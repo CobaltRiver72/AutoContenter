@@ -1845,9 +1845,10 @@
       var AI_MODELS = {
         anthropic: [
           { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (Fast)' },
+          { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
           { value: 'claude-sonnet-4-6-20250610', label: 'Claude Sonnet 4.6 (Balanced)' },
-          { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (Balanced)' },
-          { value: 'claude-opus-4-20250514', label: 'Claude Opus 4 (Best)' },
+          { value: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
+          { value: 'claude-opus-4-6-20250610', label: 'Claude Opus 4.6 (Best)' },
         ],
         openai: [
           { value: 'gpt-4o', label: 'GPT-4o (Balanced)' },
@@ -1855,6 +1856,9 @@
           { value: 'gpt-4.1', label: 'GPT-4.1 (Latest)' },
           { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (Latest Fast)' },
           { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (Cheapest)' },
+          { value: 'o3', label: 'O3 (Reasoning)' },
+          { value: 'o3-mini', label: 'O3 Mini (Reasoning Fast)' },
+          { value: 'o4-mini', label: 'O4 Mini (Latest Reasoning)' },
         ],
       };
       editorProviderEl.addEventListener('change', function () {

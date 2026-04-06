@@ -18,8 +18,12 @@ var REQUIRED_VARS = [
 ];
 
 var DEFAULTS = {
+  AI_PROVIDER: 'anthropic',
   AI_PRIMARY_MODEL: 'claude-haiku-4-5-20251001',
   AI_FALLBACK_MODEL: 'gpt-4o',
+  ENABLE_FALLBACK: 'true',
+  MAX_TOKENS: '4096',
+  TEMPERATURE: '0.7',
   MIN_SOURCES_THRESHOLD: '2',
   SIMILARITY_THRESHOLD: '0.35',
   BUFFER_HOURS: '6',
@@ -55,7 +59,7 @@ var NUMERIC_KEYS = [
 var CSV_KEYS = ['TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES'];
 
 // Boolean keys that should be parsed as booleans
-var BOOLEAN_KEYS = ['TRENDS_ENABLED', 'INFRANODUS_ENABLED'];
+var BOOLEAN_KEYS = ['TRENDS_ENABLED', 'INFRANODUS_ENABLED', 'ENABLE_FALLBACK'];
 
 /**
  * Build the config object from environment variables and defaults.

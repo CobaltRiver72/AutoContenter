@@ -3,21 +3,28 @@
 // Model definitions — used by both backend and sent to frontend
 var AI_MODELS = {
   anthropic: [
-    { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', tier: 'Fast & Cheap' },
-    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', tier: 'Balanced' },
-    { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', tier: 'Best Quality' },
+    { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', tier: 'Fast & Cheap', type: 'standard' },
+    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', tier: 'Balanced', type: 'standard' },
+    { id: 'claude-sonnet-4-6-20250610', name: 'Claude Sonnet 4.6', tier: 'Latest Balanced', type: 'standard' },
+    { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', tier: 'Best Quality', type: 'standard' },
+    { id: 'claude-opus-4-6-20250610', name: 'Claude Opus 4.6', tier: 'Latest Best', type: 'standard' },
   ],
   openai: [
-    { id: 'gpt-4o', name: 'GPT-4o', tier: 'Balanced' },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', tier: 'Fast & Cheap' },
-    { id: 'gpt-4.1', name: 'GPT-4.1', tier: 'Latest' },
-    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', tier: 'Latest Fast' },
-    { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', tier: 'Cheapest' },
-    { id: 'o3', name: 'O3', tier: 'Reasoning' },
-    { id: 'o3-mini', name: 'O3 Mini', tier: 'Reasoning Fast' },
-    { id: 'o4-mini', name: 'O4 Mini', tier: 'Latest Reasoning' },
+    { id: 'gpt-4o', name: 'GPT-4o', tier: 'Balanced', type: 'standard' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', tier: 'Fast & Cheap', type: 'standard' },
+    { id: 'gpt-4.1', name: 'GPT-4.1', tier: 'Latest', type: 'standard' },
+    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', tier: 'Latest Fast', type: 'standard' },
+    { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', tier: 'Cheapest', type: 'standard' },
+    { id: 'o3', name: 'O3', tier: 'Reasoning', type: 'reasoning' },
+    { id: 'o3-mini', name: 'O3 Mini', tier: 'Reasoning Fast', type: 'reasoning' },
+    { id: 'o4-mini', name: 'O4 Mini', tier: 'Latest Reasoning', type: 'reasoning' },
   ],
 };
+
+function countWords(html) {
+  var text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return text ? text.split(' ').length : 0;
+}
 
 // ─── SEO Prompt Builder (used by automated pipeline) ──────────────────────
 
@@ -447,6 +454,7 @@ class ArticleRewriter {
 
     var parsed = parseAIResponse(rawText);
     var tokensUsed = (response.usage ? (response.usage.input_tokens || 0) + (response.usage.output_tokens || 0) : 0);
+    var wc = parsed.content ? countWords(parsed.content) : (parsed.word_count || 0);
 
     return {
       title: parsed.title,
@@ -457,7 +465,7 @@ class ArticleRewriter {
       targetKeyword: parsed.target_keyword || '',
       relatedKeywords: parsed.related_keywords || [],
       faq: parsed.faq || [],
-      wordCount: parsed.word_count || 0,
+      wordCount: wc,
       tokensUsed: tokensUsed,
     };
   }
@@ -480,7 +488,8 @@ class ArticleRewriter {
         model: model,
         max_completion_tokens: maxTokens,
         messages: [
-          { role: 'user', content: 'You are a professional news journalist. Always respond in valid JSON.\n\n' + prompt },
+          { role: 'developer', content: 'You are a professional news journalist. Always respond in valid JSON.' },
+          { role: 'user', content: prompt },
         ],
       });
     } else {
@@ -503,6 +512,7 @@ class ArticleRewriter {
 
     var parsed = parseAIResponse(rawText);
     var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
+    var wc = parsed.content ? countWords(parsed.content) : (parsed.word_count || 0);
 
     return {
       title: parsed.title,
@@ -513,7 +523,7 @@ class ArticleRewriter {
       targetKeyword: parsed.target_keyword || '',
       relatedKeywords: parsed.related_keywords || [],
       faq: parsed.faq || [],
-      wordCount: parsed.word_count || 0,
+      wordCount: wc,
       tokensUsed: tokensUsed,
     };
   }
@@ -558,6 +568,7 @@ class ArticleRewriter {
     return {
       success: true,
       rewrittenContent: rewrittenContent,
+      wordCount: countWords(rewrittenContent),
       provider: 'anthropic',
       model: model,
       tokensUsed: tokensUsed,
@@ -583,7 +594,10 @@ class ArticleRewriter {
       response = await client.chat.completions.create({
         model: model,
         max_completion_tokens: maxTokens,
-        messages: [{ role: 'user', content: systemPrompt + '\n\n' + userPrompt }],
+        messages: [
+          { role: 'developer', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
       });
     } else {
       response = await client.chat.completions.create({
@@ -607,6 +621,7 @@ class ArticleRewriter {
     return {
       success: true,
       rewrittenContent: rewrittenContent,
+      wordCount: countWords(rewrittenContent),
       provider: 'openai',
       model: model,
       tokensUsed: tokensUsed,
