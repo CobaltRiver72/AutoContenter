@@ -4,7 +4,7 @@ const axios = require('axios');
 const path = require('path');
 
 // Timeout for WordPress API calls (15 seconds)
-const WP_TIMEOUT_MS = 15000;
+const WP_TIMEOUT_MS = 60000;
 
 // Max retries for WP API calls
 const MAX_RETRIES = 2;

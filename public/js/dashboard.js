@@ -1483,19 +1483,25 @@
     if (draft.status !== 'fetching' && (draft.extraction_status === 'failed' || draft.is_partial)) {
       actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry Extract</button>';
     }
-    if (draft.status === 'draft' || draft.status === 'editing' || draft.status === 'ready') {
+    // Edit button for ALL actionable statuses including published
+    if (draft.status !== 'fetching' && draft.status !== 'rewriting') {
       actionsHTML += '<button class="btn btn-sm btn-primary" onclick="window.__openEditor(' + draft.id + ')">&#9998; Edit Draft</button>';
     }
-    if (draft.status === 'draft') {
+    if (draft.status === 'draft' || draft.status === 'failed') {
       actionsHTML += '<button class="btn btn-sm btn-purple" onclick="window.__triggerRewrite(' + draft.id + ')">&#129302; Rewrite</button>';
     }
     if (draft.status === 'rewriting') {
       actionsHTML += '<button class="btn btn-sm btn-secondary" disabled>&#9203; Rewriting...</button>';
     }
-    if (draft.status === 'ready') {
+    if (draft.status === 'ready' || draft.status === 'published') {
       actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__previewDraftHTML(' + draft.id + ')">&#128065; Preview</button>';
       actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__downloadDraftHTML(' + draft.id + ')">&#11015; Download</button>';
+    }
+    if (draft.status === 'ready') {
       actionsHTML += '<button class="btn btn-sm btn-green" onclick="window.__openEditor(' + draft.id + ')">&#128640; Publish</button>';
+    }
+    if (draft.status === 'published') {
+      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__openEditor(' + draft.id + ')">&#8635; Re-Publish</button>';
     }
     actionsHTML += '<button class="btn btn-sm btn-danger" onclick="window.__deleteDraft(' + draft.id + ')">&#128465;</button>';
 
