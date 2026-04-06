@@ -202,6 +202,16 @@ function runMigrations() {
       db.exec('ALTER TABLE drafts ADD COLUMN featured_image TEXT DEFAULT NULL');
     } catch (e) { /* already exists */ }
 
+    // Add extraction_method column to drafts if it doesn't exist
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN extraction_method TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    // Add is_partial column to drafts if it doesn't exist
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN is_partial INTEGER DEFAULT 0');
+    } catch (e) { /* already exists */ }
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);

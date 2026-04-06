@@ -1457,6 +1457,9 @@
     if (draft.status === 'fetching') {
       actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry</button>';
     }
+    if (draft.status !== 'fetching' && (draft.extraction_status === 'failed' || draft.is_partial)) {
+      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry Extract</button>';
+    }
     if (draft.status === 'draft' || draft.status === 'editing' || draft.status === 'ready') {
       actionsHTML += '<button class="btn btn-sm btn-primary" onclick="window.__openEditor(' + draft.id + ')">&#9998; Edit Draft</button>';
     }
@@ -1495,7 +1498,9 @@
           (draft.target_keyword ? '<span class="domain-badge" style="color:var(--green)">&#127919; ' + escapeHtml(draft.target_keyword) + '</span>' : '') +
           (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + (draft.extracted_content || '').length + ' chars</span>' : '') +
           (draft.extraction_status === 'failed' ? '<span style="color:var(--red);font-size:11px">&#10060; Extract failed</span>' : '') +
+          (draft.extraction_method ? '<span class="extraction-badge extraction-' + escapeHtml(draft.extraction_method) + '">' + (draft.extraction_method === 'direct' ? '&#127760; Direct' : draft.extraction_method === 'cache' ? '&#128230; Cached' : '&#128225; Firehose') + '</span>' : '') +
         '</div>' +
+        (draft.is_partial ? '<div class="partial-warning">&#9888; Partial content — may need manual review</div>' : '') +
         (contentPreview ? '<p class="draft-preview">' + escapeHtml(truncate(contentPreview, 200)) + '</p>' : '') +
         '<div class="draft-actions">' + actionsHTML + '</div>' +
       '</div>' +

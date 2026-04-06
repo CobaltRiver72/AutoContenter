@@ -1333,6 +1333,29 @@ select:focus {
 .btn-green:hover { background: #16a34a; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-hover); }
+.extraction-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.extraction-direct {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+}
+.extraction-cache {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+}
+.extraction-firehose {
+  background: rgba(33, 150, 243, 0.2);
+  color: #2196f3;
+}
+.partial-warning {
+  font-size: 11px;
+  color: #ff9800;
+  margin-top: 4px;
+  margin-bottom: 6px;
+}
 
 /* ─── Status Filter Tabs ───────────────────────────────────────��──────── */
 .status-filters {

@@ -66,100 +66,238 @@ function extractFeaturedImage(document, sourceUrl) {
   return null;
 }
 
+// ─── HTTP Helpers ───────────────────────────────────────────────────────
+
+var BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+  'Accept-Encoding': 'gzip, deflate',
+  'Cache-Control': 'no-cache',
+  'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"Windows"',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  'Upgrade-Insecure-Requests': '1',
+  'Referer': 'https://www.google.com/',
+};
+
+function fetchHtml(url) {
+  return axios.get(url, {
+    timeout: 15000,
+    maxContentLength: 5 * 1024 * 1024,
+    headers: BROWSER_HEADERS,
+    maxRedirects: 5,
+  }).then(function (res) { return res.data; });
+}
+
+async function fetchFromCache(url) {
+  // Try Google Web Cache
+  var googleCacheUrl = 'https://webcache.googleusercontent.com/search?q=cache:' + encodeURIComponent(url);
+  try {
+    var html = await fetchHtml(googleCacheUrl);
+    if (html && html.length > 5000) return html;
+  } catch (e) { /* continue to next fallback */ }
+
+  // Try Archive.org latest snapshot
+  var archiveUrl = 'https://web.archive.org/web/2/' + url;
+  try {
+    var archiveHtml = await fetchHtml(archiveUrl);
+    if (archiveHtml && archiveHtml.length > 5000) return archiveHtml;
+  } catch (e) { /* continue */ }
+
+  return null;
+}
+
+// ─── Parsing Helpers ────────────────────────────────────────────────────
+
+function parseWithReadability(rawHtml, sourceUrl) {
+  var dom = new JSDOM(rawHtml, { url: sourceUrl });
+  try {
+    var reader = new Readability(dom.window.document, { charThreshold: 100 });
+    return reader.parse();
+  } finally {
+    dom.window.close();
+  }
+}
+
+function extractImageFromHtml(rawHtml, sourceUrl) {
+  var dom = new JSDOM(rawHtml, { url: sourceUrl });
+  try {
+    return extractFeaturedImage(dom.window.document, sourceUrl);
+  } finally {
+    dom.window.close();
+  }
+}
+
+function buildFromFirehoseData(draft) {
+  var parts = [];
+
+  if (draft.source_title) {
+    parts.push(draft.source_title);
+  }
+
+  var md = draft.source_content_markdown;
+  if (md && md !== '{"chunks":[]}') {
+    try {
+      var parsed = JSON.parse(md);
+      if (parsed.chunks && parsed.chunks.length > 0) {
+        var chunkText = '';
+        for (var i = 0; i < parsed.chunks.length; i++) {
+          var chunk = parsed.chunks[i];
+          var text = '';
+          if (typeof chunk === 'string') text = chunk;
+          else if (chunk && chunk.text) text = chunk.text;
+          else if (chunk && chunk.content) text = chunk.content;
+          else if (chunk && chunk.value) text = chunk.value;
+          if (text) chunkText += (chunkText ? '\n\n' : '') + text;
+        }
+        if (chunkText.length > 50) parts.push(chunkText);
+      }
+    } catch (e) {
+      // Not valid JSON — use as raw text
+      if (md.length > 100) parts.push(md);
+    }
+  }
+
+  var content = parts.join('\n\n');
+  return {
+    content: content || null,
+    isPartial: true,
+    charCount: content ? content.length : 0,
+  };
+}
+
 // ─── Content Extraction ─────────────────────────────────────────────────
 
 /**
  * Extract full body content + featured image for a single draft.
- * Uses the existing ContentExtractor module if available,
- * otherwise does a direct fetch + Readability parse.
+ * Uses a 3-layer fallback: direct fetch → cache/archive → firehose data.
  *
  * @param {number} draftId
- * @param {object} deps - { db, logger, extractor }
+ * @param {object} deps - { db, logger }
  */
 async function extractDraftContent(draftId, deps) {
   var db = deps.db;
   var logger = deps.logger;
-  var extractor = deps.extractor;
 
   var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(draftId);
   if (!draft) return;
 
   db.prepare("UPDATE drafts SET extraction_status = 'extracting', updated_at = datetime('now') WHERE id = ?").run(draftId);
 
+  var content = null;
+  var title = null;
+  var excerpt = null;
+  var byline = null;
+  var featuredImage = null;
+  var extractionMethod = null;
+  var isPartial = 0;
+
+  // ── LAYER 1: Direct fetch with browser headers ──
   try {
-    // Always fetch raw HTML ourselves for featured image extraction
-    var response = await axios.get(draft.source_url, {
-      timeout: 15000,
-      maxContentLength: 5 * 1024 * 1024,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-      },
-      maxRedirects: 5,
-    });
+    logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 1 — direct fetch for ' + draft.source_domain);
+    var rawHtml = await fetchHtml(draft.source_url);
 
-    var rawHtml = response.data;
+    if (rawHtml && rawHtml.length > 2000) {
+      featuredImage = extractImageFromHtml(rawHtml, draft.source_url);
 
-    // Extract featured image from a FRESH DOM (before Readability mutates it)
-    var imageDom = new JSDOM(rawHtml, { url: draft.source_url });
-    var featuredImage = null;
-    try {
-      featuredImage = extractFeaturedImage(imageDom.window.document, draft.source_url);
-    } finally {
-      imageDom.window.close();
-    }
-
-    // Now extract body content
-    var dom = new JSDOM(rawHtml, { url: draft.source_url });
-    try {
-      var reader = new Readability(dom.window.document, { charThreshold: 100 });
-      var article = reader.parse();
-
+      var article = parseWithReadability(rawHtml, draft.source_url);
       if (article && article.textContent && article.textContent.length > 100) {
-        db.prepare(`
-          UPDATE drafts SET
-            extracted_content = ?,
-            extracted_title = ?,
-            extracted_excerpt = ?,
-            extracted_byline = ?,
-            featured_image = ?,
-            extraction_status = 'success',
-            status = 'draft',
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).run(article.textContent, article.title, article.excerpt, article.byline, featuredImage, draftId);
-
-        logger.info('draft-helpers', 'Draft ' + draftId + ': Extracted ' + article.textContent.length + ' chars' + (featuredImage ? ' + image' : '') + ' from ' + draft.source_domain);
-      } else {
-        // Use Firehose content as fallback
-        db.prepare(`
-          UPDATE drafts SET
-            extracted_content = COALESCE(source_content_markdown, source_title),
-            featured_image = ?,
-            extraction_status = 'fallback',
-            status = 'draft',
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).run(featuredImage, draftId);
-
-        logger.warn('draft-helpers', 'Draft ' + draftId + ': Extraction returned insufficient content, using fallback');
+        content = article.textContent;
+        title = article.title;
+        excerpt = article.excerpt;
+        byline = article.byline;
+        extractionMethod = 'direct';
+        logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 1 success — ' + content.length + ' chars' + (featuredImage ? ' + image' : ''));
       }
-    } finally {
-      dom.window.close();
     }
   } catch (err) {
+    logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 1 failed — ' + err.message);
+  }
+
+  // ── LAYER 2: Google Cache / Archive.org fallback ──
+  if (!content) {
+    try {
+      logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 2 — cache/archive fallback');
+      var cachedHtml = await fetchFromCache(draft.source_url);
+
+      if (cachedHtml) {
+        if (!featuredImage) {
+          featuredImage = extractImageFromHtml(cachedHtml, draft.source_url);
+        }
+
+        var cachedArticle = parseWithReadability(cachedHtml, draft.source_url);
+        if (cachedArticle && cachedArticle.textContent && cachedArticle.textContent.length > 100) {
+          content = cachedArticle.textContent;
+          title = cachedArticle.title;
+          excerpt = cachedArticle.excerpt;
+          byline = cachedArticle.byline;
+          extractionMethod = 'cache';
+          logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 2 success — ' + content.length + ' chars');
+        }
+      }
+    } catch (err) {
+      logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 2 failed — ' + err.message);
+    }
+  }
+
+  // ── LAYER 3: Build from Firehose data ──
+  if (!content) {
+    logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 — building from Firehose data');
+    var firehoseResult = buildFromFirehoseData(draft);
+
+    if (firehoseResult.content && firehoseResult.content.length > 50) {
+      content = firehoseResult.content;
+      extractionMethod = 'firehose';
+      isPartial = 1;
+      logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 — ' + firehoseResult.charCount + ' chars (partial)');
+    }
+  }
+
+  // ── SAVE RESULT ──
+  if (content) {
+    db.prepare(`
+      UPDATE drafts SET
+        extracted_content = ?,
+        extracted_title = ?,
+        extracted_excerpt = ?,
+        extracted_byline = ?,
+        featured_image = COALESCE(?, featured_image),
+        extraction_status = ?,
+        extraction_method = ?,
+        is_partial = ?,
+        status = 'draft',
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      content,
+      title || draft.source_title,
+      excerpt,
+      byline,
+      featuredImage,
+      isPartial ? 'fallback' : 'success',
+      extractionMethod,
+      isPartial,
+      draftId
+    );
+  } else {
     db.prepare(`
       UPDATE drafts SET
         extracted_content = COALESCE(source_content_markdown, source_title),
         extraction_status = 'failed',
-        extraction_error = ?,
+        extraction_method = NULL,
+        is_partial = 0,
+        extraction_error = 'All extraction methods failed. Site may require JavaScript rendering.',
         status = 'draft',
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(err.message, draftId);
+    `).run(draftId);
 
-    logger.warn('draft-helpers', 'Draft ' + draftId + ': Extraction failed: ' + err.message);
+    logger.warn('draft-helpers', 'Draft ' + draftId + ': All extraction layers failed for ' + draft.source_domain);
   }
 }
 
