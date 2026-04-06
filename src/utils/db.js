@@ -157,6 +157,12 @@ function runMigrations() {
     try {
       db.exec('ALTER TABLE published ADD COLUMN target_keyword TEXT');
     } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE published ADD COLUMN excerpt TEXT');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE published ADD COLUMN meta_description TEXT');
+    } catch (e) { /* already exists */ }
 
     // Drafts table (manual article selection + editor)
     db.exec(`

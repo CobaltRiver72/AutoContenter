@@ -410,7 +410,7 @@ function createApiRouter(deps) {
       db.prepare("UPDATE clusters SET status = 'queued' WHERE id = ?").run(clusterId);
 
       if (scheduler && typeof scheduler.enqueue === 'function') {
-        scheduler.enqueue(clusterId, 'high');
+        scheduler.enqueue(cluster);
       }
 
       logger.info('api', 'Cluster manually enqueued for publish', { clusterId: clusterId });
@@ -1171,16 +1171,33 @@ function createApiRouter(deps) {
           publisherMod.reinit();
         }
         if (publisherMod && publisherMod.enabled) {
-          var postData = {
+          // Build rewrittenArticle object matching what publisher.publish() expects
+          var rewrittenArticle = {
             title: draft.rewritten_title || draft.extracted_title || draft.source_title,
-            content: body.html || draft.rewritten_html,
+            content: body.html || draft.rewritten_html || '',
             excerpt: draft.extracted_excerpt || '',
-            status: publisherMod.config.WP_POST_STATUS || 'publish',
-            author: publisherMod.config.WP_AUTHOR_ID || 1,
-            categories: [publisherMod.config.WP_DEFAULT_CATEGORY || 1],
-            featured_media: 0,
+            metaDescription: draft.meta_description || draft.extracted_excerpt || '',
+            slug: draft.target_keyword ? draft.target_keyword.replace(/[^a-z0-9]+/gi, '-').toLowerCase() : '',
+            targetKeyword: draft.target_keyword || '',
+            relatedKeywords: [],
+            faq: [],
+            wordCount: draft.rewritten_word_count || 0,
+            aiModel: draft.ai_model_used || 'manual',
+            tokensUsed: 0,
           };
-          publisherMod.createPost(postData).then(function (result) {
+
+          // Build a minimal cluster with articles for image extraction
+          var draftCluster = {
+            id: null,
+            articles: [{
+              content_markdown: draft.source_content_markdown || '',
+              content: draft.extracted_content || '',
+              featured_image: draft.featured_image || '',
+            }],
+          };
+
+          // Use full publish pipeline: image upload + schema + post creation
+          publisherMod.publish(rewrittenArticle, draftCluster, db).then(function (result) {
             publishUrl = result.wpPostUrl || '';
             db.prepare("UPDATE drafts SET status = 'published', published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(id);
             logger.info('api', 'Draft ' + id + ' published to WordPress: ' + publishUrl);
@@ -1191,7 +1208,6 @@ function createApiRouter(deps) {
             var wpError = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : '';
             var fullMsg = 'WP publish failed' + (statusCode ? ' (HTTP ' + statusCode + ')' : '') + ': ' + detail + (wpError ? ' — ' + wpError : '');
             logger.error('api', fullMsg);
-            // Store in logs table for the error log box
             try {
               db.prepare("INSERT INTO logs (level, module, message, created_at) VALUES ('error', 'publisher', ?, datetime('now'))").run(fullMsg);
             } catch (logErr) { /* ignore */ }

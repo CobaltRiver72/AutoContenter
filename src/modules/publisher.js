@@ -187,9 +187,9 @@ class WordPressPublisher {
     // Step 1: Try to upload a featured image (non-blocking on failure)
     try {
       const primaryArticle = (cluster.articles && cluster.articles[0]) || {};
-      const imageUrl = extractImageUrl(
-        primaryArticle.content_markdown || primaryArticle.content || ''
-      );
+      // Check for explicit featured_image URL first, then extract from content
+      const imageUrl = primaryArticle.featured_image ||
+        extractImageUrl(primaryArticle.content_markdown || primaryArticle.content || '');
 
       if (imageUrl) {
         this.logger.info('Uploading featured image', { imageUrl });
@@ -270,7 +270,7 @@ class WordPressPublisher {
       );
 
       insertStmt.run(
-        cluster.id || null,
+        cluster.id || 0,
         postResult.wpPostId,
         postResult.wpPostUrl,
         wpImageId,
