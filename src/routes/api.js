@@ -528,12 +528,6 @@ function createApiRouter(deps) {
 
   router.post('/test/wordpress', function (req, res) {
     var config = getConfig();
-    var axios;
-    try {
-      axios = require('axios');
-    } catch (e) {
-      return res.status(503).json({ error: 'axios not available' });
-    }
 
     if (!config.WP_URL || !config.WP_USERNAME || !config.WP_APP_PASSWORD) {
       return res.status(400).json({
@@ -549,39 +543,51 @@ function createApiRouter(deps) {
       config.WP_USERNAME + ':' + config.WP_APP_PASSWORD
     ).toString('base64');
 
-    var testPost = {
-      title: '[HDF AutoPub] Connection Test — ' + new Date().toISOString(),
-      content: '<p>This is an automated connection test. This draft will be deleted.</p>',
-      status: 'draft',
-    };
+    // Use ?rest_route= format (works on Cloudways without Nginx rewrite)
+    var restRouteUrl = wpUrl + '/?rest_route=' + encodeURIComponent('/wp/v2/users/me');
 
-    axios.post(wpUrl + '/wp-json/wp/v2/posts', testPost, {
-      headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+    logger.info('api', 'Testing WP connection: ' + restRouteUrl);
+
+    axios.get(restRouteUrl, {
+      headers: { 'Authorization': authHeader },
       timeout: 15000,
     })
-      .then(function (createRes) {
-        var postId = createRes.data.id;
-        // Delete the draft
-        return axios.delete(wpUrl + '/wp-json/wp/v2/posts/' + postId + '?force=true', {
-          headers: { Authorization: authHeader },
-          timeout: 10000,
-        }).then(function () {
+      .then(function (userRes) {
+        if (userRes.data && userRes.data.id) {
           res.json({
             success: true,
-            message: 'WordPress connection successful. Draft created and deleted.',
+            message: 'WordPress connection successful. Authenticated as: ' + (userRes.data.name || userRes.data.slug),
             wpUrl: wpUrl,
-            postId: postId,
+            userId: userRes.data.id,
+            method: '?rest_route=',
           });
-        });
+        } else {
+          res.json({ success: false, error: 'Unexpected response from WordPress' });
+        }
       })
       .catch(function (err) {
-        var msg = err.response
-          ? 'WP API error ' + err.response.status + ': ' + (err.response.data.message || '')
-          : err.message;
-        var fullMsg = 'WordPress test failed: ' + msg;
-        logger.error('api', fullMsg);
+        var statusCode = err.response ? err.response.status : null;
+        var wpMsg = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : err.message;
+        var fullMsg = '';
+
+        if (statusCode === 401) {
+          fullMsg = 'Authentication failed (HTTP 401): ' + wpMsg +
+            '. The Authorization header is likely stripped by Nginx. ' +
+            'Fix: Add "SetEnvIf Authorization (.*) HTTP_AUTHORIZATION=$1" to .htaccess, ' +
+            'or add "fastcgi_param HTTP_AUTHORIZATION $http_authorization;" to Nginx config.';
+        } else if (statusCode === 404) {
+          fullMsg = 'REST API not found (HTTP 404). WordPress REST API may be disabled. ' +
+            'Check: Settings → Permalinks → Save. Ensure no plugin is blocking REST API.';
+        } else if (statusCode) {
+          fullMsg = 'WP API error (HTTP ' + statusCode + '): ' + wpMsg;
+        } else {
+          fullMsg = 'Cannot reach WordPress: ' + err.message +
+            '. Check that WP_URL is correct and the server is reachable.';
+        }
+
+        logger.error('api', 'WordPress test failed: ' + fullMsg);
         try {
-          db.prepare("INSERT INTO logs (level, module, message, created_at) VALUES ('error', 'publisher', ?, datetime('now'))").run(fullMsg);
+          db.prepare("INSERT INTO logs (level, module, message, created_at) VALUES ('error', 'publisher', ?, datetime('now'))").run('WP test failed: ' + fullMsg);
         } catch (logErr) { /* ignore */ }
         res.status(500).json({ error: fullMsg });
       });
@@ -633,16 +639,18 @@ function createApiRouter(deps) {
 
     result.checks.credentials = { ok: true, message: 'All credentials present' };
 
-    // Test REST API discovery
-    axios.get(wpUrl + '/wp-json/', {
-      headers: { Authorization: authHeader },
+    // Test REST API discovery using ?rest_route= (works on Cloudways)
+    var restRouteBase = wpUrl + '/?rest_route=';
+
+    axios.get(restRouteBase + encodeURIComponent('/'), {
+      headers: { 'Authorization': authHeader },
       timeout: 15000,
     }).then(function (apiRes) {
-      result.checks.restApi = { ok: true, message: 'REST API reachable', siteName: apiRes.data.name || '' };
+      result.checks.restApi = { ok: true, message: 'REST API reachable via ?rest_route=', siteName: apiRes.data.name || '' };
 
       // Test auth by fetching current user
-      return axios.get(wpUrl + '/wp-json/wp/v2/users/me', {
-        headers: { Authorization: authHeader },
+      return axios.get(restRouteBase + encodeURIComponent('/wp/v2/users/me'), {
+        headers: { 'Authorization': authHeader },
         timeout: 10000,
       });
     }).then(function (userRes) {
@@ -662,7 +670,11 @@ function createApiRouter(deps) {
       var statusCode = err.response ? err.response.status : null;
       var wpMsg = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : '';
       if (statusCode === 401 || statusCode === 403) {
-        result.checks.auth = { ok: false, message: 'Authentication failed (HTTP ' + statusCode + '): ' + wpMsg };
+        result.checks.auth = {
+          ok: false,
+          message: 'Authentication failed (HTTP ' + statusCode + '): ' + wpMsg +
+            '. Nginx may be stripping the Authorization header. Add to .htaccess: SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1'
+        };
       } else if (statusCode) {
         result.checks.restApi = { ok: false, message: 'REST API error (HTTP ' + statusCode + '): ' + wpMsg };
       } else {

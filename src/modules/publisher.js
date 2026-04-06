@@ -1,47 +1,27 @@
 'use strict';
 
-const axios = require('axios');
-const path = require('path');
+var axios = require('axios');
+var path = require('path');
 
-// Timeout for WordPress API calls (15 seconds)
-const WP_TIMEOUT_MS = 60000;
-
-// Max retries for WP API calls
-const MAX_RETRIES = 2;
+// Timeout for WordPress API calls
+var WP_TIMEOUT_MS = 60000;
 
 // Regex patterns to extract the first image URL from article content
-const MD_IMAGE_RE = /!\[[^\]]*\]\(([^)]+)\)/;
-const HTML_IMAGE_RE = /<img[^>]+src=["']([^"']+)["']/;
+var MD_IMAGE_RE = /!\[[^\]]*\]\(([^)]+)\)/;
+var HTML_IMAGE_RE = /<img[^>]+src=["']([^"']+)["']/;
 
-/**
- * Extract the first image URL from markdown or HTML content.
- *
- * @param {string} content - Article content (markdown or HTML)
- * @returns {string|null}
- */
 function extractImageUrl(content) {
   if (!content) return null;
-
-  // Try markdown image first
-  const mdMatch = content.match(MD_IMAGE_RE);
+  var mdMatch = content.match(MD_IMAGE_RE);
   if (mdMatch && mdMatch[1]) return mdMatch[1];
-
-  // Try HTML img tag
-  const htmlMatch = content.match(HTML_IMAGE_RE);
+  var htmlMatch = content.match(HTML_IMAGE_RE);
   if (htmlMatch && htmlMatch[1]) return htmlMatch[1];
-
   return null;
 }
 
-/**
- * Guess MIME type from URL or default to jpeg.
- *
- * @param {string} url
- * @returns {string}
- */
 function guessMimeType(url) {
-  const ext = path.extname(url).toLowerCase().split('?')[0];
-  const mimeMap = {
+  var ext = path.extname(url).toLowerCase().split('?')[0];
+  var mimeMap = {
     '.png': 'image/png',
     '.gif': 'image/gif',
     '.webp': 'image/webp',
@@ -52,32 +32,15 @@ function guessMimeType(url) {
   return mimeMap[ext] || 'image/jpeg';
 }
 
-/**
- * Generate a filename from a slug and image URL.
- *
- * @param {string} slug
- * @param {string} imageUrl
- * @returns {string}
- */
 function generateFilename(slug, imageUrl) {
-  const ext = path.extname(imageUrl).toLowerCase().split('?')[0] || '.jpg';
-  const safeName = (slug || 'featured').replace(/[^a-z0-9-]/g, '').slice(0, 50);
-  return `${safeName}${ext}`;
+  var ext = path.extname(imageUrl).toLowerCase().split('?')[0] || '.jpg';
+  var safeName = (slug || 'featured').replace(/[^a-z0-9-]/g, '').slice(0, 50);
+  return safeName + ext;
 }
 
-/**
- * Build JSON-LD schema markup for the article.
- * Generates NewsArticle + FAQPage schemas.
- *
- * @param {object} rewrittenArticle - Output from rewriter
- * @param {string} wpPostUrl - The published WordPress post URL
- * @param {string} siteName - The site name from WP_URL
- * @returns {string} HTML string with <script type="application/ld+json"> blocks
- */
 function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName) {
   var schemas = [];
 
-  // NewsArticle schema
   var newsArticle = {
     '@context': 'https://schema.org',
     '@type': 'NewsArticle',
@@ -86,27 +49,16 @@ function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName) {
     'url': wpPostUrl || '',
     'datePublished': new Date().toISOString(),
     'dateModified': new Date().toISOString(),
-    'author': {
-      '@type': 'Organization',
-      'name': siteName || 'HDF News'
-    },
-    'publisher': {
-      '@type': 'Organization',
-      'name': siteName || 'HDF News'
-    },
-    'mainEntityOfPage': {
-      '@type': 'WebPage',
-      '@id': wpPostUrl || ''
-    }
+    'author': { '@type': 'Organization', 'name': siteName || 'HDF News' },
+    'publisher': { '@type': 'Organization', 'name': siteName || 'HDF News' },
+    'mainEntityOfPage': { '@type': 'WebPage', '@id': wpPostUrl || '' }
   };
 
   if (rewrittenArticle.targetKeyword) {
     newsArticle.keywords = rewrittenArticle.targetKeyword;
   }
-
   schemas.push(newsArticle);
 
-  // FAQPage schema (if FAQ data available)
   if (rewrittenArticle.faq && Array.isArray(rewrittenArticle.faq) && rewrittenArticle.faq.length > 0) {
     var faqEntities = [];
     for (var i = 0; i < rewrittenArticle.faq.length; i++) {
@@ -115,98 +67,158 @@ function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName) {
         faqEntities.push({
           '@type': 'Question',
           'name': item.question,
-          'acceptedAnswer': {
-            '@type': 'Answer',
-            'text': item.answer
-          }
+          'acceptedAnswer': { '@type': 'Answer', 'text': item.answer }
         });
       }
     }
-
     if (faqEntities.length > 0) {
-      schemas.push({
-        '@context': 'https://schema.org',
-        '@type': 'FAQPage',
-        'mainEntity': faqEntities
-      });
+      schemas.push({ '@context': 'https://schema.org', '@type': 'FAQPage', 'mainEntity': faqEntities });
     }
   }
 
-  // Build the HTML script tags
   var html = '';
   for (var j = 0; j < schemas.length; j++) {
     html += '<script type="application/ld+json">' + JSON.stringify(schemas[j]) + '</script>\n';
   }
-
   return html;
 }
 
 class WordPressPublisher {
-  /**
-   * @param {object} config - App config from getConfig()
-   * @param {object} logger - Winston logger instance
-   */
   constructor(config, logger) {
     this.config = config;
     this.logger = logger;
 
-    // Build the base auth header once
-    this.authHeader = `Basic ${Buffer.from(
-      `${this.config.WP_USERNAME}:${this.config.WP_APP_PASSWORD}`
-    ).toString('base64')}`;
+    this.authHeader = '';
+    this.wpBaseUrl = '';
 
-    // Base WP REST URL (strip trailing slash)
-    this.wpBaseUrl = (this.config.WP_URL || '').replace(/\/+$/, '');
-
-    // Module independence
     this.enabled = false;
     this.status = 'disabled';
     this.error = null;
 
-    // Stats
     this.stats = {
       totalPublished: 0,
       publishedToday: 0,
       lastPublishAt: null,
-      _todayDate: null, // internal: tracks which day "publishedToday" refers to
+      _todayDate: null,
     };
   }
 
   /**
-   * Full publish pipeline: download featured image, upload to WP media,
-   * create post, record in the published table.
-   *
-   * @param {object} rewrittenArticle - Output from ArticleRewriter.rewrite()
-   * @param {object} cluster - The cluster object
-   * @param {object} db - better-sqlite3 Database instance
-   * @returns {Promise<object>} { wpPostId, wpPostUrl, wpImageId }
+   * Build the REST API URL for a given path.
+   * Uses ?rest_route= format (works on Cloudways/Nginx without rewrite rules)
+   * with /wp-json/ as fallback.
+   */
+  _restUrl(restPath) {
+    return this.wpBaseUrl + '/?rest_route=' + encodeURIComponent(restPath);
+  }
+
+  _wpJsonUrl(restPath) {
+    return this.wpBaseUrl + '/wp-json' + restPath;
+  }
+
+  /**
+   * Make a WP REST API request with multi-method fallback:
+   *   1. ?rest_route= with Authorization header
+   *   2. ?rest_route= with credentials in URL (if auth header stripped)
+   *   3. /wp-json/ with Authorization header (if Nginx rewrite works)
+   */
+  async _wpRequest(method, restPath, data, extraHeaders) {
+    var self = this;
+    var headers = Object.assign({
+      'Authorization': self.authHeader,
+      'Content-Type': 'application/json',
+    }, extraHeaders || {});
+
+    var errors = [];
+
+    // Method 1: ?rest_route= with auth header (most reliable on Cloudways)
+    var url1 = self._restUrl(restPath);
+    self.logger.info('publisher', 'WP API Method 1: ' + method + ' ' + url1);
+    try {
+      var res1 = await axios({ method: method, url: url1, data: data, headers: headers, timeout: WP_TIMEOUT_MS });
+      self.logger.info('publisher', 'Method 1 succeeded (' + res1.status + ')');
+      return res1;
+    } catch (err1) {
+      var status1 = err1.response ? err1.response.status : null;
+      var msg1 = err1.response && err1.response.data ? (err1.response.data.message || err1.response.data.code || '') : err1.message;
+      self.logger.warn('publisher', 'Method 1 failed: ' + (status1 || '') + ' ' + msg1);
+      errors.push({ method: '?rest_route= + header', status: status1, message: msg1 });
+
+      // If 401 — auth header likely stripped by Nginx
+      if (status1 === 401) {
+        // Method 2: credentials in URL
+        self.logger.info('publisher', 'WP API Method 2: URL-encoded credentials');
+        try {
+          var encodedUser = encodeURIComponent(self.config.WP_USERNAME);
+          var encodedPwd = encodeURIComponent(self.config.WP_APP_PASSWORD);
+          var urlParsed = new URL(self.wpBaseUrl);
+          var authBaseUrl = urlParsed.protocol + '//' + encodedUser + ':' + encodedPwd + '@' + urlParsed.host + urlParsed.pathname.replace(/\/+$/, '');
+          var url2 = authBaseUrl + '/?rest_route=' + encodeURIComponent(restPath);
+          var headers2 = Object.assign({}, extraHeaders || {}, { 'Content-Type': 'application/json' });
+
+          var res2 = await axios({ method: method, url: url2, data: data, headers: headers2, timeout: WP_TIMEOUT_MS });
+          self.logger.info('publisher', 'Method 2 succeeded (' + res2.status + ')');
+          return res2;
+        } catch (err2) {
+          var status2 = err2.response ? err2.response.status : null;
+          var msg2 = err2.response && err2.response.data ? (err2.response.data.message || err2.response.data.code || '') : err2.message;
+          self.logger.warn('publisher', 'Method 2 failed: ' + (status2 || '') + ' ' + msg2);
+          errors.push({ method: 'URL-encoded auth', status: status2, message: msg2 });
+        }
+      }
+    }
+
+    // Method 3: /wp-json/ pretty URL with auth header
+    var url3 = self._wpJsonUrl(restPath);
+    self.logger.info('publisher', 'WP API Method 3: ' + method + ' ' + url3);
+    try {
+      var res3 = await axios({ method: method, url: url3, data: data, headers: headers, timeout: WP_TIMEOUT_MS });
+      self.logger.info('publisher', 'Method 3 succeeded (' + res3.status + ')');
+      return res3;
+    } catch (err3) {
+      var status3 = err3.response ? err3.response.status : null;
+      var msg3 = err3.response && err3.response.data ? (err3.response.data.message || err3.response.data.code || '') : err3.message;
+      self.logger.warn('publisher', 'Method 3 failed: ' + (status3 || '') + ' ' + msg3);
+      errors.push({ method: '/wp-json/ + header', status: status3, message: msg3 });
+    }
+
+    // All methods failed — build detailed error
+    var detail = errors.map(function (e) { return e.method + ': ' + (e.status || 'network') + ' ' + e.message; }).join(' | ');
+    var finalErr = new Error('All WP API methods failed for ' + restPath + '. Details: ' + detail);
+    finalErr.wpErrors = errors;
+
+    // Check if auth-related
+    var hasAuth401 = errors.some(function (e) { return e.status === 401; });
+    if (hasAuth401) {
+      finalErr.message += '\n\nLikely fix: Nginx is stripping the Authorization header. ' +
+        'Add to .htaccess: SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1\n' +
+        'Or add to wp-config.php the HTTP_AUTHORIZATION fix.\n' +
+        'Or add to Nginx: fastcgi_param HTTP_AUTHORIZATION $http_authorization;';
+    }
+
+    throw finalErr;
+  }
+
+  /**
+   * Full publish pipeline.
    */
   async publish(rewrittenArticle, cluster, db) {
-    let wpImageId = null;
+    var wpImageId = null;
 
     // Step 1: Try to upload a featured image (non-blocking on failure)
     try {
-      const primaryArticle = (cluster.articles && cluster.articles[0]) || {};
-      // Check for explicit featured_image URL first, then extract from content
-      const imageUrl = primaryArticle.featured_image ||
+      var primaryArticle = (cluster.articles && cluster.articles[0]) || {};
+      var imageUrl = primaryArticle.featured_image ||
         extractImageUrl(primaryArticle.content_markdown || primaryArticle.content || '');
 
       if (imageUrl) {
-        this.logger.info('Uploading featured image', { imageUrl });
-        const imageResult = await this.uploadImage(imageUrl, rewrittenArticle.title);
+        this.logger.info('publisher', 'Uploading featured image: ' + imageUrl);
+        var imageResult = await this.uploadImage(imageUrl, rewrittenArticle.title);
         wpImageId = imageResult.mediaId;
-        this.logger.info('Featured image uploaded', {
-          mediaId: imageResult.mediaId,
-          mediaUrl: imageResult.mediaUrl,
-        });
-      } else {
-        this.logger.info('No featured image found in primary article');
+        this.logger.info('publisher', 'Featured image uploaded: mediaId=' + imageResult.mediaId);
       }
     } catch (imgErr) {
-      this.logger.warn('Featured image upload failed — publishing without image', {
-        error: imgErr.message,
-      });
-      // Don't block publishing
+      this.logger.warn('publisher', 'Featured image upload failed — continuing without image: ' + imgErr.message);
     }
 
     // Step 2: Build schema markup
@@ -218,48 +230,36 @@ class WordPressPublisher {
     }
     var schemaHtml = buildSchemaMarkup(rewrittenArticle, '', siteName);
 
-    // Step 3: Create the WordPress post with schema appended
+    // Step 3: Create the WordPress post
     var postContent = (rewrittenArticle.content || '');
     if (schemaHtml) {
       postContent += '\n\n' + schemaHtml;
     }
 
-    const postData = {
+    var postData = {
       title: rewrittenArticle.title,
       content: postContent,
       excerpt: rewrittenArticle.excerpt,
-      status: this.config.WP_POST_STATUS || 'publish',
-      author: this.config.WP_AUTHOR_ID || 1,
-      categories: [this.config.WP_DEFAULT_CATEGORY || 1],
+      status: this.config.WP_POST_STATUS || 'draft',
+      author: parseInt(this.config.WP_AUTHOR_ID, 10) || 1,
+      categories: [parseInt(this.config.WP_DEFAULT_CATEGORY, 10) || 1],
       featured_media: wpImageId || 0,
     };
 
-    const postResult = await this.createPost(postData);
+    var postResult = await this.createPost(postData);
 
-    // Update schema with actual post URL (we didn't know it before creation)
+    // Step 4: Update schema with actual post URL (non-critical)
     if (postResult.wpPostUrl && schemaHtml) {
       try {
         var updatedSchema = buildSchemaMarkup(rewrittenArticle, postResult.wpPostUrl, siteName);
         var updatedContent = (rewrittenArticle.content || '') + '\n\n' + updatedSchema;
-        await axios.post(
-          this.wpBaseUrl + '/wp-json/wp/v2/posts/' + postResult.wpPostId,
-          { content: updatedContent },
-          {
-            headers: {
-              Authorization: this.authHeader,
-              'Content-Type': 'application/json',
-            },
-            timeout: WP_TIMEOUT_MS,
-          }
-        );
+        await this._wpRequest('post', '/wp/v2/posts/' + postResult.wpPostId, { content: updatedContent });
       } catch (schemaErr) {
-        this.logger.warn('Failed to update schema URL in post — non-critical', {
-          error: schemaErr.message,
-        });
+        this.logger.warn('publisher', 'Schema URL update failed (non-critical): ' + schemaErr.message);
       }
     }
 
-    // Step 4: Record in the published table
+    // Step 5: Record in the published table
     try {
       var insertStmt = db.prepare(
         'INSERT INTO published (' +
@@ -268,7 +268,6 @@ class WordPressPublisher {
         '  word_count, target_keyword, ai_model, tokens_used, published_at' +
         ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
-
       insertStmt.run(
         cluster.id || 0,
         postResult.wpPostId,
@@ -285,163 +284,76 @@ class WordPressPublisher {
         new Date().toISOString()
       );
     } catch (dbErr) {
-      this.logger.error('Failed to record published article in database', {
-        error: dbErr.message,
-        wpPostId: postResult.wpPostId,
-      });
-      // Don't throw — the article is already published
+      this.logger.error('publisher', 'Failed to record published article: ' + dbErr.message);
     }
 
-    // Update stats
     this._updateStats();
 
-    this.logger.info('Article published to WordPress', {
-      wpPostId: postResult.wpPostId,
-      wpPostUrl: postResult.wpPostUrl,
-      title: rewrittenArticle.title,
-    });
+    this.logger.info('publisher', 'Article published to WordPress: postId=' + postResult.wpPostId + ' url=' + postResult.wpPostUrl);
 
     return {
       wpPostId: postResult.wpPostId,
       wpPostUrl: postResult.wpPostUrl,
-      wpImageId,
+      wpImageId: wpImageId,
     };
   }
 
   /**
-   * Download an image and upload it to WordPress media library.
-   *
-   * @param {string} imageUrl - Source image URL
-   * @param {string} altText  - Alt text for the image
-   * @returns {Promise<object>} { mediaId, mediaUrl }
+   * Upload an image to WP media library using multi-method fallback.
    */
   async uploadImage(imageUrl, altText) {
-    let lastError = null;
+    // Download the image first
+    var imageResponse = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: WP_TIMEOUT_MS,
+      headers: { 'User-Agent': 'HDF-News-AutoPub/1.0' },
+    });
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    var imageBuffer = Buffer.from(imageResponse.data);
+    var mimeType = guessMimeType(imageUrl);
+    var filename = generateFilename(altText, imageUrl);
+
+    // Upload via _wpRequest with binary content type
+    var uploadRes = await this._wpRequest('post', '/wp/v2/media', imageBuffer, {
+      'Content-Type': mimeType,
+      'Content-Disposition': 'attachment; filename="' + filename + '"',
+    });
+
+    // Set alt text (non-critical)
+    if (uploadRes.data.id && altText) {
       try {
-        // Download the image
-        const imageResponse = await axios.get(imageUrl, {
-          responseType: 'arraybuffer',
-          timeout: WP_TIMEOUT_MS,
-          headers: {
-            'User-Agent': 'HDF-News-AutoPub/1.0',
-          },
-        });
-
-        const imageBuffer = Buffer.from(imageResponse.data);
-        const mimeType = guessMimeType(imageUrl);
-        const filename = generateFilename(altText, imageUrl);
-
-        // Upload to WordPress
-        const uploadResponse = await axios.post(
-          `${this.wpBaseUrl}/wp-json/wp/v2/media`,
-          imageBuffer,
-          {
-            headers: {
-              Authorization: this.authHeader,
-              'Content-Type': mimeType,
-              'Content-Disposition': `attachment; filename="${filename}"`,
-            },
-            timeout: WP_TIMEOUT_MS,
-          }
-        );
-
-        // Set alt text if the media endpoint returned an ID
-        if (uploadResponse.data.id && altText) {
-          try {
-            await axios.post(
-              `${this.wpBaseUrl}/wp-json/wp/v2/media/${uploadResponse.data.id}`,
-              { alt_text: altText },
-              {
-                headers: {
-                  Authorization: this.authHeader,
-                  'Content-Type': 'application/json',
-                },
-                timeout: WP_TIMEOUT_MS,
-              }
-            );
-          } catch (_altErr) {
-            // Non-critical — ignore
-          }
-        }
-
-        return {
-          mediaId: uploadResponse.data.id,
-          mediaUrl: uploadResponse.data.source_url || uploadResponse.data.guid?.rendered || '',
-        };
-      } catch (err) {
-        lastError = err;
-        this.logger.warn(`Image upload attempt ${attempt}/${MAX_RETRIES} failed`, {
-          error: err.message,
-          imageUrl,
-        });
-
-        // Don't retry on 4xx client errors (bad URL, forbidden, etc.)
-        if (err.response && err.response.status >= 400 && err.response.status < 500) {
-          break;
-        }
-      }
+        await this._wpRequest('post', '/wp/v2/media/' + uploadRes.data.id, { alt_text: altText });
+      } catch (e) { /* ignore */ }
     }
 
-    throw lastError;
+    return {
+      mediaId: uploadRes.data.id,
+      mediaUrl: uploadRes.data.source_url || (uploadRes.data.guid && uploadRes.data.guid.rendered) || '',
+    };
   }
 
   /**
-   * Create a WordPress post via the REST API.
-   *
-   * @param {object} data - Post data { title, content, excerpt, status, author, categories, featured_media }
-   * @returns {Promise<object>} { wpPostId, wpPostUrl }
+   * Create a WordPress post via the REST API with multi-method fallback.
    */
   async createPost(data) {
-    let lastError = null;
+    var response = await this._wpRequest('post', '/wp/v2/posts', data);
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const response = await axios.post(
-          `${this.wpBaseUrl}/wp-json/wp/v2/posts`,
-          data,
-          {
-            headers: {
-              Authorization: this.authHeader,
-              'Content-Type': 'application/json',
-            },
-            timeout: WP_TIMEOUT_MS,
-          }
-        );
-
-        return {
-          wpPostId: response.data.id,
-          wpPostUrl: response.data.link || response.data.guid?.rendered || '',
-        };
-      } catch (err) {
-        lastError = err;
-        this.logger.warn(`WP post creation attempt ${attempt}/${MAX_RETRIES} failed`, {
-          error: err.message,
-          status: err.response ? err.response.status : null,
-        });
-
-        // Don't retry on auth or validation errors
-        if (err.response && (err.response.status === 401 || err.response.status === 403 || err.response.status === 400)) {
-          break;
-        }
-      }
+    if (!response.data || !response.data.id) {
+      throw new Error('WordPress returned no post ID. Response status: ' + response.status);
     }
 
-    throw lastError;
+    return {
+      wpPostId: response.data.id,
+      wpPostUrl: response.data.link || (response.data.guid && response.data.guid.rendered) || '',
+    };
   }
 
-  /**
-   * Update internal stats counters.
-   */
   _updateStats() {
-    const today = new Date().toISOString().slice(0, 10);
-
+    var today = new Date().toISOString().slice(0, 10);
     if (this.stats._todayDate !== today) {
       this.stats._todayDate = today;
       this.stats.publishedToday = 0;
     }
-
     this.stats.totalPublished++;
     this.stats.publishedToday++;
     this.stats.lastPublishAt = new Date().toISOString();
@@ -451,10 +363,6 @@ class WordPressPublisher {
     this.reinit();
   }
 
-  /**
-   * Rebuild credentials and re-check enabled status from current config.
-   * Called at boot and whenever WP settings are saved via the dashboard.
-   */
   reinit() {
     try {
       var { getConfig } = require('../utils/config');
@@ -478,7 +386,7 @@ class WordPressPublisher {
       this.status = 'connected';
       this.error = null;
 
-      this.logger.info('publisher', 'Publisher re-initialized: ' + this.wpBaseUrl);
+      this.logger.info('publisher', 'Publisher initialized: ' + this.wpBaseUrl);
     } catch (err) {
       this.status = 'error';
       this.error = err.message;
@@ -494,10 +402,7 @@ class WordPressPublisher {
       status: this.status,
       error: this.error,
       lastActivity: this.stats.lastPublishAt,
-      stats: {
-        wpUrl: this.wpBaseUrl,
-        totalPublished: this.stats.totalPublished,
-      }
+      stats: { wpUrl: this.wpBaseUrl, totalPublished: this.stats.totalPublished },
     };
   }
 
@@ -506,20 +411,12 @@ class WordPressPublisher {
     this.status = 'disabled';
   }
 
-  /**
-   * Get current publisher statistics.
-   *
-   * @returns {object}
-   */
   getStatus() {
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Reset publishedToday if the day has changed since last update
+    var today = new Date().toISOString().slice(0, 10);
     if (this.stats._todayDate !== today) {
       this.stats._todayDate = today;
       this.stats.publishedToday = 0;
     }
-
     return {
       totalPublished: this.stats.totalPublished,
       publishedToday: this.stats.publishedToday,
