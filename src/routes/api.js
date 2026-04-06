@@ -1048,19 +1048,23 @@ function createApiRouter(deps) {
       var publishUrl = null;
 
       if (platform === 'wordpress') {
-        // Use existing publisher module if available
+        // Use existing publisher module
         var publisherMod = deps.publisher || (deps.scheduler && deps.scheduler.publisher);
         if (publisherMod && publisherMod.enabled) {
-          publisherMod.publishPost({
+          var postData = {
             title: draft.rewritten_title || draft.extracted_title || draft.source_title,
             content: body.html || draft.rewritten_html,
             excerpt: draft.extracted_excerpt || '',
-            status: 'publish',
-          }).then(function (result) {
-            publishUrl = result.url || result.link;
+            status: publisherMod.config.WP_POST_STATUS || 'publish',
+            author: publisherMod.config.WP_AUTHOR_ID || 1,
+            categories: [publisherMod.config.WP_DEFAULT_CATEGORY || 1],
+            featured_media: 0,
+          };
+          publisherMod.createPost(postData).then(function (result) {
+            publishUrl = result.wpPostUrl || '';
             db.prepare("UPDATE drafts SET status = 'published', published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(id);
-            logger.info('api', 'Draft ' + id + ' published to WordPress' + (publishUrl ? ': ' + publishUrl : ''));
-            res.json({ success: true, url: publishUrl });
+            logger.info('api', 'Draft ' + id + ' published to WordPress: ' + publishUrl);
+            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId });
           }).catch(function (err) {
             logger.error('api', 'WP publish failed for draft ' + id + ': ' + err.message);
             res.status(500).json({ success: false, error: err.message });
