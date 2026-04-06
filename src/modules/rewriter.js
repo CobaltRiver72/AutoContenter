@@ -199,7 +199,7 @@ class ArticleRewriter {
         error: openaiErr.message,
         articleTitle: article.title,
       });
-      throw new Error(`Both AI providers failed for "${article.title}": Claude: ${openaiErr.message}`);
+      throw new Error(`Both AI providers failed for "${article.title}": ${openaiErr.message}`);
     }
   }
 
@@ -233,6 +233,9 @@ class ArticleRewriter {
           }
         );
 
+        if (!response.data || !response.data.content || !response.data.content[0]) {
+          throw new Error('Claude returned empty response');
+        }
         const rawText = response.data.content[0].text;
         const parsed = parseAIResponse(rawText);
 
@@ -318,6 +321,9 @@ class ArticleRewriter {
           }
         );
 
+        if (!response.data || !response.data.choices || !response.data.choices[0]) {
+          throw new Error('OpenAI returned empty response');
+        }
         const rawText = response.data.choices[0].message.content;
         const parsed = parseAIResponse(rawText);
 

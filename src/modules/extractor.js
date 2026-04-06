@@ -156,7 +156,13 @@ class ContentExtractor {
       return null;
     }
 
-    var dom = new JSDOM(html, { url: url });
+    var dom;
+    try {
+      dom = new JSDOM(html, { url: url });
+    } catch (jsdomErr) {
+      this.logger.warn('JSDOM parsing failed for ' + url + ': ' + jsdomErr.message);
+      return null;
+    }
     try {
       var reader = new Readability(dom.window.document, {
         charThreshold: 100,
@@ -177,7 +183,7 @@ class ContentExtractor {
         siteName: article.siteName || '',
       };
     } finally {
-      dom.window.close();
+      if (dom) dom.window.close();
     }
   }
 

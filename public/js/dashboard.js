@@ -183,6 +183,12 @@
     // Clear timers from the previous page before switching
     clearPageTimers();
 
+    // Close SSE connection when leaving feed page
+    if (state.currentPage === 'feed' && state.sseConnection) {
+      state.sseConnection.close();
+      state.sseConnection = null;
+    }
+
     state.currentPage = page;
 
     // Keep URL hash in sync
@@ -252,13 +258,13 @@
     var sidebarClose = $('sidebarClose');
     var sidebar = $('sidebar');
 
-    if (hamburger) {
+    if (hamburger && sidebar) {
       hamburger.addEventListener('click', function () {
         sidebar.classList.toggle('open');
       });
     }
 
-    if (sidebarClose) {
+    if (sidebarClose && sidebar) {
       sidebarClose.addEventListener('click', function () {
         sidebar.classList.remove('open');
       });
@@ -1558,6 +1564,7 @@
         var draft = data.data;
         if (draft && draft.rewritten_html) {
           var win = window.open('', '_blank');
+          if (!win) { showToast('Popup blocked by browser', 'error'); return; }
           win.document.write(draft.rewritten_html);
           win.document.close();
         } else {
@@ -1845,19 +1852,19 @@
         fetchApi('/api/drafts/' + currentDraftId + '/blogger-xml', { method: 'POST', body: { html: html } })
           .then(function (data) {
             if (data.success && data.xml) {
-              navigator.clipboard.writeText(data.xml).then(function () {
-                showToast('Blogger XML copied to clipboard!', 'success');
-              });
+              navigator.clipboard.writeText(data.xml)
+                .then(function () { showToast('Blogger XML copied to clipboard!', 'success'); })
+                .catch(function () { showToast('Clipboard access denied', 'error'); });
             } else {
-              navigator.clipboard.writeText(html).then(function () {
-                showToast('HTML copied (Blogger conversion not available)', 'info');
-              });
+              navigator.clipboard.writeText(html)
+                .then(function () { showToast('HTML copied (Blogger conversion not available)', 'info'); })
+                .catch(function () { showToast('Clipboard access denied', 'error'); });
             }
           })
           .catch(function () {
-            navigator.clipboard.writeText(html).then(function () {
-              showToast('HTML copied to clipboard', 'info');
-            });
+            navigator.clipboard.writeText(html)
+              .then(function () { showToast('HTML copied to clipboard', 'info'); })
+              .catch(function () { showToast('Clipboard access denied', 'error'); });
           });
       };
     }
@@ -1868,6 +1875,7 @@
         var html = $('html-code-editor').value;
         if (!html) { showToast('No HTML to preview', 'error'); return; }
         var win = window.open('', '_blank');
+        if (!win) { showToast('Popup blocked by browser', 'error'); return; }
         win.document.write(html);
         win.document.close();
       };
@@ -1922,7 +1930,7 @@
         target_language: $('setting-language').value,
         schema_types: schemaTypes.join(','),
       }
-    });
+    }).catch(function (err) { showToast('Failed to save settings', 'error'); });
   }
 
   function pollEditorRewriteStatus(draftId) {
@@ -1947,7 +1955,7 @@
             $('ai-output-content').innerHTML = '<p style="color:var(--red);">Rewrite failed. Check logs for details.</p>';
           }
         })
-        .catch(function () { /* silent */ });
+        .catch(function () { clearInterval(interval); });
     }, 3000);
     // Timeout after 2 minutes
     setTimeout(function () { clearInterval(interval); }, 120000);

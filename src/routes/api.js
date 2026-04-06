@@ -326,9 +326,19 @@ function createApiRouter(deps) {
         settings[row.key] = row.value;
       });
 
-      // Merge with current config defaults for display
+      // Merge with current config defaults for display (filter out secrets)
       var config = getConfig();
-      res.json({ settings: settings, config: config });
+      var SENSITIVE_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'FIREHOSE_TOKEN', 'WP_APP_PASSWORD', 'WP_USERNAME', 'DASHBOARD_PASSWORD'];
+      var safeConfig = {};
+      var configKeys = Object.keys(config);
+      for (var k = 0; k < configKeys.length; k++) {
+        if (SENSITIVE_KEYS.indexOf(configKeys[k]) !== -1) {
+          safeConfig[configKeys[k]] = config[configKeys[k]] ? '••••••••' : '';
+        } else {
+          safeConfig[configKeys[k]] = config[configKeys[k]];
+        }
+      }
+      res.json({ settings: settings, config: safeConfig });
     } catch (err) {
       logger.error('api', 'Failed to fetch settings', err.message);
       res.status(500).json({ error: 'Failed to fetch settings' });
@@ -439,7 +449,7 @@ function createApiRouter(deps) {
       return res.json({ success: false, error: 'Firehose token not configured', tokenConfigured: false });
     }
     // Test by fetching rules (lightweight API call)
-    axios.get('https://api.firehose.com/v1/rules', {
+    return axios.get('https://api.firehose.com/v1/rules', {
       headers: { 'Authorization': 'Bearer ' + token },
       timeout: 10000,
     })
@@ -466,7 +476,7 @@ function createApiRouter(deps) {
       return res.status(503).json({ error: 'Trends module not available' });
     }
 
-    trends.pollOnce()
+    return trends.pollOnce()
       .then(function (results) {
         res.json({ success: true, results: results });
       })
@@ -492,7 +502,7 @@ function createApiRouter(deps) {
       }
 
       var article = req.body.article;
-      rewriter.rewrite(article)
+      return rewriter.rewrite(article)
         .then(function (result) {
           res.json({ success: true, result: result });
         })
@@ -623,8 +633,11 @@ function createApiRouter(deps) {
       return res.status(400).json({ error: 'Firehose token not configured' });
     }
     var ruleId = req.params.id;
+    if (!/^[a-zA-Z0-9_-]+$/.test(ruleId)) {
+      return res.status(400).json({ error: 'Invalid rule ID format' });
+    }
     var body = req.body;
-    axios.put('https://api.firehose.com/v1/rules/' + ruleId, body, {
+    return axios.put('https://api.firehose.com/v1/rules/' + ruleId, body, {
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       timeout: 15000,
     })
@@ -646,7 +659,10 @@ function createApiRouter(deps) {
       return res.status(400).json({ error: 'Firehose token not configured' });
     }
     var ruleId = req.params.id;
-    axios.delete('https://api.firehose.com/v1/rules/' + ruleId, {
+    if (!/^[a-zA-Z0-9_-]+$/.test(ruleId)) {
+      return res.status(400).json({ error: 'Invalid rule ID format' });
+    }
+    return axios.delete('https://api.firehose.com/v1/rules/' + ruleId, {
       headers: { 'Authorization': 'Bearer ' + token },
       timeout: 15000,
     })
@@ -907,7 +923,10 @@ function createApiRouter(deps) {
   // DELETE /api/drafts/:id — Delete a draft
   router.delete('/drafts/:id', function (req, res) {
     try {
-      db.prepare('DELETE FROM drafts WHERE id = ?').run(req.params.id);
+      var result = db.prepare('DELETE FROM drafts WHERE id = ?').run(req.params.id);
+      if (result.changes === 0) {
+        return res.status(404).json({ success: false, error: 'Draft not found' });
+      }
       return res.json({ success: true });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
