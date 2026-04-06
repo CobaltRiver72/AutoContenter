@@ -1534,6 +1534,7 @@
           (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + (draft.extracted_content || '').length + ' chars</span>' : '') +
           (draft.extraction_status === 'failed' ? '<span style="color:var(--red);font-size:11px">&#10060; Extract failed</span>' : '') +
           (draft.extraction_method ? '<span class="extraction-badge extraction-' + escapeHtml(draft.extraction_method) + '">' + (draft.extraction_method === 'direct' ? '&#127760; Direct' : draft.extraction_method === 'cache' ? '&#128230; Cached' : '&#128225; Firehose') + '</span>' : '') +
+          (draft.ai_model_used ? '<span class="ai-badge">' + (draft.ai_provider === 'anthropic' ? '&#128995; ' : '&#129001; ') + escapeHtml(draft.ai_model_used.replace('claude-', '').replace('gpt-', 'GPT-').split('-20')[0]) + (draft.ai_tokens_used ? ' &bull; ' + draft.ai_tokens_used + ' tok' : '') + '</span>' : '') +
         '</div>' +
         (draft.is_partial ? '<div class="partial-warning">&#9888; Partial content — may need manual review</div>' : '') +
         (contentPreview ? '<p class="draft-preview">' + escapeHtml(truncate(contentPreview, 200)) + '</p>' : '') +
@@ -1804,13 +1805,25 @@
         saveEditorSettings();
 
         var customPrompt = $('setting-custom-prompt').value.trim();
+        var reqBody = { custom_prompt: customPrompt };
+
+        // Per-article AI overrides
+        var editorProvider = $('editor-provider');
+        var editorModel = $('editor-model');
+        if (editorProvider && editorProvider.value !== 'default') {
+          reqBody.provider = editorProvider.value;
+          if (editorModel && editorModel.value) {
+            reqBody.model = editorModel.value;
+          }
+        }
+
         $('editor-status').textContent = 'REWRITING...';
         $('editor-status').style.background = '#a855f7';
         $('ai-output-content').innerHTML = '<p style="color:#a855f7;">&#129302; AI is rewriting... This may take 30-60 seconds.</p>';
 
         fetchApi('/api/drafts/' + currentDraftId + '/rewrite', {
           method: 'POST',
-          body: { custom_prompt: customPrompt }
+          body: reqBody
         })
           .then(function (data) {
             if (data.success) pollEditorRewriteStatus(currentDraftId);
@@ -1824,6 +1837,43 @@
             $('ai-output-content').innerHTML = '<p style="color:var(--red);">Network error: ' + escapeHtml(err.message) + '</p>';
           });
       };
+    }
+
+    // Editor provider/model toggle
+    var editorProviderEl = $('editor-provider');
+    if (editorProviderEl) {
+      var AI_MODELS = {
+        anthropic: [
+          { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (Fast)' },
+          { value: 'claude-sonnet-4-6-20250610', label: 'Claude Sonnet 4.6 (Balanced)' },
+          { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (Balanced)' },
+          { value: 'claude-opus-4-20250514', label: 'Claude Opus 4 (Best)' },
+        ],
+        openai: [
+          { value: 'gpt-4o', label: 'GPT-4o (Balanced)' },
+          { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast)' },
+          { value: 'gpt-4.1', label: 'GPT-4.1 (Latest)' },
+          { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (Latest Fast)' },
+          { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (Cheapest)' },
+        ],
+      };
+      editorProviderEl.addEventListener('change', function () {
+        var prov = editorProviderEl.value;
+        var modelChoice = $('editor-model-choice');
+        var modelSelect = $('editor-model');
+        if (prov === 'default') {
+          if (modelChoice) modelChoice.style.display = 'none';
+          return;
+        }
+        if (modelChoice) modelChoice.style.display = '';
+        if (modelSelect && AI_MODELS[prov]) {
+          var optHtml = '';
+          for (var m = 0; m < AI_MODELS[prov].length; m++) {
+            optHtml += '<option value="' + AI_MODELS[prov][m].value + '">' + AI_MODELS[prov][m].label + '</option>';
+          }
+          modelSelect.innerHTML = optHtml;
+        }
+      });
     }
 
     var saveBtn = $('editorSaveBtn');
@@ -2017,6 +2067,8 @@
         for (var i = 0; i < inputs.length; i++) {
           var key = inputs[i].getAttribute('data-setting-key');
           var val = inputs[i].type === 'checkbox' ? (inputs[i].checked ? 'true' : 'false') : inputs[i].value;
+          // Skip masked sensitive values (not changed by user)
+          if (inputs[i].type === 'password' && (val === '' || val === '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022')) continue;
           updates[key] = val;
         }
 
@@ -2044,9 +2096,9 @@
   function renderSettingsForm(container, settings, config) {
     if (!container) return;
 
-    var groups = {
+    // Standard groups (non-AI)
+    var standardGroups = {
       'Firehose': ['FIREHOSE_TOKEN'],
-      'AI Models': ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'AI_PRIMARY_MODEL', 'AI_FALLBACK_MODEL'],
       'WordPress': ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS'],
       'Pipeline': ['MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
@@ -2071,10 +2123,95 @@
 
     var html = '';
 
-    var groupNames = Object.keys(groups);
+    // ─── AI Models section (custom dropdowns) ───
+    var aiProvider = settings.AI_PROVIDER || config.AI_PROVIDER || 'anthropic';
+    var anthropicKey = settings.ANTHROPIC_API_KEY || '';
+    var anthropicConfigured = !!(settings.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY);
+    var openaiKey = settings.OPENAI_API_KEY || '';
+    var openaiConfigured = !!(settings.OPENAI_API_KEY || config.OPENAI_API_KEY);
+    var anthropicModel = settings.AI_PRIMARY_MODEL || config.AI_PRIMARY_MODEL || 'claude-haiku-4-5-20251001';
+    var openaiModel = settings.AI_FALLBACK_MODEL || config.AI_FALLBACK_MODEL || 'gpt-4o';
+    var enableFallback = String(settings.ENABLE_FALLBACK || config.ENABLE_FALLBACK || 'true').toLowerCase() === 'true';
+    var maxTokens = settings.MAX_TOKENS || config.MAX_TOKENS || '4096';
+    var temperature = settings.TEMPERATURE || config.TEMPERATURE || '0.7';
+
+    html += '<div class="settings-group">';
+    html += '<div class="settings-group-title">AI Models</div>';
+
+    // Provider dropdown
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">AI_PROVIDER</label>' +
+      '<select data-setting-key="AI_PROVIDER" id="setting-ai-provider" class="setting-select">' +
+        '<option value="anthropic"' + (aiProvider === 'anthropic' ? ' selected' : '') + '>Anthropic (Claude)</option>' +
+        '<option value="openai"' + (aiProvider === 'openai' ? ' selected' : '') + '>OpenAI (GPT)</option>' +
+      '</select>' +
+    '</div>';
+
+    // Anthropic settings
+    html += '<div id="anthropic-settings" class="provider-settings"' + (aiProvider !== 'anthropic' ? ' style="display:none"' : '') + '>';
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">ANTHROPIC_API_KEY</label>' +
+      '<input type="password" data-setting-key="ANTHROPIC_API_KEY" value="' + escapeHtml(anthropicKey) + '"' +
+      ' placeholder="' + (anthropicConfigured ? '(configured)' : '(not set)') + '">' +
+    '</div>';
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">ANTHROPIC_MODEL</label>' +
+      '<select data-setting-key="AI_PRIMARY_MODEL" class="setting-select">' +
+        '<option value="claude-haiku-4-5-20251001"' + (anthropicModel === 'claude-haiku-4-5-20251001' ? ' selected' : '') + '>Claude Haiku 4.5 (Fast, Cheap)</option>' +
+        '<option value="claude-sonnet-4-6-20250610"' + (anthropicModel === 'claude-sonnet-4-6-20250610' ? ' selected' : '') + '>Claude Sonnet 4.6 (Balanced)</option>' +
+        '<option value="claude-sonnet-4-20250514"' + (anthropicModel === 'claude-sonnet-4-20250514' ? ' selected' : '') + '>Claude Sonnet 4 (Balanced)</option>' +
+        '<option value="claude-opus-4-20250514"' + (anthropicModel === 'claude-opus-4-20250514' ? ' selected' : '') + '>Claude Opus 4 (Best Quality)</option>' +
+      '</select>' +
+    '</div>';
+    html += '</div>';
+
+    // OpenAI settings
+    html += '<div id="openai-settings" class="provider-settings"' + (aiProvider !== 'openai' ? ' style="display:none"' : '') + '>';
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">OPENAI_API_KEY</label>' +
+      '<input type="password" data-setting-key="OPENAI_API_KEY" value="' + escapeHtml(openaiKey) + '"' +
+      ' placeholder="' + (openaiConfigured ? '(configured)' : '(not set)') + '">' +
+    '</div>';
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">OPENAI_MODEL</label>' +
+      '<select data-setting-key="AI_FALLBACK_MODEL" class="setting-select">' +
+        '<option value="gpt-4o"' + (openaiModel === 'gpt-4o' ? ' selected' : '') + '>GPT-4o (Balanced)</option>' +
+        '<option value="gpt-4o-mini"' + (openaiModel === 'gpt-4o-mini' ? ' selected' : '') + '>GPT-4o Mini (Fast, Cheap)</option>' +
+        '<option value="gpt-4.1"' + (openaiModel === 'gpt-4.1' ? ' selected' : '') + '>GPT-4.1 (Latest)</option>' +
+        '<option value="gpt-4.1-mini"' + (openaiModel === 'gpt-4.1-mini' ? ' selected' : '') + '>GPT-4.1 Mini (Latest Fast)</option>' +
+        '<option value="gpt-4.1-nano"' + (openaiModel === 'gpt-4.1-nano' ? ' selected' : '') + '>GPT-4.1 Nano (Cheapest)</option>' +
+      '</select>' +
+    '</div>';
+    html += '</div>';
+
+    // Fallback toggle
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">ENABLE_FALLBACK</label>' +
+      '<div class="toggle-wrapper">' +
+        '<input type="checkbox" data-setting-key="ENABLE_FALLBACK" id="setting-enable-fallback"' + (enableFallback ? ' checked' : '') + '>' +
+        '<label for="setting-enable-fallback">If primary fails, try the other provider</label>' +
+      '</div>' +
+    '</div>';
+
+    // Max tokens
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">MAX_TOKENS</label>' +
+      '<input type="number" data-setting-key="MAX_TOKENS" value="' + escapeHtml(String(maxTokens)) + '" min="1000" max="16000">' +
+    '</div>';
+
+    // Temperature
+    html += '<div class="settings-row">' +
+      '<label class="settings-label">TEMPERATURE</label>' +
+      '<input type="number" data-setting-key="TEMPERATURE" value="' + escapeHtml(String(temperature)) + '" min="0" max="2" step="0.1">' +
+    '</div>';
+
+    html += '</div>';
+
+    // ─── Standard groups ───
+    var groupNames = Object.keys(standardGroups);
     for (var g = 0; g < groupNames.length; g++) {
       var groupName = groupNames[g];
-      var keys = groups[groupName];
+      var keys = standardGroups[groupName];
 
       html += '<div class="settings-group">';
       html += '<div class="settings-group-title">' + escapeHtml(groupName) + '</div>';
@@ -2121,6 +2258,18 @@
     }
 
     container.innerHTML = html;
+
+    // Wire up AI provider toggle
+    var providerSelect = document.getElementById('setting-ai-provider');
+    if (providerSelect) {
+      providerSelect.addEventListener('change', function () {
+        var p = providerSelect.value;
+        var antDiv = document.getElementById('anthropic-settings');
+        var oaiDiv = document.getElementById('openai-settings');
+        if (antDiv) antDiv.style.display = p === 'anthropic' ? '' : 'none';
+        if (oaiDiv) oaiDiv.style.display = p === 'openai' ? '' : 'none';
+      });
+    }
   }
 
   function initTestButtons() {

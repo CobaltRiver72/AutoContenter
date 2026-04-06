@@ -1079,8 +1079,11 @@ function createApiRouter(deps) {
       db.prepare("UPDATE drafts SET status = 'rewriting', updated_at = datetime('now') WHERE id = ?").run(id);
 
       var customPrompt = (req.body && req.body.custom_prompt) || '';
+      var aiOptions = {};
+      if (req.body && req.body.provider) aiOptions.provider = req.body.provider;
+      if (req.body && req.body.model) aiOptions.model = req.body.model;
 
-      rewriteDraftContent(id, customPrompt, draftDeps).catch(function (err) {
+      rewriteDraftContent(id, customPrompt, draftDeps, aiOptions).catch(function (err) {
         logger.warn('api', 'Rewrite failed for draft ' + id + ': ' + err.message);
         db.prepare("UPDATE drafts SET status = 'draft', updated_at = datetime('now') WHERE id = ?").run(id);
       });

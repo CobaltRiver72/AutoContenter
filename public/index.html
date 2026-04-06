@@ -387,9 +387,24 @@
                   <label><input type="checkbox" value="Event" /> Event</label>
                 </div>
               </label>
-              <label>Custom AI Instructions (optional)
-                <textarea id="setting-custom-prompt" rows="4" placeholder="Add special instructions for the AI rewriter."></textarea>
-              </label>
+              <div class="editor-ai-section">
+                <div class="editor-ai-title">AI Rewrite Options</div>
+                <label>AI Provider
+                  <select id="editor-provider" class="setting-select">
+                    <option value="default">Use Default (from Settings)</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="openai">OpenAI (GPT)</option>
+                  </select>
+                </label>
+                <div id="editor-model-choice" style="display:none;">
+                  <label>Model
+                    <select id="editor-model" class="setting-select"></select>
+                  </label>
+                </div>
+                <label>Custom AI Instructions (optional)
+                  <textarea id="setting-custom-prompt" rows="4" placeholder="Add special instructions for the AI rewriter."></textarea>
+                </label>
+              </div>
               <button type="button" class="btn btn-purple btn-full" id="editorRewriteBtn">&#129302; Rewrite with AI</button>
             </form>
           </div>

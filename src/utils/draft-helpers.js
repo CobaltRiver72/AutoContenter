@@ -308,7 +308,7 @@ async function extractDraftContent(draftId, deps) {
  * @param {string} customPrompt - Optional custom instructions
  * @param {object} deps - { db, logger, rewriter }
  */
-async function rewriteDraftContent(draftId, customPrompt, deps) {
+async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
   var db = deps.db;
   var logger = deps.logger;
   var rewriter = deps.rewriter;
@@ -348,26 +348,32 @@ async function rewriteDraftContent(draftId, customPrompt, deps) {
       schemaTypes: draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList',
     };
 
-    var result = await rewriter.rewrite(articleObj, clusterObj);
+    // Per-call AI overrides (provider, model)
+    var opts = aiOptions || {};
+    var result = await rewriter.rewrite(articleObj, clusterObj, opts);
 
     if (result && (result.html || result.content)) {
       var html = result.html || result.content || '';
       var title = result.title || draft.extracted_title || draft.source_title || '';
       var wordCount = result.wordCount || result.word_count || 0;
-      var model = result.model || result.aiModel || 'unknown';
+      var model = result.aiModel || result.model || 'unknown';
+      var provider = result.aiProvider || opts.provider || '';
+      var tokensUsed = result.tokensUsed || 0;
 
-      db.prepare(`
-        UPDATE drafts SET
-          rewritten_html = ?,
-          rewritten_title = ?,
-          rewritten_word_count = ?,
-          ai_model_used = ?,
-          status = 'ready',
-          updated_at = datetime('now')
-        WHERE id = ?
-      `).run(html, title, wordCount, model, draftId);
+      db.prepare(
+        "UPDATE drafts SET" +
+        "  rewritten_html = ?," +
+        "  rewritten_title = ?," +
+        "  rewritten_word_count = ?," +
+        "  ai_model_used = ?," +
+        "  ai_provider = ?," +
+        "  ai_tokens_used = ?," +
+        "  status = 'ready'," +
+        "  updated_at = datetime('now')" +
+        " WHERE id = ?"
+      ).run(html, title, wordCount, model, provider, tokensUsed, draftId);
 
-      logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words)');
+      logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ')');
     } else {
       throw new Error('Rewriter returned no output');
     }

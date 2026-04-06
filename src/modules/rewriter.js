@@ -164,42 +164,69 @@ class ArticleRewriter {
   }
 
   /**
-   * Rewrite an article using Claude (primary) with OpenAI fallback.
+   * Rewrite an article using the configured AI provider with optional fallback.
    *
    * @param {object} article  - The primary article { title, url, content_markdown, ... }
    * @param {object} cluster  - The cluster object { articles, trends_boosted, ... }
-   * @returns {Promise<object>} { title, content, excerpt, metaDescription, slug, aiModel, tokensUsed }
+   * @param {object} [options] - Per-call overrides { provider, model }
+   * @returns {Promise<object>} { title, content, excerpt, metaDescription, slug, aiModel, aiProvider, tokensUsed }
    */
-  async rewrite(article, cluster) {
-    // Try Claude first
+  async rewrite(article, cluster, options) {
+    var opts = options || {};
+    var { getConfig } = require('../utils/config');
+    var freshConfig = getConfig();
+
+    // Determine primary provider from per-call override or config
+    var provider = opts.provider || freshConfig.AI_PROVIDER || 'anthropic';
+    var enableFallback = freshConfig.ENABLE_FALLBACK !== false;
+
+    // Per-call model override
+    var modelOverride = opts.model || null;
+
+    // Try primary provider
+    var primaryFn = provider === 'openai' ? 'rewriteWithOpenAI' : 'rewriteWithClaude';
+    var fallbackFn = provider === 'openai' ? 'rewriteWithClaude' : 'rewriteWithOpenAI';
+
     try {
-      this.logger.info('Attempting rewrite with Claude', {
+      this.logger.info('Attempting rewrite with ' + provider, {
         articleTitle: article.title,
-        model: this.config.AI_PRIMARY_MODEL,
+        model: modelOverride || (provider === 'openai' ? freshConfig.AI_FALLBACK_MODEL : freshConfig.AI_PRIMARY_MODEL),
       });
-      const result = await this.rewriteWithClaude(article, cluster);
+      var result = await this[primaryFn](article, cluster, modelOverride);
+      result.aiProvider = provider;
       return result;
-    } catch (claudeErr) {
-      this.logger.warn('Claude rewrite failed, falling back to OpenAI', {
-        error: claudeErr.message,
+    } catch (primaryErr) {
+      this.logger.warn(provider + ' rewrite failed', {
+        error: primaryErr.message,
         articleTitle: article.title,
       });
+
+      if (!enableFallback) {
+        throw primaryErr;
+      }
     }
 
-    // Fall back to OpenAI
+    // Try fallback provider
+    var fallbackProvider = provider === 'openai' ? 'anthropic' : 'openai';
+    var fallbackKey = fallbackProvider === 'openai' ? freshConfig.OPENAI_API_KEY : freshConfig.ANTHROPIC_API_KEY;
+    if (!fallbackKey) {
+      throw new Error(provider + ' rewrite failed and no ' + fallbackProvider + ' API key configured for fallback');
+    }
+
     try {
-      this.logger.info('Attempting rewrite with OpenAI', {
+      this.logger.info('Falling back to ' + fallbackProvider, {
         articleTitle: article.title,
-        model: this.config.AI_FALLBACK_MODEL,
       });
-      const result = await this.rewriteWithOpenAI(article, cluster);
+      var result = await this[fallbackFn](article, cluster);
+      result.aiProvider = fallbackProvider;
+      result.usedFallback = true;
       return result;
-    } catch (openaiErr) {
-      this.logger.error('OpenAI rewrite also failed — skipping article', {
-        error: openaiErr.message,
+    } catch (fallbackErr) {
+      this.logger.error('Both AI providers failed', {
+        error: fallbackErr.message,
         articleTitle: article.title,
       });
-      throw new Error(`Both AI providers failed for "${article.title}": ${openaiErr.message}`);
+      throw new Error('Both AI providers failed for "' + article.title + '": ' + fallbackErr.message);
     }
   }
 
@@ -210,7 +237,13 @@ class ArticleRewriter {
    * @param {object} cluster
    * @returns {Promise<object>}
    */
-  async rewriteWithClaude(article, cluster) {
+  async rewriteWithClaude(article, cluster, modelOverride) {
+    var { getConfig } = require('../utils/config');
+    var freshConfig = getConfig();
+    var model = modelOverride || freshConfig.AI_PRIMARY_MODEL || 'claude-haiku-4-5-20251001';
+    var maxTokens = parseInt(freshConfig.MAX_TOKENS, 10) || 4096;
+    var temperature = parseFloat(freshConfig.TEMPERATURE) || 0.7;
+
     const prompt = buildPrompt(article, cluster);
     let lastError = null;
 
@@ -219,8 +252,9 @@ class ArticleRewriter {
         const response = await axios.post(
           'https://api.anthropic.com/v1/messages',
           {
-            model: this.config.AI_PRIMARY_MODEL,
-            max_tokens: 6000,
+            model: model,
+            max_tokens: maxTokens,
+            temperature: temperature,
             messages: [{ role: 'user', content: prompt }],
           },
           {
@@ -265,7 +299,7 @@ class ArticleRewriter {
           relatedKeywords: parsed.related_keywords || [],
           faq: parsed.faq || [],
           wordCount: parsed.word_count || 0,
-          aiModel: this.config.AI_PRIMARY_MODEL,
+          aiModel: model,
           tokensUsed: tokensUsed,
         };
       } catch (err) {
@@ -292,7 +326,13 @@ class ArticleRewriter {
    * @param {object} cluster
    * @returns {Promise<object>}
    */
-  async rewriteWithOpenAI(article, cluster) {
+  async rewriteWithOpenAI(article, cluster, modelOverride) {
+    var { getConfig } = require('../utils/config');
+    var freshConfig = getConfig();
+    var model = modelOverride || freshConfig.AI_FALLBACK_MODEL || 'gpt-4o';
+    var maxTokens = parseInt(freshConfig.MAX_TOKENS, 10) || 4096;
+    var temperature = parseFloat(freshConfig.TEMPERATURE) || 0.7;
+
     const prompt = buildPrompt(article, cluster);
     let lastError = null;
 
@@ -301,8 +341,9 @@ class ArticleRewriter {
         const response = await axios.post(
           'https://api.openai.com/v1/chat/completions',
           {
-            model: this.config.AI_FALLBACK_MODEL,
-            max_tokens: 6000,
+            model: model,
+            max_tokens: maxTokens,
+            temperature: temperature,
             response_format: { type: 'json_object' },
             messages: [
               {
@@ -314,7 +355,7 @@ class ArticleRewriter {
           },
           {
             headers: {
-              Authorization: `Bearer ${this.config.OPENAI_API_KEY}`,
+              Authorization: 'Bearer ' + freshConfig.OPENAI_API_KEY,
               'Content-Type': 'application/json',
             },
             timeout: AI_TIMEOUT_MS,
@@ -339,6 +380,7 @@ class ArticleRewriter {
 
         this.logger.info('OpenAI rewrite successful', {
           articleTitle: article.title,
+          model: model,
           tokensUsed,
           attempt,
         });
@@ -353,12 +395,12 @@ class ArticleRewriter {
           relatedKeywords: parsed.related_keywords || [],
           faq: parsed.faq || [],
           wordCount: parsed.word_count || 0,
-          aiModel: this.config.AI_FALLBACK_MODEL,
+          aiModel: model,
           tokensUsed: tokensUsed,
         };
       } catch (err) {
         lastError = err;
-        this.logger.warn(`OpenAI attempt ${attempt}/${MAX_RETRIES} failed`, {
+        this.logger.warn('OpenAI attempt ' + attempt + '/' + MAX_RETRIES + ' failed', {
           error: err.message,
           status: err.response ? err.response.status : null,
         });
