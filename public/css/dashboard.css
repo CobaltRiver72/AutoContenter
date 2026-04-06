@@ -1717,6 +1717,15 @@ select:focus {
   border-left: 2px solid var(--border);
 }
 
+.provider-settings-block {
+  margin: 10px 0;
+  padding: 10px 15px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.02);
+  border-left: 3px solid var(--border);
+  transition: all 0.2s;
+}
+
 .toggle-wrapper {
   display: flex;
   align-items: center;

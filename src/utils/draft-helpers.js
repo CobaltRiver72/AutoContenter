@@ -350,33 +350,41 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
 
     // Per-call AI overrides (provider, model)
     var opts = aiOptions || {};
-    var result = await rewriter.rewrite(articleObj, clusterObj, opts);
 
-    if (result && (result.html || result.content)) {
-      var html = result.html || result.content || '';
-      var title = result.title || draft.extracted_title || draft.source_title || '';
-      var wordCount = result.wordCount || result.word_count || 0;
-      var model = result.aiModel || result.model || 'unknown';
-      var provider = result.aiProvider || opts.provider || '';
-      var tokensUsed = result.tokensUsed || 0;
-
-      db.prepare(
-        "UPDATE drafts SET" +
-        "  rewritten_html = ?," +
-        "  rewritten_title = ?," +
-        "  rewritten_word_count = ?," +
-        "  ai_model_used = ?," +
-        "  ai_provider = ?," +
-        "  ai_tokens_used = ?," +
-        "  status = 'ready'," +
-        "  updated_at = datetime('now')" +
-        " WHERE id = ?"
-      ).run(html, title, wordCount, model, provider, tokensUsed, draftId);
-
-      logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ')');
+    // Use rewriteSimple for draft content (returns HTML), falling back to rewrite (returns structured JSON)
+    var result;
+    if (typeof rewriter.rewriteSimple === 'function') {
+      result = await rewriter.rewriteSimple(content, customPrompt || null, opts);
     } else {
-      throw new Error('Rewriter returned no output');
+      result = await rewriter.rewrite(articleObj, clusterObj, opts);
     }
+
+    // Handle both response formats
+    var html = result.rewrittenContent || result.html || result.content || '';
+    var title = result.title || draft.extracted_title || draft.source_title || '';
+    var wordCount = result.wordCount || result.word_count || 0;
+    var model = result.model || result.aiModel || 'unknown';
+    var provider = result.provider || result.aiProvider || opts.provider || '';
+    var tokensUsed = result.tokensUsed || 0;
+
+    if (!html || html.length < 50) {
+      throw new Error('Rewriter returned empty or too-short output');
+    }
+
+    db.prepare(
+      "UPDATE drafts SET" +
+      "  rewritten_html = ?," +
+      "  rewritten_title = ?," +
+      "  rewritten_word_count = ?," +
+      "  ai_model_used = ?," +
+      "  ai_provider = ?," +
+      "  ai_tokens_used = ?," +
+      "  status = 'ready'," +
+      "  updated_at = datetime('now')" +
+      " WHERE id = ?"
+    ).run(html, title, wordCount, model, provider, tokensUsed, draftId);
+
+    logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ')');
   } catch (err) {
     db.prepare("UPDATE drafts SET status = 'draft', updated_at = datetime('now') WHERE id = ?").run(draftId);
     logger.error('draft-helpers', 'Draft ' + draftId + ' rewrite failed: ' + err.message);

@@ -217,7 +217,7 @@
       case 'trends': loadTrends(); break;
       case 'clusters': loadClusters(); break;
       case 'published': loadPublished(); break;
-      case 'settings': loadSettings(); break;
+      case 'settings': loadSettings(); loadAISettings(); break;
       case 'logs': loadLogs(); break;
     }
 
@@ -2096,7 +2096,7 @@
   function renderSettingsForm(container, settings, config) {
     if (!container) return;
 
-    // Standard groups (non-AI)
+    // Standard groups (AI is handled by its own section now)
     var standardGroups = {
       'Firehose': ['FIREHOSE_TOKEN'],
       'WordPress': ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS'],
@@ -2109,8 +2109,6 @@
 
     var sensitiveKeys = {
       FIREHOSE_TOKEN: true,
-      ANTHROPIC_API_KEY: true,
-      OPENAI_API_KEY: true,
       WP_APP_PASSWORD: true,
       DASHBOARD_PASSWORD: true,
       INFRANODUS_API_KEY: true,
@@ -2123,91 +2121,6 @@
 
     var html = '';
 
-    // ─── AI Models section (custom dropdowns) ───
-    var aiProvider = settings.AI_PROVIDER || config.AI_PROVIDER || 'anthropic';
-    var anthropicKey = settings.ANTHROPIC_API_KEY || '';
-    var anthropicConfigured = !!(settings.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY);
-    var openaiKey = settings.OPENAI_API_KEY || '';
-    var openaiConfigured = !!(settings.OPENAI_API_KEY || config.OPENAI_API_KEY);
-    var anthropicModel = settings.AI_PRIMARY_MODEL || config.AI_PRIMARY_MODEL || 'claude-haiku-4-5-20251001';
-    var openaiModel = settings.AI_FALLBACK_MODEL || config.AI_FALLBACK_MODEL || 'gpt-4o';
-    var enableFallback = String(settings.ENABLE_FALLBACK || config.ENABLE_FALLBACK || 'true').toLowerCase() === 'true';
-    var maxTokens = settings.MAX_TOKENS || config.MAX_TOKENS || '4096';
-    var temperature = settings.TEMPERATURE || config.TEMPERATURE || '0.7';
-
-    html += '<div class="settings-group">';
-    html += '<div class="settings-group-title">AI Models</div>';
-
-    // Provider dropdown
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">AI_PROVIDER</label>' +
-      '<select data-setting-key="AI_PROVIDER" id="setting-ai-provider" class="setting-select">' +
-        '<option value="anthropic"' + (aiProvider === 'anthropic' ? ' selected' : '') + '>Anthropic (Claude)</option>' +
-        '<option value="openai"' + (aiProvider === 'openai' ? ' selected' : '') + '>OpenAI (GPT)</option>' +
-      '</select>' +
-    '</div>';
-
-    // Anthropic settings
-    html += '<div id="anthropic-settings" class="provider-settings"' + (aiProvider !== 'anthropic' ? ' style="display:none"' : '') + '>';
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">ANTHROPIC_API_KEY</label>' +
-      '<input type="password" data-setting-key="ANTHROPIC_API_KEY" value="' + escapeHtml(anthropicKey) + '"' +
-      ' placeholder="' + (anthropicConfigured ? '(configured)' : '(not set)') + '">' +
-    '</div>';
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">ANTHROPIC_MODEL</label>' +
-      '<select data-setting-key="AI_PRIMARY_MODEL" class="setting-select">' +
-        '<option value="claude-haiku-4-5-20251001"' + (anthropicModel === 'claude-haiku-4-5-20251001' ? ' selected' : '') + '>Claude Haiku 4.5 (Fast, Cheap)</option>' +
-        '<option value="claude-sonnet-4-6-20250610"' + (anthropicModel === 'claude-sonnet-4-6-20250610' ? ' selected' : '') + '>Claude Sonnet 4.6 (Balanced)</option>' +
-        '<option value="claude-sonnet-4-20250514"' + (anthropicModel === 'claude-sonnet-4-20250514' ? ' selected' : '') + '>Claude Sonnet 4 (Balanced)</option>' +
-        '<option value="claude-opus-4-20250514"' + (anthropicModel === 'claude-opus-4-20250514' ? ' selected' : '') + '>Claude Opus 4 (Best Quality)</option>' +
-      '</select>' +
-    '</div>';
-    html += '</div>';
-
-    // OpenAI settings
-    html += '<div id="openai-settings" class="provider-settings"' + (aiProvider !== 'openai' ? ' style="display:none"' : '') + '>';
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">OPENAI_API_KEY</label>' +
-      '<input type="password" data-setting-key="OPENAI_API_KEY" value="' + escapeHtml(openaiKey) + '"' +
-      ' placeholder="' + (openaiConfigured ? '(configured)' : '(not set)') + '">' +
-    '</div>';
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">OPENAI_MODEL</label>' +
-      '<select data-setting-key="AI_FALLBACK_MODEL" class="setting-select">' +
-        '<option value="gpt-4o"' + (openaiModel === 'gpt-4o' ? ' selected' : '') + '>GPT-4o (Balanced)</option>' +
-        '<option value="gpt-4o-mini"' + (openaiModel === 'gpt-4o-mini' ? ' selected' : '') + '>GPT-4o Mini (Fast, Cheap)</option>' +
-        '<option value="gpt-4.1"' + (openaiModel === 'gpt-4.1' ? ' selected' : '') + '>GPT-4.1 (Latest)</option>' +
-        '<option value="gpt-4.1-mini"' + (openaiModel === 'gpt-4.1-mini' ? ' selected' : '') + '>GPT-4.1 Mini (Latest Fast)</option>' +
-        '<option value="gpt-4.1-nano"' + (openaiModel === 'gpt-4.1-nano' ? ' selected' : '') + '>GPT-4.1 Nano (Cheapest)</option>' +
-      '</select>' +
-    '</div>';
-    html += '</div>';
-
-    // Fallback toggle
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">ENABLE_FALLBACK</label>' +
-      '<div class="toggle-wrapper">' +
-        '<input type="checkbox" data-setting-key="ENABLE_FALLBACK" id="setting-enable-fallback"' + (enableFallback ? ' checked' : '') + '>' +
-        '<label for="setting-enable-fallback">If primary fails, try the other provider</label>' +
-      '</div>' +
-    '</div>';
-
-    // Max tokens
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">MAX_TOKENS</label>' +
-      '<input type="number" data-setting-key="MAX_TOKENS" value="' + escapeHtml(String(maxTokens)) + '" min="1000" max="16000">' +
-    '</div>';
-
-    // Temperature
-    html += '<div class="settings-row">' +
-      '<label class="settings-label">TEMPERATURE</label>' +
-      '<input type="number" data-setting-key="TEMPERATURE" value="' + escapeHtml(String(temperature)) + '" min="0" max="2" step="0.1">' +
-    '</div>';
-
-    html += '</div>';
-
-    // ─── Standard groups ───
     var groupNames = Object.keys(standardGroups);
     for (var g = 0; g < groupNames.length; g++) {
       var groupName = groupNames[g];
@@ -2258,18 +2171,6 @@
     }
 
     container.innerHTML = html;
-
-    // Wire up AI provider toggle
-    var providerSelect = document.getElementById('setting-ai-provider');
-    if (providerSelect) {
-      providerSelect.addEventListener('change', function () {
-        var p = providerSelect.value;
-        var antDiv = document.getElementById('anthropic-settings');
-        var oaiDiv = document.getElementById('openai-settings');
-        if (antDiv) antDiv.style.display = p === 'anthropic' ? '' : 'none';
-        if (oaiDiv) oaiDiv.style.display = p === 'openai' ? '' : 'none';
-      });
-    }
   }
 
   function initTestButtons() {
@@ -2457,6 +2358,130 @@
       .catch(function (err) {
         content.innerHTML = '<p style="color:var(--red)">Failed to load WP logs: ' + escapeHtml(err.message) + '</p>';
       });
+  }
+
+  // ─── AI Settings (dedicated section) ──────────────────────────────────
+
+  function loadAISettings() {
+    fetchApi('/api/ai/settings')
+      .then(function (data) {
+        if (!data.success) return;
+        var el;
+        el = $('ai-provider'); if (el) el.value = data.provider || 'anthropic';
+        el = $('anthropic-key');
+        if (el && data.anthropicKey) el.placeholder = data.anthropicKey;
+        el = $('anthropic-model'); if (el) el.value = data.anthropicModel || 'claude-haiku-4-5-20251001';
+        el = $('openai-key');
+        if (el && data.openaiKey) el.placeholder = data.openaiKey;
+        el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o';
+        el = $('ai-fallback'); if (el) el.checked = data.enableFallback !== false;
+        el = $('ai-max-tokens'); if (el) el.value = data.maxTokens || 4096;
+        el = $('ai-temperature'); if (el) el.value = data.temperature !== undefined ? data.temperature : 0.7;
+        updateAIProviderVisibility();
+      })
+      .catch(function (err) {
+        console.error('Failed to load AI settings:', err);
+      });
+
+    // Wire events
+    var providerEl = $('ai-provider');
+    if (providerEl) providerEl.onchange = updateAIProviderVisibility;
+
+    var saveBtn = $('saveAiSettingsBtn');
+    if (saveBtn) saveBtn.onclick = saveAISettings;
+
+    var testAntBtn = $('testAnthropicBtn');
+    if (testAntBtn) testAntBtn.onclick = function () { testApiKey('anthropic'); };
+
+    var testOaiBtn = $('testOpenaiBtn');
+    if (testOaiBtn) testOaiBtn.onclick = function () { testApiKey('openai'); };
+  }
+
+  function saveAISettings() {
+    var banner = $('ai-status-banner');
+    var payload = {
+      provider: $('ai-provider') ? $('ai-provider').value : 'anthropic',
+      anthropicModel: $('anthropic-model') ? $('anthropic-model').value : undefined,
+      openaiModel: $('openai-model') ? $('openai-model').value : undefined,
+      enableFallback: $('ai-fallback') ? $('ai-fallback').checked : true,
+      maxTokens: $('ai-max-tokens') ? parseInt($('ai-max-tokens').value, 10) : undefined,
+      temperature: $('ai-temperature') ? parseFloat($('ai-temperature').value) : undefined,
+    };
+
+    // Only send API keys if user typed a new one
+    var antKeyInput = $('anthropic-key');
+    if (antKeyInput && antKeyInput.value && antKeyInput.value.length > 10) {
+      payload.anthropicKey = antKeyInput.value.trim();
+    }
+    var oaiKeyInput = $('openai-key');
+    if (oaiKeyInput && oaiKeyInput.value && oaiKeyInput.value.length > 10) {
+      payload.openaiKey = oaiKeyInput.value.trim();
+    }
+
+    fetchApi('/api/ai/settings', { method: 'POST', body: payload })
+      .then(function (data) {
+        if (banner) {
+          banner.style.display = 'block';
+          banner.style.background = 'rgba(16,185,129,0.15)';
+          banner.style.color = '#10b981';
+          banner.textContent = 'AI settings saved successfully!';
+          setTimeout(function () { banner.style.display = 'none'; }, 3000);
+        }
+        showToast('AI settings saved', 'success');
+      })
+      .catch(function (err) {
+        if (banner) {
+          banner.style.display = 'block';
+          banner.style.background = 'rgba(239,68,68,0.15)';
+          banner.style.color = '#ef4444';
+          banner.textContent = 'Save failed: ' + err.message;
+        }
+        showToast('AI settings save failed: ' + err.message, 'error');
+      });
+  }
+
+  function testApiKey(provider) {
+    var statusEl = $(provider + '-key-status');
+    var keyInput = $(provider + '-key');
+    var apiKey = keyInput ? keyInput.value.trim() : '';
+
+    if (!apiKey || apiKey.length < 10) {
+      if (statusEl) { statusEl.textContent = 'Enter an API key first'; statusEl.style.color = '#f59e0b'; }
+      return;
+    }
+
+    if (statusEl) { statusEl.textContent = 'Testing...'; statusEl.style.color = '#888'; }
+
+    fetchApi('/api/ai/test', { method: 'POST', body: { provider: provider, apiKey: apiKey } })
+      .then(function (data) {
+        if (data.success) {
+          if (statusEl) { statusEl.textContent = 'Key is valid! Response: ' + (data.response || 'OK'); statusEl.style.color = '#10b981'; }
+        } else {
+          if (statusEl) { statusEl.textContent = 'Invalid: ' + (data.error || 'Unknown error'); statusEl.style.color = '#ef4444'; }
+        }
+      })
+      .catch(function (err) {
+        if (statusEl) { statusEl.textContent = 'Test failed: ' + err.message; statusEl.style.color = '#ef4444'; }
+      });
+  }
+
+  function updateAIProviderVisibility() {
+    var provider = $('ai-provider') ? $('ai-provider').value : 'anthropic';
+    var antBlock = $('anthropic-settings');
+    var oaiBlock = $('openai-settings');
+
+    // Show both blocks so user can configure both keys for fallback
+    if (antBlock) antBlock.style.display = 'block';
+    if (oaiBlock) oaiBlock.style.display = 'block';
+
+    // Highlight primary
+    if (provider === 'anthropic') {
+      if (antBlock) { antBlock.style.borderLeft = '3px solid #a78bfa'; antBlock.style.opacity = '1'; }
+      if (oaiBlock) { oaiBlock.style.borderLeft = '3px solid #333'; oaiBlock.style.opacity = '0.7'; }
+    } else {
+      if (oaiBlock) { oaiBlock.style.borderLeft = '3px solid #10b981'; oaiBlock.style.opacity = '1'; }
+      if (antBlock) { antBlock.style.borderLeft = '3px solid #333'; antBlock.style.opacity = '0.7'; }
+    }
   }
 
   function initWpDiagButtons() {

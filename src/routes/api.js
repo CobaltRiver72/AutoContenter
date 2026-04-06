@@ -388,6 +388,56 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── AI Settings Routes ────────────────────────────────────────────────────
+
+  router.get('/ai/settings', function (req, res) {
+    try {
+      var settings = rewriter.getSettings();
+      res.json({ success: true, provider: settings.provider, anthropicKey: settings.anthropicKey, anthropicModel: settings.anthropicModel, openaiKey: settings.openaiKey, openaiModel: settings.openaiModel, enableFallback: settings.enableFallback, maxTokens: settings.maxTokens, temperature: settings.temperature, models: settings.models });
+    } catch (err) {
+      logger.error('api', 'Get AI settings failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/ai/settings', function (req, res) {
+    try {
+      var body = req.body || {};
+      rewriter.updateSettings({
+        provider: body.provider,
+        anthropicKey: body.anthropicKey,
+        anthropicModel: body.anthropicModel,
+        openaiKey: body.openaiKey,
+        openaiModel: body.openaiModel,
+        enableFallback: body.enableFallback === true || body.enableFallback === 'true',
+        maxTokens: body.maxTokens ? parseInt(body.maxTokens, 10) : undefined,
+        temperature: body.temperature !== undefined ? parseFloat(body.temperature) : undefined,
+      });
+      res.json({ success: true, message: 'AI settings saved' });
+    } catch (err) {
+      logger.error('api', 'Save AI settings failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/ai/test', async function (req, res) {
+    try {
+      var body = req.body || {};
+      if (!body.provider || !body.apiKey) {
+        return res.status(400).json({ success: false, error: 'Provider and API key required' });
+      }
+      var result = await rewriter.testConnection(body.provider, body.apiKey);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.get('/ai/models', function (req, res) {
+    var AI_MODELS = require('../modules/rewriter').AI_MODELS;
+    res.json({ success: true, models: AI_MODELS });
+  });
+
   // ─── POST /api/clusters/:id/publish ───────────────────────────────────────
 
   router.post('/clusters/:id/publish', function (req, res) {

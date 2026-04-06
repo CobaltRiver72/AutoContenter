@@ -268,6 +268,81 @@
       <!-- Settings -->
       <section class="page hidden" id="page-settings">
         <h2 class="page-title">Settings</h2>
+
+        <!-- AI Rewrite Models (dedicated section with own save) -->
+        <div class="settings-form" id="ai-settings-section">
+          <div class="settings-group">
+            <div class="settings-group-title">AI Rewrite Models</div>
+            <div id="ai-status-banner" style="display:none; padding:10px 15px; border-radius:6px; margin-bottom:15px; font-size:13px;"></div>
+            <div class="settings-row">
+              <label class="settings-label">Primary Provider</label>
+              <select id="ai-provider" class="setting-select">
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (ChatGPT)</option>
+              </select>
+            </div>
+            <div id="anthropic-settings" class="provider-settings-block">
+              <h4 style="color:#a78bfa; margin:15px 0 10px; font-size:14px;">Anthropic (Claude)</h4>
+              <div class="settings-row">
+                <label class="settings-label">API Key</label>
+                <div style="display:flex; gap:8px;">
+                  <input type="password" id="anthropic-key" placeholder="sk-ant-api03-..." style="flex:1;" />
+                  <button class="btn btn-sm btn-secondary" id="testAnthropicBtn">Test</button>
+                </div>
+                <small id="anthropic-key-status" style="color:#888; font-size:11px; display:block; margin-top:4px;"></small>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Model</label>
+                <select id="anthropic-model" class="setting-select">
+                  <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 &mdash; Fast &amp; Cheap</option>
+                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4 &mdash; Balanced</option>
+                  <option value="claude-opus-4-20250514">Claude Opus 4 &mdash; Best Quality</option>
+                </select>
+              </div>
+            </div>
+            <div id="openai-settings" class="provider-settings-block">
+              <h4 style="color:#10b981; margin:15px 0 10px; font-size:14px;">OpenAI (ChatGPT)</h4>
+              <div class="settings-row">
+                <label class="settings-label">API Key</label>
+                <div style="display:flex; gap:8px;">
+                  <input type="password" id="openai-key" placeholder="sk-..." style="flex:1;" />
+                  <button class="btn btn-sm btn-secondary" id="testOpenaiBtn">Test</button>
+                </div>
+                <small id="openai-key-status" style="color:#888; font-size:11px; display:block; margin-top:4px;"></small>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Model</label>
+                <select id="openai-model" class="setting-select">
+                  <option value="gpt-4o">GPT-4o &mdash; Balanced</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini &mdash; Fast &amp; Cheap</option>
+                  <option value="gpt-4.1">GPT-4.1 &mdash; Latest</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 Mini &mdash; Latest Fast</option>
+                  <option value="gpt-4.1-nano">GPT-4.1 Nano &mdash; Cheapest</option>
+                  <option value="o3">O3 &mdash; Reasoning</option>
+                  <option value="o3-mini">O3 Mini &mdash; Reasoning Fast</option>
+                  <option value="o4-mini">O4 Mini &mdash; Latest Reasoning</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-row" style="margin-top:15px;">
+              <label style="display:flex; align-items:center; gap:10px; cursor:pointer; color:var(--text-secondary);">
+                <input type="checkbox" id="ai-fallback" checked style="width:18px; height:18px; accent-color:#6c63ff;" />
+                Enable fallback &mdash; if primary fails, try the other provider
+              </label>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Max Tokens</label>
+              <input type="number" id="ai-max-tokens" value="4096" min="1000" max="16000" step="500" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Temperature</label>
+              <input type="number" id="ai-temperature" value="0.7" min="0" max="2" step="0.1" />
+            </div>
+            <button class="btn btn-purple btn-full" id="saveAiSettingsBtn" style="margin-top:15px;">Save AI Settings</button>
+          </div>
+        </div>
+
+        <!-- Other Settings (dynamically rendered) -->
         <div id="settingsForm" class="settings-form">
           <p class="placeholder-text">Loading...</p>
         </div>
@@ -389,20 +464,22 @@
               </label>
               <div class="editor-ai-section">
                 <div class="editor-ai-title">AI Rewrite Options</div>
-                <label>AI Provider
-                  <select id="editor-provider" class="setting-select">
-                    <option value="default">Use Default (from Settings)</option>
-                    <option value="anthropic">Anthropic (Claude)</option>
-                    <option value="openai">OpenAI (GPT)</option>
-                  </select>
-                </label>
-                <div id="editor-model-choice" style="display:none;">
-                  <label>Model
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                  <div>
+                    <label style="font-size:12px; color:#888; display:block; margin-bottom:4px;">AI Provider</label>
+                    <select id="editor-provider" class="setting-select">
+                      <option value="default">Default (from Settings)</option>
+                      <option value="anthropic">Anthropic (Claude)</option>
+                      <option value="openai">OpenAI (ChatGPT)</option>
+                    </select>
+                  </div>
+                  <div id="editor-model-choice" style="display:none;">
+                    <label style="font-size:12px; color:#888; display:block; margin-bottom:4px;">Model</label>
                     <select id="editor-model" class="setting-select"></select>
-                  </label>
+                  </div>
                 </div>
                 <label>Custom AI Instructions (optional)
-                  <textarea id="setting-custom-prompt" rows="4" placeholder="Add special instructions for the AI rewriter."></textarea>
+                  <textarea id="setting-custom-prompt" rows="3" placeholder="e.g., Write in Hindi, add FAQ section, focus on SEO for 'keyword'..."></textarea>
                 </label>
               </div>
               <button type="button" class="btn btn-purple btn-full" id="editorRewriteBtn">&#129302; Rewrite with AI</button>
