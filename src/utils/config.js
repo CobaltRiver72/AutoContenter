@@ -18,7 +18,7 @@ var REQUIRED_VARS = [
 ];
 
 var DEFAULTS = {
-  AI_PRIMARY_MODEL: 'claude-sonnet-4-20250514',
+  AI_PRIMARY_MODEL: 'claude-haiku-4-5-20251001',
   AI_FALLBACK_MODEL: 'gpt-4o',
   MIN_SOURCES_THRESHOLD: '2',
   SIMILARITY_THRESHOLD: '0.35',
@@ -127,9 +127,22 @@ function buildConfig() {
     }
   }
 
-  // Derived convenience values
-  config.DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
-  config.DB_PATH = path.join(config.DATA_DIR, 'autopub.db');
+  // Derived convenience values — use persistent path to survive redeployments
+  if (process.env.DB_PATH) {
+    config.DB_PATH = process.env.DB_PATH;
+    config.DATA_DIR = path.dirname(config.DB_PATH);
+  } else if (process.env.DATA_DIR) {
+    config.DATA_DIR = process.env.DATA_DIR;
+    config.DB_PATH = path.join(config.DATA_DIR, 'autopub.db');
+  } else {
+    var homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    if (homeDir) {
+      config.DATA_DIR = path.join(homeDir, 'hdf-data');
+    } else {
+      config.DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
+    }
+    config.DB_PATH = path.join(config.DATA_DIR, 'autopub.db');
+  }
   config.LOG_PATH = path.join(config.DATA_DIR, 'app.log');
   config.MISSING_REQUIRED = missing;
   config.IS_CONFIGURED = missing.length === 0;

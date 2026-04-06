@@ -180,7 +180,15 @@
   // ─── Router ─────────────────────────────────────────────────────────────
 
   function navigateTo(page) {
+    // Clear timers from the previous page before switching
+    clearPageTimers();
+
     state.currentPage = page;
+
+    // Keep URL hash in sync
+    if (window.location.hash.slice(1) !== page) {
+      window.location.hash = page;
+    }
 
     // Update nav
     var links = $$('.nav-link[data-page]');
@@ -188,7 +196,7 @@
       links[i].classList.toggle('active', links[i].getAttribute('data-page') === page);
     }
 
-    // Show/hide pages
+    // Hide ALL pages, then show the target
     var pages = $$('.page');
     for (var j = 0; j < pages.length; j++) {
       var pageId = pages[j].id.replace('page-', '');
@@ -216,10 +224,25 @@
     var hash = window.location.hash.slice(1) || 'overview';
     navigateTo(hash);
 
+    // Handle browser back/forward
     window.addEventListener('hashchange', function () {
       var hash = window.location.hash.slice(1) || 'overview';
-      navigateTo(hash);
+      if (hash !== state.currentPage) {
+        navigateTo(hash);
+      }
     });
+
+    // Explicit click handlers on sidebar nav links (belt-and-suspenders)
+    var navLinks = $$('.nav-link[data-page]');
+    for (var i = 0; i < navLinks.length; i++) {
+      navLinks[i].addEventListener('click', function (e) {
+        var page = this.getAttribute('data-page');
+        if (page) {
+          e.preventDefault();
+          navigateTo(page);
+        }
+      });
+    }
   }
 
   // ─── Mobile Sidebar ────────────────────────────────────────────────────
