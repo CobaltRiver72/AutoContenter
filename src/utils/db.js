@@ -218,6 +218,19 @@ function runMigrations() {
       db.exec('ALTER TABLE drafts ADD COLUMN is_partial INTEGER DEFAULT 0');
     } catch (e) { /* already exists */ }
 
+    // Add AI tracking columns to drafts
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN ai_provider TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN ai_tokens_used INTEGER DEFAULT 0');
+    } catch (e) { /* already exists */ }
+
+    // Add WP media tracking column to drafts
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN wp_media_id INTEGER DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);

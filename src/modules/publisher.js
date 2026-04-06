@@ -205,8 +205,30 @@ class WordPressPublisher {
   async publish(rewrittenArticle, cluster, db) {
     var wpImageId = null;
 
-    // Image upload disabled for now — focus on getting the post created first
-    // TODO: Re-enable image upload once WP connection is confirmed working
+    // Step 1: Upload featured image (if available)
+    var featuredImageUrl = rewrittenArticle.featuredImage || null;
+
+    // Try to extract featured image from cluster articles
+    if (!featuredImageUrl && cluster && cluster.articles) {
+      for (var ai = 0; ai < cluster.articles.length; ai++) {
+        var a = cluster.articles[ai];
+        if (a.featured_image) { featuredImageUrl = a.featured_image; break; }
+        var imgUrl = extractImageUrl(a.content_markdown || a.content || '');
+        if (imgUrl) { featuredImageUrl = imgUrl; break; }
+      }
+    }
+
+    if (featuredImageUrl) {
+      try {
+        this.logger.info('publisher', 'Uploading featured image: ' + featuredImageUrl.substring(0, 100) + '...');
+        var imageResult = await this.uploadImage(featuredImageUrl, rewrittenArticle.title || 'Featured Image');
+        wpImageId = imageResult.mediaId;
+        this.logger.info('publisher', 'Featured image uploaded: mediaId=' + wpImageId);
+      } catch (imgErr) {
+        // Non-blocking — publish without image
+        this.logger.warn('publisher', 'Featured image upload failed (continuing without): ' + imgErr.message);
+      }
+    }
 
     // Step 2: Build schema markup
     var siteName = '';

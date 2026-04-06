@@ -1256,6 +1256,7 @@ function createApiRouter(deps) {
             wordCount: draft.rewritten_word_count || 0,
             aiModel: draft.ai_model_used || 'manual',
             tokensUsed: 0,
+            featuredImage: draft.featured_image || null,
           };
 
           // Build a minimal cluster with articles for image extraction
@@ -1271,9 +1272,15 @@ function createApiRouter(deps) {
           // Use full publish pipeline: image upload + schema + post creation
           publisherMod.publish(rewrittenArticle, draftCluster, db).then(function (result) {
             publishUrl = result.wpPostUrl || '';
-            db.prepare("UPDATE drafts SET status = 'published', published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(id);
-            logger.info('api', 'Draft ' + id + ' published to WordPress: ' + publishUrl);
-            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId });
+            db.prepare(
+              "UPDATE drafts SET status = 'published', published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+            ).run(id);
+            // Store wp_media_id if image was uploaded
+            if (result.wpImageId) {
+              try { db.prepare("UPDATE drafts SET wp_media_id = ? WHERE id = ?").run(result.wpImageId, id); } catch (e) { /* ignore */ }
+            }
+            logger.info('api', 'Draft ' + id + ' published to WordPress: ' + publishUrl + (result.wpImageId ? ' (image: ' + result.wpImageId + ')' : ''));
+            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null });
           }).catch(function (err) {
             var detail = err.message || 'Unknown error';
             var statusCode = err.response ? err.response.status : null;
