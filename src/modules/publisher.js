@@ -205,21 +205,8 @@ class WordPressPublisher {
   async publish(rewrittenArticle, cluster, db) {
     var wpImageId = null;
 
-    // Step 1: Try to upload a featured image (non-blocking on failure)
-    try {
-      var primaryArticle = (cluster.articles && cluster.articles[0]) || {};
-      var imageUrl = primaryArticle.featured_image ||
-        extractImageUrl(primaryArticle.content_markdown || primaryArticle.content || '');
-
-      if (imageUrl) {
-        this.logger.info('publisher', 'Uploading featured image: ' + imageUrl);
-        var imageResult = await this.uploadImage(imageUrl, rewrittenArticle.title);
-        wpImageId = imageResult.mediaId;
-        this.logger.info('publisher', 'Featured image uploaded: mediaId=' + imageResult.mediaId);
-      }
-    } catch (imgErr) {
-      this.logger.warn('publisher', 'Featured image upload failed — continuing without image: ' + imgErr.message);
-    }
+    // Image upload disabled for now — focus on getting the post created first
+    // TODO: Re-enable image upload once WP connection is confirmed working
 
     // Step 2: Build schema markup
     var siteName = '';
