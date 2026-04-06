@@ -1687,6 +1687,14 @@
         // Settings tab
         $('setting-keyword').value = draft.target_keyword || '';
         $('setting-domain').value = draft.target_domain || '';
+        // Default to wordpress if WP credentials are configured, unless draft was explicitly set
+        var defaultPlatform = 'blogspot';
+        fetchApi('/api/wp-status').then(function (wpData) {
+          if (wpData && wpData.configured) defaultPlatform = 'wordpress';
+          $('setting-platform').value = draft.target_platform === 'blogspot' ? defaultPlatform : (draft.target_platform || defaultPlatform);
+        }).catch(function () {
+          $('setting-platform').value = draft.target_platform || 'blogspot';
+        });
         $('setting-platform').value = draft.target_platform || 'blogspot';
         $('setting-language').value = draft.target_language || 'en+hi';
         $('setting-custom-prompt').value = '';
@@ -1892,6 +1900,9 @@
 
         $('editor-status').textContent = 'PUBLISHING...';
         $('editor-status').style.background = '#f59e0b';
+
+        // Save editor settings first (platform, keyword, etc) then publish
+        saveEditorSettings();
 
         fetchApi('/api/drafts/' + currentDraftId + '/publish', {
           method: 'POST',

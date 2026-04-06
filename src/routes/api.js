@@ -918,9 +918,12 @@ function createApiRouter(deps) {
         return res.json({ success: true, draft_id: existing.id, message: 'Draft already exists' });
       }
 
+      var draftConfig = getConfig();
+      var draftPlatform = (draftConfig.WP_URL && draftConfig.WP_USERNAME && draftConfig.WP_APP_PASSWORD) ? 'wordpress' : 'blogspot';
+
       var result = db.prepare(
-        "INSERT INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, status, mode) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual')"
+        "INSERT INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual')"
       ).run(
         body.article_id || null,
         url,
@@ -929,7 +932,8 @@ function createApiRouter(deps) {
         body.content_markdown || '',
         body.language || null,
         body.page_category || null,
-        body.publish_time || null
+        body.publish_time || null,
+        draftPlatform
       );
 
       var draftId = result.lastInsertRowid;
@@ -1157,7 +1161,10 @@ function createApiRouter(deps) {
     try {
       var id = req.params.id;
       var body = req.body || {};
-      var platform = body.platform || 'blogspot';
+      // Default to wordpress if WP credentials are configured
+      var config = getConfig();
+      var wpConfigured = !!(config.WP_URL && config.WP_USERNAME && config.WP_APP_PASSWORD);
+      var platform = body.platform || (wpConfigured ? 'wordpress' : 'blogspot');
       var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
 
