@@ -1473,24 +1473,32 @@
     }
     actionsHTML += '<button class="btn btn-sm btn-danger" onclick="window.__deleteDraft(' + draft.id + ')">&#128465;</button>';
 
-    return '<div class="draft-card" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
-      '<div class="draft-header">' +
-        '<span class="draft-status-badge' + (isPulsing ? ' pulsing' : '') + '" style="background:' + statusColor + '">' +
-          escapeHtml(draft.status.toUpperCase()) +
-        '</span>' +
-        '<span class="draft-mode">' + (draft.mode === 'auto' ? '&#129302; Auto' : '&#128100; Manual') + '</span>' +
-        '<span class="draft-time">' + formatTime(draft.created_at) + '</span>' +
+    var imageHTML = '';
+    if (draft.featured_image) {
+      imageHTML = '<div class="draft-card-image"><img src="' + escapeHtml(draft.featured_image) + '" alt="" onerror="this.parentElement.style.display=\'none\'"></div>';
+    }
+
+    return '<div class="draft-card' + (draft.featured_image ? ' has-image' : '') + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
+      imageHTML +
+      '<div class="draft-card-body">' +
+        '<div class="draft-header">' +
+          '<span class="draft-status-badge' + (isPulsing ? ' pulsing' : '') + '" style="background:' + statusColor + '">' +
+            escapeHtml(draft.status.toUpperCase()) +
+          '</span>' +
+          '<span class="draft-mode">' + (draft.mode === 'auto' ? '&#129302; Auto' : '&#128100; Manual') + '</span>' +
+          '<span class="draft-time">' + formatTime(draft.created_at) + '</span>' +
+        '</div>' +
+        '<h3 class="draft-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</h3>' +
+        '<div class="draft-meta">' +
+          '<span class="domain-badge">' + escapeHtml(draft.source_domain || '--') + '</span>' +
+          (draft.source_language ? '<span class="domain-badge">' + escapeHtml(draft.source_language.toUpperCase()) + '</span>' : '') +
+          (draft.target_keyword ? '<span class="domain-badge" style="color:var(--green)">&#127919; ' + escapeHtml(draft.target_keyword) + '</span>' : '') +
+          (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + (draft.extracted_content || '').length + ' chars</span>' : '') +
+          (draft.extraction_status === 'failed' ? '<span style="color:var(--red);font-size:11px">&#10060; Extract failed</span>' : '') +
+        '</div>' +
+        (contentPreview ? '<p class="draft-preview">' + escapeHtml(truncate(contentPreview, 200)) + '</p>' : '') +
+        '<div class="draft-actions">' + actionsHTML + '</div>' +
       '</div>' +
-      '<h3 class="draft-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</h3>' +
-      '<div class="draft-meta">' +
-        '<span class="domain-badge">' + escapeHtml(draft.source_domain || '--') + '</span>' +
-        (draft.source_language ? '<span class="domain-badge">' + escapeHtml(draft.source_language.toUpperCase()) + '</span>' : '') +
-        (draft.target_keyword ? '<span class="domain-badge" style="color:var(--green)">&#127919; ' + escapeHtml(draft.target_keyword) + '</span>' : '') +
-        (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + (draft.extracted_content || '').length + ' chars</span>' : '') +
-        (draft.extraction_status === 'failed' ? '<span style="color:var(--red);font-size:11px">&#10060; Extract failed</span>' : '') +
-      '</div>' +
-      (contentPreview ? '<p class="draft-preview">' + escapeHtml(truncate(contentPreview, 200)) + '</p>' : '') +
-      '<div class="draft-actions">' + actionsHTML + '</div>' +
     '</div>';
   }
 
@@ -1599,13 +1607,39 @@
         $('editor-status').textContent = draft.status.toUpperCase();
         $('editor-status').style.background = getStatusColor(draft.status);
 
-        // Source tab
-        $('source-meta').innerHTML =
+        // Source tab — featured image + meta
+        var featImgHTML = '';
+        if (draft.featured_image) {
+          featImgHTML = '<div class="editor-featured-image">' +
+            '<img src="' + escapeHtml(draft.featured_image) + '" alt="Featured image" onerror="this.style.display=\'none\'">' +
+            '</div>';
+        }
+        featImgHTML += '<div class="editor-featured-url">' +
+          '<label><strong>Featured Image URL:</strong>' +
+          '<input type="text" id="editor-featured-input" value="' + escapeHtml(draft.featured_image || '') + '" placeholder="https://..." style="width:100%;margin-top:4px;padding:6px 10px;background:var(--bg-main);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:0.8rem">' +
+          '</label></div>';
+
+        $('source-meta').innerHTML = featImgHTML +
+          '<div style="margin-top:10px">' +
           '<strong>Source:</strong> <a href="' + escapeHtml(draft.source_url) + '" target="_blank" style="color:var(--accent)">' + escapeHtml(draft.source_domain || draft.source_url) + '</a>' +
           ' | <strong>Language:</strong> ' + escapeHtml(draft.source_language || '--') +
           ' | <strong>Category:</strong> ' + escapeHtml(draft.source_category || '--') +
           ' | <strong>Extraction:</strong> ' + escapeHtml(draft.extraction_status || '--') +
-          (draft.extracted_content ? ' | <strong>Length:</strong> ' + draft.extracted_content.length + ' chars' : '');
+          (draft.extracted_content ? ' | <strong>Length:</strong> ' + draft.extracted_content.length + ' chars' : '') +
+          '</div>';
+
+        // Save featured image on blur
+        var featInput = $('editor-featured-input');
+        if (featInput) {
+          featInput.addEventListener('change', function () {
+            fetchApi('/api/drafts/' + draftId, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ featured_image: featInput.value })
+            }).then(function () { showToast('Featured image updated', 'info'); })
+              .catch(function () { showToast('Failed to save image URL', 'error'); });
+          });
+        }
 
         $('source-content').textContent = draft.extracted_content || draft.source_content_markdown || 'No content extracted.';
 

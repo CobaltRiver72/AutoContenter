@@ -181,6 +181,7 @@ function runMigrations() {
         target_platform TEXT DEFAULT 'blogspot',
         target_language TEXT DEFAULT 'en+hi',
         schema_types TEXT DEFAULT 'NewsArticle,FAQPage,BreadcrumbList',
+        featured_image TEXT,
         rewritten_html TEXT,
         rewritten_title TEXT,
         rewritten_word_count INTEGER,
@@ -195,6 +196,11 @@ function runMigrations() {
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_url ON drafts(source_url)');
+
+    // Add featured_image column to drafts if it doesn't exist
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN featured_image TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
 
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {

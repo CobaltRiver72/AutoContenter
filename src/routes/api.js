@@ -883,7 +883,7 @@ function createApiRouter(deps) {
       var updates = [];
       var params = [];
 
-      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status'];
+      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status', 'featured_image'];
       for (var i = 0; i < fields.length; i++) {
         if (body[fields[i]] !== undefined) {
           updates.push(fields[i] + ' = ?');

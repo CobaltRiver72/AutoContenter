@@ -4,8 +4,72 @@ var axios = require('axios');
 var { JSDOM } = require('jsdom');
 var { Readability } = require('@mozilla/readability');
 
+// ─── Featured Image Extraction ──────────────────────────────────────────
+
+function resolveUrl(url, baseUrl) {
+  try {
+    if (!url) return null;
+    url = url.trim();
+    if (url.indexOf('//') === 0) return 'https:' + url;
+    if (url.indexOf('http') === 0) return url;
+    return new URL(url, baseUrl).href;
+  } catch (e) {
+    return url;
+  }
+}
+
+function extractFeaturedImage(document, sourceUrl) {
+  // Priority 1: Open Graph image
+  var ogImage = document.querySelector('meta[property="og:image"]');
+  if (ogImage && ogImage.getAttribute('content')) {
+    return resolveUrl(ogImage.getAttribute('content'), sourceUrl);
+  }
+
+  // Priority 2: Twitter card image
+  var twitterImage = document.querySelector('meta[name="twitter:image"]');
+  if (twitterImage && twitterImage.getAttribute('content')) {
+    return resolveUrl(twitterImage.getAttribute('content'), sourceUrl);
+  }
+
+  // Priority 3: Schema.org image in JSON-LD
+  var jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+  for (var s = 0; s < jsonLdScripts.length; s++) {
+    try {
+      var data = JSON.parse(jsonLdScripts[s].textContent);
+      var schemaImage = (data.image && data.image.url) || (Array.isArray(data.image) && (data.image[0].url || data.image[0])) || data.image || data.thumbnailUrl;
+      if (schemaImage && typeof schemaImage === 'string') {
+        return resolveUrl(schemaImage, sourceUrl);
+      }
+    } catch (e) { /* skip invalid JSON-LD */ }
+  }
+
+  // Priority 4: First large image in article body
+  var articleImages = document.querySelectorAll('article img, .article-body img, .story-body img, [role="main"] img, .post-content img');
+  for (var i = 0; i < articleImages.length; i++) {
+    var img = articleImages[i];
+    var src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+    if (src && src.indexOf('logo') === -1 && src.indexOf('icon') === -1 && src.indexOf('avatar') === -1 && src.indexOf('ads') === -1) {
+      var width = parseInt(img.getAttribute('width') || '0', 10);
+      if (width === 0 || width >= 300) {
+        return resolveUrl(src, sourceUrl);
+      }
+    }
+  }
+
+  // Priority 5: Any meta image
+  var metaImage = document.querySelector('meta[name="image"]') || document.querySelector('link[rel="image_src"]');
+  if (metaImage) {
+    var content = metaImage.getAttribute('content') || metaImage.getAttribute('href');
+    if (content) return resolveUrl(content, sourceUrl);
+  }
+
+  return null;
+}
+
+// ─── Content Extraction ─────────────────────────────────────────────────
+
 /**
- * Extract full body content for a single draft.
+ * Extract full body content + featured image for a single draft.
  * Uses the existing ContentExtractor module if available,
  * otherwise does a direct fetch + Readability parse.
  *
@@ -23,29 +87,7 @@ async function extractDraftContent(draftId, deps) {
   db.prepare("UPDATE drafts SET extraction_status = 'extracting', updated_at = datetime('now') WHERE id = ?").run(draftId);
 
   try {
-    // Try existing ContentExtractor module first
-    if (extractor && extractor.enabled && typeof extractor._fetchAndExtract === 'function') {
-      var extracted = await extractor._fetchAndExtract(draft.source_url);
-
-      if (extracted && extracted.textContent && extracted.textContent.length > 100) {
-        db.prepare(`
-          UPDATE drafts SET
-            extracted_content = ?,
-            extracted_title = ?,
-            extracted_excerpt = ?,
-            extracted_byline = ?,
-            extraction_status = 'success',
-            status = 'draft',
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).run(extracted.textContent, extracted.title, extracted.excerpt, extracted.byline, draftId);
-
-        logger.info('draft-helpers', 'Draft ' + draftId + ': Extracted ' + extracted.textContent.length + ' chars from ' + draft.source_domain);
-        return;
-      }
-    }
-
-    // Fallback: Direct fetch with jsdom + Readability
+    // Always fetch raw HTML ourselves for featured image extraction
     var response = await axios.get(draft.source_url, {
       timeout: 15000,
       maxContentLength: 5 * 1024 * 1024,
@@ -57,7 +99,19 @@ async function extractDraftContent(draftId, deps) {
       maxRedirects: 5,
     });
 
-    var dom = new JSDOM(response.data, { url: draft.source_url });
+    var rawHtml = response.data;
+
+    // Extract featured image from a FRESH DOM (before Readability mutates it)
+    var imageDom = new JSDOM(rawHtml, { url: draft.source_url });
+    var featuredImage = null;
+    try {
+      featuredImage = extractFeaturedImage(imageDom.window.document, draft.source_url);
+    } finally {
+      imageDom.window.close();
+    }
+
+    // Now extract body content
+    var dom = new JSDOM(rawHtml, { url: draft.source_url });
     try {
       var reader = new Readability(dom.window.document, { charThreshold: 100 });
       var article = reader.parse();
@@ -69,23 +123,25 @@ async function extractDraftContent(draftId, deps) {
             extracted_title = ?,
             extracted_excerpt = ?,
             extracted_byline = ?,
+            featured_image = ?,
             extraction_status = 'success',
             status = 'draft',
             updated_at = datetime('now')
           WHERE id = ?
-        `).run(article.textContent, article.title, article.excerpt, article.byline, draftId);
+        `).run(article.textContent, article.title, article.excerpt, article.byline, featuredImage, draftId);
 
-        logger.info('draft-helpers', 'Draft ' + draftId + ': Fallback extracted ' + article.textContent.length + ' chars');
+        logger.info('draft-helpers', 'Draft ' + draftId + ': Extracted ' + article.textContent.length + ' chars' + (featuredImage ? ' + image' : '') + ' from ' + draft.source_domain);
       } else {
         // Use Firehose content as fallback
         db.prepare(`
           UPDATE drafts SET
             extracted_content = COALESCE(source_content_markdown, source_title),
+            featured_image = ?,
             extraction_status = 'fallback',
             status = 'draft',
             updated_at = datetime('now')
           WHERE id = ?
-        `).run(draftId);
+        `).run(featuredImage, draftId);
 
         logger.warn('draft-helpers', 'Draft ' + draftId + ': Extraction returned insufficient content, using fallback');
       }
