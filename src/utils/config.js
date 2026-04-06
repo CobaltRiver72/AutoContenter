@@ -29,7 +29,7 @@ var DEFAULTS = {
   TRENDS_POLL_MINUTES: '15',
   WP_AUTHOR_ID: '1',
   WP_DEFAULT_CATEGORY: '1',
-  WP_POST_STATUS: 'publish',
+  WP_POST_STATUS: 'draft',
   TIER1_SOURCES: 'ndtv.com,hindustantimes.com,timesofindia.indiatimes.com,thehindu.com,indianexpress.com',
   TIER2_SOURCES: 'livemint.com,business-standard.com,deccanherald.com,firstpost.com,news18.com',
   TIER3_SOURCES: 'zeenews.india.com,republicworld.com,wionews.com,aninews.in',
