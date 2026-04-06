@@ -1,0 +1,32 @@
+{
+  "name": "hdf-news-autopub",
+  "version": "1.0.0",
+  "description": "Ahrefs Firehose + Google Trends → AI Rewrite → WordPress Auto-Publisher",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "eventsource": "^2.0.2",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "google-trends-api": "^4.9.2",
+    "natural": "^8.0.1",
+    "axios": "^1.7.0",
+    "better-sqlite3": "^11.0.0",
+    "node-cron": "^3.0.3",
+    "winston": "^3.14.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "dotenv": "^16.4.0",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.1.5",
+    "bcryptjs": "^2.4.3",
+    "jsdom": "^24.0.0",
+    "@mozilla/readability": "^0.5.0"
+  }
+}

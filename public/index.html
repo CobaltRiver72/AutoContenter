@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HDF AutoPub Dashboard</title>
+  <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">HDF <span class="logo-accent">AutoPub</span></div>
+      <button class="sidebar-close" id="sidebarClose" aria-label="Close sidebar">&times;</button>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#overview" class="nav-link active" data-page="overview">
+        <span class="nav-icon">&#9632;</span> Overview
+      </a>
+      <a href="#feed" class="nav-link" data-page="feed">
+        <span class="nav-icon">&#9881;</span> Live Feed
+      </a>
+      <a href="#rules" class="nav-link" data-page="rules">
+        <span class="nav-icon">&#9733;</span> Firehose Rules
+      </a>
+      <a href="#trends" class="nav-link" data-page="trends">
+        <span class="nav-icon">&#9650;</span> Trends
+      </a>
+      <a href="#clusters" class="nav-link" data-page="clusters">
+        <span class="nav-icon">&#10070;</span> Clusters
+      </a>
+      <a href="#published" class="nav-link" data-page="published">
+        <span class="nav-icon">&#10003;</span> Published
+      </a>
+      <a href="#settings" class="nav-link" data-page="settings">
+        <span class="nav-icon">&#9881;</span> Settings
+      </a>
+      <a href="#logs" class="nav-link" data-page="logs">
+        <span class="nav-icon">&#9783;</span> Logs
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/logout" class="nav-link logout-link">
+        <span class="nav-icon">&#10132;</span> Logout
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main wrapper -->
+  <div class="main-wrapper">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <button class="hamburger" id="hamburger" aria-label="Toggle sidebar">&#9776;</button>
+      <div class="topbar-status">
+        <span class="status-item">
+          <span class="status-dot" id="firehoseStatus" title="Firehose"></span>
+          Firehose
+        </span>
+        <span class="status-item">
+          <span class="status-dot" id="trendsStatus" title="Trends"></span>
+          Trends
+        </span>
+      </div>
+      <div class="topbar-info">
+        <span id="lastTrendsPoll" class="topbar-meta" title="Last trends poll">--</span>
+        <span id="bufferCount" class="topbar-meta" title="Articles in buffer">Buffer: --</span>
+      </div>
+    </header>
+
+    <!-- Page sections -->
+    <main class="content">
+
+      <!-- Overview -->
+      <section class="page" id="page-overview">
+        <h2 class="page-title">Overview</h2>
+
+        <!-- Module Health Panel -->
+        <div class="health-panel" id="healthPanel">
+          <div class="health-card" id="health-firehose"><div class="health-dot"></div><div class="health-label">Firehose</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-trends"><div class="health-dot"></div><div class="health-label">Trends</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-buffer"><div class="health-dot"></div><div class="health-label">Buffer</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-extractor"><div class="health-dot"></div><div class="health-label">Extractor</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-rewriter"><div class="health-dot"></div><div class="health-label">Rewriter</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-publisher"><div class="health-dot"></div><div class="health-label">Publisher</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-scheduler"><div class="health-dot"></div><div class="health-label">Scheduler</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-infranodus"><div class="health-dot"></div><div class="health-label">InfraNodus</div><div class="health-detail">--</div></div>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat-card">
+            <div class="stat-number" id="statArticlesToday">--</div>
+            <div class="stat-label">Articles Today</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" id="statClustersToday">--</div>
+            <div class="stat-label">Clusters Today</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" id="statPublishedToday">--</div>
+            <div class="stat-label">Published Today</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" id="statTotalArticles">--</div>
+            <div class="stat-label">Total Articles</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Articles per Hour (Last 24h)</h3>
+          <div id="hourlyChart" class="chart-container"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">System Status</h3>
+          <div id="systemStatus" class="status-table-wrap">
+            <p class="placeholder-text">Loading...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live Feed -->
+      <section class="page hidden" id="page-feed">
+        <div class="page-header">
+          <h2 class="page-title">Live Feed</h2>
+          <div class="page-actions">
+            <span class="feed-counter" id="feedCounter">0 articles</span>
+            <button class="btn btn-sm" id="feedPauseBtn">Pause</button>
+            <button class="btn btn-sm btn-secondary" id="feedClearBtn">Clear</button>
+          </div>
+        </div>
+        <div id="feedList" class="feed-list"></div>
+      </section>
+
+      <!-- Firehose Rules -->
+      <section class="page hidden" id="page-rules">
+        <div class="page-header">
+          <h2 class="page-title">Firehose Rules</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm" id="rulesRefreshBtn">Refresh</button>
+          </div>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="card" id="firehoseConfigCard">
+          <h3 class="card-title">Firehose Connection</h3>
+          <div class="firehose-config">
+            <div class="settings-row">
+              <label class="settings-label">API Key</label>
+              <input type="password" id="firehoseTokenInput" placeholder="fhm_ (management key) or fh_ (tap token)" style="flex:1">
+              <button class="btn btn-sm" id="firehoseSaveBtn">Save &amp; Connect</button>
+            </div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:4px;padding-left:140px" id="firehoseKeyHint">
+              Paste your Management Key (fhm_...) and we'll auto-discover your tap token. Or paste a Tap Token (fh_...) directly.
+            </div>
+            <div class="firehose-status-row" id="firehoseStatusRow">
+              <span class="status-dot" id="firehoseConnDot"></span>
+              <span id="firehoseConnText">Checking...</span>
+              <span id="firehoseTokenPreview" style="color:var(--text-muted);font-size:12px;margin-left:auto"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rules List -->
+        <div class="card">
+          <h3 class="card-title">Active Rules</h3>
+          <div id="rulesList">
+            <p class="placeholder-text">Loading...</p>
+          </div>
+        </div>
+
+        <!-- Add Rule -->
+        <div class="card">
+          <h3 class="card-title">Add New Rule</h3>
+          <div class="rule-form">
+            <div class="settings-row">
+              <label class="settings-label">Template</label>
+              <select id="ruleTemplate" style="flex:1">
+                <option value="">-- Select a template (optional) --</option>
+                <option value="cricket">Cricket / IPL</option>
+                <option value="finance">Finance / Markets</option>
+                <option value="entertainment">Entertainment / Bollywood</option>
+                <option value="technology">Technology / Phones</option>
+                <option value="politics">Politics / Government</option>
+                <option value="automotive">Automotive</option>
+                <option value="jobs">Government Jobs / Exams</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Tag (label)</label>
+              <input type="text" id="ruleTagInput" placeholder="e.g. cricket-news" style="flex:1">
+            </div>
+            <div class="settings-row" style="align-items:flex-start">
+              <label class="settings-label" style="padding-top:8px">Lucene Query</label>
+              <textarea id="ruleQueryInput" rows="4" placeholder='e.g. page_category:"/News" AND language:"en" AND title:cricket' style="flex:1;resize:vertical;font-family:monospace;font-size:12px"></textarea>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Quality Filter</label>
+              <label style="display:flex;align-items:center;gap:6px;color:var(--text-secondary)">
+                <input type="checkbox" id="ruleQualityInput" checked> Enabled (recommended)
+              </label>
+            </div>
+            <div style="margin-top:12px">
+              <button class="btn" id="ruleAddBtn">Add Rule</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Trends -->
+      <section class="page hidden" id="page-trends">
+        <div class="page-header">
+          <h2 class="page-title">Trends</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm" id="trendsPollBtn">Poll Now</button>
+          </div>
+        </div>
+        <div id="trendsDisabledNotice" class="card" style="display:none">
+          <p style="color:var(--yellow);font-weight:500;margin-bottom:8px">Google Trends polling is disabled.</p>
+          <p style="color:var(--text-secondary);font-size:13px">Enable it in Settings. Note: This feature may not work on server IPs due to Google's rate limiting. It works best when running locally.</p>
+        </div>
+        <div class="trends-grid">
+          <div class="card">
+            <h3 class="card-title">Real-Time Trends</h3>
+            <div id="trendsRealtime" class="trend-list">
+              <p class="placeholder-text">Loading...</p>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Daily Trends</h3>
+            <div id="trendsDaily" class="trend-list">
+              <p class="placeholder-text">Loading...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Clusters -->
+      <section class="page hidden" id="page-clusters">
+        <div class="page-header">
+          <h2 class="page-title">Clusters</h2>
+          <div class="page-actions">
+            <select id="clusterStatusFilter" class="filter-select">
+              <option value="">All Status</option>
+              <option value="detected">Detected</option>
+              <option value="queued">Queued</option>
+              <option value="publishing">Publishing</option>
+              <option value="published">Published</option>
+              <option value="skipped">Skipped</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+        </div>
+        <div id="clustersList" class="clusters-list">
+          <p class="placeholder-text">Loading...</p>
+        </div>
+        <div id="clustersPagination" class="pagination"></div>
+      </section>
+
+      <!-- Published -->
+      <section class="page hidden" id="page-published">
+        <h2 class="page-title">Published Articles</h2>
+        <div id="publishedList" class="table-wrap">
+          <p class="placeholder-text">Loading...</p>
+        </div>
+        <div id="publishedPagination" class="pagination"></div>
+      </section>
+
+      <!-- Settings -->
+      <section class="page hidden" id="page-settings">
+        <h2 class="page-title">Settings</h2>
+        <div id="settingsForm" class="settings-form">
+          <p class="placeholder-text">Loading...</p>
+        </div>
+        <div class="settings-actions" id="settingsActions" style="display:none;">
+          <button class="btn" id="settingsSaveBtn">Save Settings</button>
+          <div class="settings-tests">
+            <button class="btn btn-sm btn-secondary" id="testFirehoseBtn">Test Firehose</button>
+            <button class="btn btn-sm btn-secondary" id="testTrendsBtn">Test Trends</button>
+            <button class="btn btn-sm btn-secondary" id="testWpBtn">Test WordPress</button>
+            <button class="btn btn-sm btn-secondary" id="testInfranodusBtn">Test InfraNodus</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Logs -->
+      <section class="page hidden" id="page-logs">
+        <div class="page-header">
+          <h2 class="page-title">Logs</h2>
+          <div class="page-actions">
+            <select id="logModuleFilter" class="filter-select">
+              <option value="">All Modules</option>
+              <option value="firehose">Firehose</option>
+              <option value="trends">Trends</option>
+              <option value="buffer">Buffer</option>
+              <option value="similarity">Similarity</option>
+              <option value="rewriter">Rewriter</option>
+              <option value="publisher">Publisher</option>
+              <option value="scheduler">Scheduler</option>
+              <option value="api">API</option>
+            </select>
+            <select id="logLevelFilter" class="filter-select">
+              <option value="">All Levels</option>
+              <option value="error">Error</option>
+              <option value="warn">Warn</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+            </select>
+          </div>
+        </div>
+        <div id="logsList" class="logs-container">
+          <p class="placeholder-text">Loading...</p>
+        </div>
+        <div id="logsPagination" class="pagination"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Editor Overlay -->
+  <div id="editor-overlay" class="editor-overlay" style="display:none;">
+    <div class="editor-container">
+      <div class="editor-topbar">
+        <button class="editor-back-btn" id="editorBackBtn">&larr; Back</button>
+        <h2 class="editor-title" id="editor-title">Draft Editor</h2>
+        <span class="editor-status" id="editor-status">DRAFT</span>
+      </div>
+      <div class="editor-panels">
+        <div class="editor-left">
+          <div class="editor-tabs">
+            <button class="editor-tab active" data-panel="left" data-tab="source">Source</button>
+            <button class="editor-tab" data-panel="left" data-tab="settings">Settings</button>
+          </div>
+          <div class="editor-tab-content" id="tab-source">
+            <div class="source-meta" id="source-meta"></div>
+            <div class="source-content" id="source-content"></div>
+          </div>
+          <div class="editor-tab-content" id="tab-settings" style="display:none;">
+            <form id="draft-settings-form">
+              <label>Target Keyword
+                <input type="text" id="setting-keyword" placeholder="e.g., OnePlus Nord 6 Price in India" />
+              </label>
+              <label>Target Domain
+                <input type="text" id="setting-domain" placeholder="e.g., keyword-slug.blogspot.com" />
+              </label>
+              <label>Platform
+                <select id="setting-platform">
+                  <option value="blogspot">Blogspot</option>
+                  <option value="wordpress">WordPress</option>
+                  <option value="github_pages">GitHub Pages</option>
+                  <option value="s3">S3 Static</option>
+                </select>
+              </label>
+              <label>Language
+                <select id="setting-language">
+                  <option value="en+hi">English + Hindi</option>
+                  <option value="en">English Only</option>
+                  <option value="hi">Hindi Only</option>
+                </select>
+              </label>
+              <label>Schema Types
+                <div class="checkbox-group">
+                  <label><input type="checkbox" value="NewsArticle" checked /> NewsArticle</label>
+                  <label><input type="checkbox" value="FAQPage" checked /> FAQPage</label>
+                  <label><input type="checkbox" value="BreadcrumbList" checked /> BreadcrumbList</label>
+                  <label><input type="checkbox" value="Product" /> Product</label>
+                  <label><input type="checkbox" value="Event" /> Event</label>
+                </div>
+              </label>
+              <label>Custom AI Instructions (optional)
+                <textarea id="setting-custom-prompt" rows="4" placeholder="Add special instructions for the AI rewriter."></textarea>
+              </label>
+              <button type="button" class="btn btn-purple btn-full" id="editorRewriteBtn">&#129302; Rewrite with AI</button>
+            </form>
+          </div>
+        </div>
+        <div class="editor-right">
+          <div class="editor-tabs">
+            <button class="editor-tab active" data-panel="right" data-tab="ai-output">AI Output</button>
+            <button class="editor-tab" data-panel="right" data-tab="html-editor">HTML Editor</button>
+            <button class="editor-tab" data-panel="right" data-tab="preview">Preview</button>
+          </div>
+          <div class="editor-tab-content" id="tab-ai-output">
+            <div id="ai-output-content" class="ai-output-content">
+              <p class="empty-state">Click "&#129302; Rewrite with AI" to generate content</p>
+            </div>
+          </div>
+          <div class="editor-tab-content" id="tab-html-editor" style="display:none;">
+            <textarea id="html-code-editor" class="code-editor" spellcheck="false" placeholder="HTML will appear here after AI rewrite. You can also paste your own HTML."></textarea>
+          </div>
+          <div class="editor-tab-content" id="tab-preview" style="display:none;">
+            <iframe id="preview-iframe" class="preview-iframe"></iframe>
+          </div>
+        </div>
+      </div>
+      <div class="editor-bottombar">
+        <button class="btn btn-secondary" id="editorSaveBtn">&#128190; Save Draft</button>
+        <button class="btn btn-secondary" id="editorDownloadBtn">&#11015; Download HTML</button>
+        <button class="btn btn-secondary" id="editorCopyBloggerBtn">&#128203; Copy for Blogger</button>
+        <button class="btn btn-secondary" id="editorPreviewTabBtn">&#128065; Preview in New Tab</button>
+        <button class="btn btn-success" id="editorPublishBtn">&#128640; Publish</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>
