@@ -413,15 +413,7 @@
           </div>
         </div>
       </div>
-      <div class="editor-bottombar">
-        <button class="btn btn-secondary" id="editorSaveBtn">&#128190; Save Draft</button>
-        <button class="btn btn-secondary" id="editorDownloadBtn">&#11015; Download HTML</button>
-        <button class="btn btn-secondary" id="editorCopyBloggerBtn">&#128203; Copy for Blogger</button>
-        <button class="btn btn-secondary" id="editorPreviewTabBtn">&#128065; Preview in New Tab</button>
-        <button class="btn btn-success" id="editorPublishBtn">&#128640; Publish</button>
-        <button class="btn btn-sm btn-secondary" id="editorWpLogBtn" title="View WP Error Log">WP Log</button>
-      </div>
-      <!-- Editor WP Error Log Drawer -->
+      <!-- Editor WP Error Log Drawer (above bottom bar) -->
       <div id="editorWpLog" class="editor-wp-log" style="display:none;">
         <div class="editor-wp-log-header">
           <strong>WordPress Error Log</strong>
@@ -430,6 +422,14 @@
         <div id="editorWpLogContent" class="editor-wp-log-content">
           <p class="placeholder-text">Loading...</p>
         </div>
+      </div>
+      <div class="editor-bottombar">
+        <button class="btn btn-secondary" id="editorSaveBtn">&#128190; Save Draft</button>
+        <button class="btn btn-secondary" id="editorDownloadBtn">&#11015; Download HTML</button>
+        <button class="btn btn-secondary" id="editorCopyBloggerBtn">&#128203; Copy for Blogger</button>
+        <button class="btn btn-secondary" id="editorPreviewTabBtn">&#128065; Preview in New Tab</button>
+        <button class="btn btn-success" id="editorPublishBtn">&#128640; Publish</button>
+        <button class="btn btn-wp-log" id="editorWpLogBtn">&#128270; WP Log</button>
       </div>
     </div>
   </div>
