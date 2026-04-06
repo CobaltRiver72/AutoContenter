@@ -448,16 +448,41 @@ class WordPressPublisher {
   }
 
   async init() {
+    this.reinit();
+  }
+
+  /**
+   * Rebuild credentials and re-check enabled status from current config.
+   * Called at boot and whenever WP settings are saved via the dashboard.
+   */
+  reinit() {
     try {
+      var { getConfig } = require('../utils/config');
+      var freshConfig = getConfig();
+      this.config = freshConfig;
+
       if (!this.config.WP_URL || !this.config.WP_USERNAME || !this.config.WP_APP_PASSWORD) {
+        this.enabled = false;
         this.status = 'disabled';
+        this.error = null;
+        this.authHeader = '';
+        this.wpBaseUrl = '';
         return;
       }
+
+      this.authHeader = 'Basic ' + Buffer.from(
+        this.config.WP_USERNAME + ':' + this.config.WP_APP_PASSWORD
+      ).toString('base64');
+      this.wpBaseUrl = (this.config.WP_URL || '').replace(/\/+$/, '');
       this.enabled = true;
       this.status = 'connected';
+      this.error = null;
+
+      this.logger.info('publisher', 'Publisher re-initialized: ' + this.wpBaseUrl);
     } catch (err) {
       this.status = 'error';
       this.error = err.message;
+      this.logger.error('publisher', 'Publisher reinit failed: ' + err.message);
     }
   }
 

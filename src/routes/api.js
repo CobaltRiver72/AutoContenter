@@ -372,6 +372,14 @@ function createApiRouter(deps) {
       var { loadRuntimeOverrides } = require('../utils/config');
       loadRuntimeOverrides(db);
 
+      // Re-initialize publisher if any WP credentials changed
+      var wpKeys = ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_POST_STATUS', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY'];
+      var hasWpChange = entries.some(function (e) { return wpKeys.indexOf(e[0]) !== -1; });
+      if (hasWpChange && publisher && typeof publisher.reinit === 'function') {
+        publisher.reinit();
+        logger.info('api', 'Publisher re-initialized after WP settings change');
+      }
+
       logger.info('api', 'Settings updated', { keys: entries.map(function (e) { return e[0]; }) });
       res.json({ success: true, updated: entries.length });
     } catch (err) {
@@ -570,9 +578,98 @@ function createApiRouter(deps) {
         var msg = err.response
           ? 'WP API error ' + err.response.status + ': ' + (err.response.data.message || '')
           : err.message;
-        logger.error('api', 'WordPress test failed', msg);
-        res.status(500).json({ error: 'WordPress test failed: ' + msg });
+        var fullMsg = 'WordPress test failed: ' + msg;
+        logger.error('api', fullMsg);
+        try {
+          db.prepare("INSERT INTO logs (level, module, message, created_at) VALUES ('error', 'publisher', ?, datetime('now'))").run(fullMsg);
+        } catch (logErr) { /* ignore */ }
+        res.status(500).json({ error: fullMsg });
       });
+  });
+
+  // ─── GET /api/wp-logs — Recent WordPress-related logs ──────────────────
+
+  router.get('/wp-logs', function (req, res) {
+    try {
+      var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+      var rows = db.prepare(
+        "SELECT id, level, module, message, details, created_at FROM logs " +
+        "WHERE (module IN ('publisher', 'wordpress')) " +
+        "OR (module = 'api' AND (message LIKE '%WP%' OR message LIKE '%WordPress%' OR message LIKE '%wordpress%' OR message LIKE '%wp-json%')) " +
+        "ORDER BY created_at DESC LIMIT ?"
+      ).all(limit);
+      res.json({ logs: rows, total: rows.length });
+    } catch (err) {
+      logger.error('api', 'Failed to fetch WP logs: ' + err.message);
+      res.status(500).json({ error: 'Failed to fetch WP logs' });
+    }
+  });
+
+  // ─── GET /api/wp-status — Live WordPress connection diagnostic ────────
+
+  router.get('/wp-status', function (req, res) {
+    var config = getConfig();
+    var result = {
+      configured: !!(config.WP_URL && config.WP_USERNAME && config.WP_APP_PASSWORD),
+      wpUrl: config.WP_URL ? config.WP_URL.replace(/\/$/, '') : '',
+      wpUsername: config.WP_USERNAME || '',
+      publisherEnabled: publisher ? publisher.enabled : false,
+      publisherStatus: publisher ? publisher.status : 'not_loaded',
+      publisherError: publisher ? publisher.error : null,
+      postStatus: config.WP_POST_STATUS || 'draft',
+      checks: {},
+    };
+
+    if (!result.configured) {
+      result.checks.credentials = { ok: false, message: 'Missing WP_URL, WP_USERNAME, or WP_APP_PASSWORD' };
+      return res.json(result);
+    }
+
+    // Test actual connection
+    var wpUrl = config.WP_URL.replace(/\/$/, '');
+    var authHeader = 'Basic ' + Buffer.from(
+      config.WP_USERNAME + ':' + config.WP_APP_PASSWORD
+    ).toString('base64');
+
+    result.checks.credentials = { ok: true, message: 'All credentials present' };
+
+    // Test REST API discovery
+    axios.get(wpUrl + '/wp-json/', {
+      headers: { Authorization: authHeader },
+      timeout: 15000,
+    }).then(function (apiRes) {
+      result.checks.restApi = { ok: true, message: 'REST API reachable', siteName: apiRes.data.name || '' };
+
+      // Test auth by fetching current user
+      return axios.get(wpUrl + '/wp-json/wp/v2/users/me', {
+        headers: { Authorization: authHeader },
+        timeout: 10000,
+      });
+    }).then(function (userRes) {
+      result.checks.auth = {
+        ok: true,
+        message: 'Authenticated as ' + (userRes.data.name || userRes.data.slug || 'user'),
+        userId: userRes.data.id,
+        roles: userRes.data.roles || [],
+      };
+      var canPublish = userRes.data.capabilities && (userRes.data.capabilities.publish_posts || userRes.data.capabilities.edit_posts);
+      result.checks.permissions = {
+        ok: !!canPublish,
+        message: canPublish ? 'User can create posts' : 'User may lack publish_posts capability',
+      };
+      res.json(result);
+    }).catch(function (err) {
+      var statusCode = err.response ? err.response.status : null;
+      var wpMsg = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : '';
+      if (statusCode === 401 || statusCode === 403) {
+        result.checks.auth = { ok: false, message: 'Authentication failed (HTTP ' + statusCode + '): ' + wpMsg };
+      } else if (statusCode) {
+        result.checks.restApi = { ok: false, message: 'REST API error (HTTP ' + statusCode + '): ' + wpMsg };
+      } else {
+        result.checks.restApi = { ok: false, message: 'Cannot reach WordPress: ' + err.message };
+      }
+      res.json(result);
+    });
   });
 
   // ─── Firehose Rules Proxy ──────────────────────────────────────────────
@@ -1069,6 +1166,10 @@ function createApiRouter(deps) {
       if (platform === 'wordpress') {
         // Use existing publisher module
         var publisherMod = deps.publisher || (deps.scheduler && deps.scheduler.publisher);
+        // Auto-reinit if publisher was disabled but credentials may now exist
+        if (publisherMod && !publisherMod.enabled && typeof publisherMod.reinit === 'function') {
+          publisherMod.reinit();
+        }
         if (publisherMod && publisherMod.enabled) {
           var postData = {
             title: draft.rewritten_title || draft.extracted_title || draft.source_title,
@@ -1085,8 +1186,16 @@ function createApiRouter(deps) {
             logger.info('api', 'Draft ' + id + ' published to WordPress: ' + publishUrl);
             res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId });
           }).catch(function (err) {
-            logger.error('api', 'WP publish failed for draft ' + id + ': ' + err.message);
-            res.status(500).json({ success: false, error: err.message });
+            var detail = err.message || 'Unknown error';
+            var statusCode = err.response ? err.response.status : null;
+            var wpError = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : '';
+            var fullMsg = 'WP publish failed' + (statusCode ? ' (HTTP ' + statusCode + ')' : '') + ': ' + detail + (wpError ? ' — ' + wpError : '');
+            logger.error('api', fullMsg);
+            // Store in logs table for the error log box
+            try {
+              db.prepare("INSERT INTO logs (level, module, message, created_at) VALUES ('error', 'publisher', ?, datetime('now'))").run(fullMsg);
+            } catch (logErr) { /* ignore */ }
+            res.status(500).json({ success: false, error: fullMsg });
           });
           return;
         } else {

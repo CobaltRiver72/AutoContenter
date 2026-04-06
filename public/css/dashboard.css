@@ -1588,6 +1588,92 @@ select:focus {
   text-align: center;
 }
 
+/* ─── WordPress Diagnostics Panel (Settings Page) ──────────────────────── */
+
+.wp-diag-panel, .wp-error-log {
+  margin-top: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.wp-diag-header, .wp-error-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-main);
+  border-bottom: 1px solid var(--border);
+}
+.wp-diag-header h3, .wp-error-log-header h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+.wp-diag-content, .wp-error-log-content {
+  padding: 12px 14px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+}
+
+/* Diagnostic check rows */
+.wp-diag-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.wp-diag-check:last-child { border-bottom: none; }
+.wp-diag-icon { font-size: 1rem; flex-shrink: 0; }
+.wp-diag-label { color: var(--text-secondary); min-width: 100px; }
+.wp-diag-msg { color: var(--text-primary); }
+.wp-diag-ok .wp-diag-msg { color: var(--green); }
+.wp-diag-fail .wp-diag-msg { color: var(--red); }
+
+/* Error log rows */
+.wp-log-entry {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.wp-log-entry:last-child { border-bottom: none; }
+.wp-log-time { color: var(--text-muted); margin-right: 8px; }
+.wp-log-level { font-weight: 600; margin-right: 8px; text-transform: uppercase; }
+.wp-log-level-error { color: var(--red); }
+.wp-log-level-warn, .wp-log-level-warning { color: #f59e0b; }
+.wp-log-level-info { color: var(--accent); }
+.wp-log-message { color: var(--text-primary); word-break: break-word; }
+.wp-log-empty { color: var(--text-muted); text-align: center; padding: 20px; }
+
+/* Editor WP Log Drawer */
+.editor-wp-log {
+  max-height: 220px;
+  background: var(--bg-card);
+  border-top: 2px solid var(--red);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.editor-wp-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid var(--border);
+  color: var(--red);
+  font-size: 0.8rem;
+}
+.editor-wp-log-content {
+  padding: 8px 14px;
+  max-height: 170px;
+  overflow-y: auto;
+  font-size: 0.75rem;
+}
+
 @media (max-width: 768px) {
   .editor-panels { flex-direction: column; }
   .editor-left { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 40vh; }

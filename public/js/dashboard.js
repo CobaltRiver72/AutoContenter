@@ -1902,14 +1902,31 @@
               $('editor-status').textContent = 'PUBLISHED';
               $('editor-status').style.background = '#22c55e';
               showToast('Published!' + (data.url ? ' URL: ' + data.url : ''), 'success');
+              // Hide error log on success
+              var logPanel = $('editorWpLog');
+              if (logPanel) logPanel.style.display = 'none';
             } else {
               showToast('Publish failed: ' + (data.error || 'Unknown'), 'error');
               $('editor-status').textContent = 'READY';
               $('editor-status').style.background = '#22c55e';
+              // Auto-show WP error log on failure
+              var logPanel = $('editorWpLog');
+              if (logPanel) {
+                logPanel.style.display = '';
+                loadWpErrorLog('editorWpLogContent');
+              }
             }
           })
           .catch(function (err) {
             showToast('Publish error: ' + err.message, 'error');
+            $('editor-status').textContent = 'READY';
+            $('editor-status').style.background = '#22c55e';
+            // Auto-show WP error log on network error
+            var logPanel = $('editorWpLog');
+            if (logPanel) {
+              logPanel.style.display = '';
+              loadWpErrorLog('editorWpLogContent');
+            }
           });
       };
     }
@@ -2174,7 +2191,157 @@
             showToast('WordPress test failed: ' + err.message, 'error');
             testWp.disabled = false;
             testWp.textContent = 'Test WordPress';
+            // Auto-open diagnostics panel on failure
+            var diagPanel = $('wpDiagPanel');
+            var errorLog = $('wpErrorLog');
+            if (diagPanel) {
+              diagPanel.style.display = '';
+              loadWpDiagnostics();
+            }
+            if (errorLog) {
+              errorLog.style.display = '';
+              loadWpErrorLog('wpErrorLogContent');
+            }
           });
+      };
+    }
+  }
+
+  // ─── WordPress Diagnostics & Error Log ──────────────────────────────────
+
+  function loadWpDiagnostics() {
+    var content = $('wpDiagContent');
+    if (!content) return;
+    content.innerHTML = '<p class="placeholder-text">Running diagnostics...</p>';
+
+    fetchApi('/api/wp-status')
+      .then(function (data) {
+        var html = '';
+
+        // Config status
+        html += '<div class="wp-diag-check ' + (data.configured ? 'wp-diag-ok' : 'wp-diag-fail') + '">' +
+          '<span class="wp-diag-icon">' + (data.configured ? '&#9989;' : '&#10060;') + '</span>' +
+          '<span class="wp-diag-label">Credentials</span>' +
+          '<span class="wp-diag-msg">' + (data.configured ? 'All WP credentials set' : 'Missing credentials') + '</span>' +
+        '</div>';
+
+        if (data.wpUrl) {
+          html += '<div class="wp-diag-check wp-diag-ok">' +
+            '<span class="wp-diag-icon">&#128279;</span>' +
+            '<span class="wp-diag-label">WP URL</span>' +
+            '<span class="wp-diag-msg">' + escapeHtml(data.wpUrl) + '</span>' +
+          '</div>';
+        }
+
+        html += '<div class="wp-diag-check ' + (data.publisherEnabled ? 'wp-diag-ok' : 'wp-diag-fail') + '">' +
+          '<span class="wp-diag-icon">' + (data.publisherEnabled ? '&#9989;' : '&#10060;') + '</span>' +
+          '<span class="wp-diag-label">Publisher</span>' +
+          '<span class="wp-diag-msg">Status: ' + escapeHtml(data.publisherStatus || 'unknown') +
+            (data.publisherError ? ' — Error: ' + escapeHtml(data.publisherError) : '') + '</span>' +
+        '</div>';
+
+        html += '<div class="wp-diag-check wp-diag-ok">' +
+          '<span class="wp-diag-icon">&#128221;</span>' +
+          '<span class="wp-diag-label">Post Status</span>' +
+          '<span class="wp-diag-msg">' + escapeHtml(data.postStatus || 'draft') + '</span>' +
+        '</div>';
+
+        // Connection checks
+        var checks = data.checks || {};
+        var checkOrder = ['credentials', 'restApi', 'auth', 'permissions'];
+        for (var i = 0; i < checkOrder.length; i++) {
+          var key = checkOrder[i];
+          var check = checks[key];
+          if (!check) continue;
+          html += '<div class="wp-diag-check ' + (check.ok ? 'wp-diag-ok' : 'wp-diag-fail') + '">' +
+            '<span class="wp-diag-icon">' + (check.ok ? '&#9989;' : '&#10060;') + '</span>' +
+            '<span class="wp-diag-label">' + escapeHtml(key) + '</span>' +
+            '<span class="wp-diag-msg">' + escapeHtml(check.message || '') + '</span>' +
+          '</div>';
+        }
+
+        content.innerHTML = html;
+      })
+      .catch(function (err) {
+        content.innerHTML = '<p style="color:var(--red)">Diagnostics failed: ' + escapeHtml(err.message) + '</p>';
+      });
+  }
+
+  function loadWpErrorLog(containerId) {
+    var content = $(containerId);
+    if (!content) return;
+    content.innerHTML = '<p class="placeholder-text">Loading...</p>';
+
+    fetchApi('/api/wp-logs?limit=50')
+      .then(function (data) {
+        var logs = data.logs || [];
+        if (logs.length === 0) {
+          content.innerHTML = '<p class="wp-log-empty">No WordPress errors logged yet.</p>';
+          return;
+        }
+
+        var html = '';
+        for (var i = 0; i < logs.length; i++) {
+          var log = logs[i];
+          var time = log.created_at ? log.created_at.replace('T', ' ').substring(0, 19) : '';
+          var levelClass = 'wp-log-level-' + (log.level || 'info');
+          html += '<div class="wp-log-entry">' +
+            '<span class="wp-log-time">' + escapeHtml(time) + '</span>' +
+            '<span class="wp-log-level ' + levelClass + '">' + escapeHtml(log.level || 'info') + '</span>' +
+            '<span class="wp-log-message">' + escapeHtml(log.message || '') + '</span>' +
+          '</div>';
+        }
+
+        content.innerHTML = html;
+      })
+      .catch(function (err) {
+        content.innerHTML = '<p style="color:var(--red)">Failed to load WP logs: ' + escapeHtml(err.message) + '</p>';
+      });
+  }
+
+  function initWpDiagButtons() {
+    var diagBtn = $('wpDiagBtn');
+    var diagPanel = $('wpDiagPanel');
+    var diagRefresh = $('wpDiagRefreshBtn');
+    var errorLog = $('wpErrorLog');
+    var logRefresh = $('wpLogRefreshBtn');
+
+    if (diagBtn && diagPanel) {
+      diagBtn.onclick = function () {
+        var visible = diagPanel.style.display !== 'none';
+        diagPanel.style.display = visible ? 'none' : '';
+        if (errorLog) errorLog.style.display = visible ? 'none' : '';
+        if (!visible) {
+          loadWpDiagnostics();
+          loadWpErrorLog('wpErrorLogContent');
+        }
+      };
+    }
+
+    if (diagRefresh) {
+      diagRefresh.onclick = function () { loadWpDiagnostics(); };
+    }
+
+    if (logRefresh) {
+      logRefresh.onclick = function () { loadWpErrorLog('wpErrorLogContent'); };
+    }
+
+    // Editor WP Log buttons
+    var editorLogBtn = $('editorWpLogBtn');
+    var editorLogPanel = $('editorWpLog');
+    var editorLogClose = $('editorWpLogClose');
+
+    if (editorLogBtn && editorLogPanel) {
+      editorLogBtn.onclick = function () {
+        var visible = editorLogPanel.style.display !== 'none';
+        editorLogPanel.style.display = visible ? 'none' : '';
+        if (!visible) loadWpErrorLog('editorWpLogContent');
+      };
+    }
+
+    if (editorLogClose && editorLogPanel) {
+      editorLogClose.onclick = function () {
+        editorLogPanel.style.display = 'none';
       };
     }
   }
@@ -2325,6 +2492,7 @@
     initSidebar();
     initRouter();
     initEditorButtons();
+    initWpDiagButtons();
   }
 
   // Wait for DOM

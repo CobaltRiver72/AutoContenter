@@ -278,6 +278,27 @@
             <button class="btn btn-sm btn-secondary" id="testTrendsBtn">Test Trends</button>
             <button class="btn btn-sm btn-secondary" id="testWpBtn">Test WordPress</button>
             <button class="btn btn-sm btn-secondary" id="testInfranodusBtn">Test InfraNodus</button>
+            <button class="btn btn-sm btn-secondary" id="wpDiagBtn">WP Diagnostics</button>
+          </div>
+        </div>
+        <!-- WordPress Diagnostics Panel -->
+        <div id="wpDiagPanel" class="wp-diag-panel" style="display:none;">
+          <div class="wp-diag-header">
+            <h3>WordPress Connection Diagnostics</h3>
+            <button class="btn btn-sm btn-secondary" id="wpDiagRefreshBtn">Refresh</button>
+          </div>
+          <div id="wpDiagContent" class="wp-diag-content">
+            <p class="placeholder-text">Click "Refresh" to run diagnostics...</p>
+          </div>
+        </div>
+        <!-- WordPress Error Log -->
+        <div id="wpErrorLog" class="wp-error-log" style="display:none;">
+          <div class="wp-error-log-header">
+            <h3>WordPress Error Log</h3>
+            <button class="btn btn-sm btn-secondary" id="wpLogRefreshBtn">Refresh</button>
+          </div>
+          <div id="wpErrorLogContent" class="wp-error-log-content">
+            <p class="placeholder-text">Loading...</p>
           </div>
         </div>
       </section>
@@ -398,6 +419,17 @@
         <button class="btn btn-secondary" id="editorCopyBloggerBtn">&#128203; Copy for Blogger</button>
         <button class="btn btn-secondary" id="editorPreviewTabBtn">&#128065; Preview in New Tab</button>
         <button class="btn btn-success" id="editorPublishBtn">&#128640; Publish</button>
+        <button class="btn btn-sm btn-secondary" id="editorWpLogBtn" title="View WP Error Log">WP Log</button>
+      </div>
+      <!-- Editor WP Error Log Drawer -->
+      <div id="editorWpLog" class="editor-wp-log" style="display:none;">
+        <div class="editor-wp-log-header">
+          <strong>WordPress Error Log</strong>
+          <button class="btn btn-sm btn-secondary" id="editorWpLogClose">Close</button>
+        </div>
+        <div id="editorWpLogContent" class="editor-wp-log-content">
+          <p class="placeholder-text">Loading...</p>
+        </div>
       </div>
     </div>
   </div>
