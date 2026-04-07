@@ -1615,6 +1615,49 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── DELETE /api/drafts/batch-failed ────────────────────────────────────
+  //
+  // Deletes ALL drafts with extraction_status = 'failed'.
+  // Safety: won't delete published articles.
+  // MUST be before /drafts/:id to prevent Express matching "batch-failed" as :id
+  //
+  router.delete('/drafts/batch-failed', function (req, res) {
+    try {
+      var failedCount = db.prepare(
+        "SELECT COUNT(*) as cnt FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
+      ).get().cnt;
+
+      if (failedCount === 0) {
+        return res.json({ success: true, message: 'No failed drafts to delete', deletedCount: 0 });
+      }
+
+      var deleteResult = db.transaction(function () {
+        db.prepare(
+          "UPDATE drafts SET locked_by = NULL WHERE extraction_status = 'failed' AND locked_by IS NOT NULL"
+        ).run();
+
+        var result = db.prepare(
+          "DELETE FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
+        ).run();
+
+        return result.changes;
+      });
+
+      var deleted = deleteResult();
+
+      logger.info('api', 'Batch delete: removed ' + deleted + ' failed drafts');
+
+      res.json({
+        success: true,
+        message: 'Deleted ' + deleted + ' failed drafts',
+        deletedCount: deleted
+      });
+    } catch (err) {
+      logger.error('api', 'Batch delete failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // DELETE /api/drafts/:id — Delete a draft
   router.delete('/drafts/:id', function (req, res) {
     try {
@@ -1724,51 +1767,6 @@ function createApiRouter(deps) {
     } catch (err) {
       logger.error('api', 'Batch extract failed: ' + err.message);
       res.status(500).json({ success: false, error: 'Batch extract failed: ' + err.message });
-    }
-  });
-
-  // ─── DELETE /api/drafts/batch-failed ────────────────────────────────────
-  //
-  // Deletes ALL drafts with extraction_status = 'failed'.
-  // Safety: won't delete published articles.
-  //
-  router.delete('/drafts/batch-failed', function (req, res) {
-    try {
-      // Count before deleting
-      var failedCount = db.prepare(
-        "SELECT COUNT(*) as cnt FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
-      ).get().cnt;
-
-      if (failedCount === 0) {
-        return res.json({ success: true, message: 'No failed drafts to delete', deletedCount: 0 });
-      }
-
-      var deleteResult = db.transaction(function () {
-        // Release locks
-        db.prepare(
-          "UPDATE drafts SET locked_by = NULL WHERE extraction_status = 'failed' AND locked_by IS NOT NULL"
-        ).run();
-
-        // Delete failed (but not published) drafts
-        var result = db.prepare(
-          "DELETE FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
-        ).run();
-
-        return result.changes;
-      });
-
-      var deleted = deleteResult();
-
-      logger.info('api', 'Batch delete: removed ' + deleted + ' failed drafts');
-
-      res.json({
-        success: true,
-        message: 'Deleted ' + deleted + ' failed drafts',
-        deletedCount: deleted
-      });
-    } catch (err) {
-      logger.error('api', 'Batch delete failed: ' + err.message);
-      res.status(500).json({ success: false, error: err.message });
     }
   });
 
