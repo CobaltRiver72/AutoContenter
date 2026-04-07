@@ -56,9 +56,7 @@ async function boot() {
     try {
       var articleId = buffer.addArticle(article);
       if (!articleId) return; // duplicate or failed insert
-
-      // Attach ID back to article for similarity engine
-      article.id = articleId;
+      // buffer.addArticle() now attaches id + fingerprint to article object
 
       // Only match trends if the module is ready
       var trendsMatch = null;
@@ -67,11 +65,15 @@ async function boot() {
       }
 
       var bufferArticles = buffer.getRecentArticles(config.BUFFER_HOURS);
+
+      // Debug: Log fingerprint + buffer stats for clustering monitoring
+      logger.debug('index', 'Clustering: article #' + article.id + ' fp=' + (article.fingerprint ? article.fingerprint.length + ' chars' : 'NONE') + ', buffer=' + bufferArticles.length + ' articles');
+
       var matches = similarity.findMatches(article, bufferArticles);
 
-      // Debug: Log similarity results for monitoring
+      // Log similarity results for monitoring
       if (matches.length > 0) {
-        logger.info('index', 'Similarity matches for "' + (article.title || article.url).substring(0, 60) + '": ' + matches.length + ' match(es), best score: ' + matches[0].score);
+        logger.info('index', 'Similarity matches for "' + (article.title || article.url).substring(0, 60) + '": ' + matches.length + ' match(es), best score: ' + matches[0].score.toFixed(3));
       }
 
       if (matches.length >= config.MIN_SOURCES_THRESHOLD - 1) {

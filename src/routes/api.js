@@ -255,6 +255,51 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/clusters/recluster — Re-run similarity on all buffer articles ──
+
+  router.post('/clusters/recluster', function (req, res) {
+    try {
+      var bufferHours = require('../utils/config').getConfig().BUFFER_HOURS || 6;
+      var articles = db.prepare(
+        "SELECT * FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours') AND cluster_id IS NULL ORDER BY received_at ASC"
+      ).all(bufferHours);
+
+      if (articles.length < 2) {
+        return res.json({ success: true, message: 'Not enough unclustered articles (' + articles.length + ')', clustersCreated: 0 });
+      }
+
+      var clustersCreated = 0;
+      var articlesMatched = 0;
+
+      for (var i = 0; i < articles.length; i++) {
+        var article = articles[i];
+        if (!article.fingerprint || article.cluster_id) continue;
+
+        var matches = similarity.findMatches(article, articles);
+        if (matches.length >= (require('../utils/config').getConfig().MIN_SOURCES_THRESHOLD || 2) - 1) {
+          var cluster = similarity.createOrUpdateCluster(article, matches, null);
+          if (cluster) {
+            clustersCreated++;
+            articlesMatched += cluster.article_count || 0;
+            // Refresh articles array to reflect new cluster_id assignments
+            for (var j = 0; j < articles.length; j++) {
+              if (articles[j].cluster_id === undefined || articles[j].cluster_id === null) {
+                var fresh = db.prepare('SELECT cluster_id FROM articles WHERE id = ?').get(articles[j].id);
+                if (fresh) articles[j].cluster_id = fresh.cluster_id;
+              }
+            }
+          }
+        }
+      }
+
+      logger.info('api', 'Re-cluster completed: ' + clustersCreated + ' new cluster(s) from ' + articles.length + ' articles');
+      res.json({ success: true, clustersCreated: clustersCreated, articlesMatched: articlesMatched, totalArticles: articles.length });
+    } catch (err) {
+      logger.error('api', 'Re-cluster failed: ' + err.message);
+      res.status(500).json({ error: 'Re-cluster failed: ' + err.message });
+    }
+  });
+
   // ─── GET /api/clusters ────────────────────────────────────────────────────
 
   router.get('/clusters', function (req, res) {

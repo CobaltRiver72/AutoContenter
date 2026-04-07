@@ -53,6 +53,9 @@ class ArticleBuffer {
     try {
       const fingerprint = this._buildFingerprint(article);
 
+      // Attach fingerprint back to the article object so similarity engine can use it
+      article.fingerprint = fingerprint;
+
       if (!this._stmts.insert) {
         this._stmts.insert = this.db.prepare(`
           INSERT OR IGNORE INTO articles
@@ -83,12 +86,15 @@ class ArticleBuffer {
 
       const articleId = result.lastInsertRowid;
 
-      this.logger.info(MODULE, `Article buffered: id=${articleId} "${article.title || article.url}"`, {
+      // Attach ID back so caller doesn't need to do it
+      article.id = typeof articleId === 'bigint' ? Number(articleId) : articleId;
+
+      this.logger.info(MODULE, `Article buffered: id=${article.id} "${article.title || article.url}"`, {
         domain: article.domain,
-        id: articleId,
+        id: article.id,
       });
 
-      return typeof articleId === 'bigint' ? Number(articleId) : articleId;
+      return article.id;
     } catch (err) {
       this.logger.error(MODULE, 'Failed to add article: ' + err.message, {
         url: article.url,
@@ -169,7 +175,8 @@ class ArticleBuffer {
    */
   cleanOldArticles() {
     try {
-      const hours = this.config.BUFFER_HOURS || 6;
+      // Use at least 24h retention so clustering has time to work
+      const hours = Math.max(this.config.BUFFER_HOURS || 6, 24);
       if (!this._stmts.clean) {
         this._stmts.clean = this.db.prepare(
           `DELETE FROM articles WHERE received_at < datetime('now', ? || ' hours') AND cluster_id IS NULL`
