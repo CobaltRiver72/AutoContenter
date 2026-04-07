@@ -1240,6 +1240,16 @@ select:focus {
 }
 .article-card:hover .article-select-btn { opacity: 1; }
 .article-select-btn:hover { background: var(--accent-hover); }
+
+/* Status buttons are ALWAYS visible — never hidden behind hover */
+.btn-added,
+.btn-published,
+.btn-status-fetching,
+.btn-status-rewriting,
+.btn-status-ready,
+.btn-status-failed {
+  opacity: 1 !important;
+}
 .article-select-btn.selected { background: var(--green); opacity: 1; }
 
 /* Selected card state */
@@ -1362,34 +1372,138 @@ select:focus {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
-.article-card.card-in-drafts { border-left: 3px solid #3b82f6; opacity: 0.85; }
-.article-card.card-published { border-left: 3px solid #10b981; opacity: 0.75; }
-.article-card.card-failed { border-left: 3px solid #ef4444; opacity: 0.85; }
-.btn-added {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  cursor: not-allowed;
-  font-size: 11px;
-  padding: 4px 12px;
-  border-radius: 6px;
-  white-space: nowrap;
-  opacity: 1;
-  flex-shrink: 0;
-  margin-top: 2px;
+/* ─── Card States: Articles Already in Pipeline ──────────────────────── */
+
+/* In drafts / fetching / rewriting — dimmed with blue left border */
+.article-card.card-in-drafts {
+  border-left: 4px solid #3b82f6;
+  opacity: 0.6;
+  background: rgba(30, 41, 59, 0.5);
 }
-.btn-published {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  cursor: not-allowed;
-  font-size: 11px;
-  padding: 4px 12px;
-  border-radius: 6px;
+.article-card.card-in-drafts:hover {
+  opacity: 0.8;
+}
+
+/* Published — dimmed more with green left border */
+.article-card.card-published {
+  border-left: 4px solid #10b981;
+  opacity: 0.45;
+  background: rgba(30, 41, 59, 0.4);
+}
+.article-card.card-published:hover {
+  opacity: 0.7;
+}
+
+/* Failed — slightly dimmed with red left border */
+.article-card.card-failed {
+  border-left: 4px solid #ef4444;
+  opacity: 0.65;
+  background: rgba(30, 41, 59, 0.5);
+}
+.article-card.card-failed:hover {
+  opacity: 0.85;
+}
+
+/* Title styling for pipeline articles — subdued */
+.article-card.card-in-drafts .article-title a,
+.article-card.card-published .article-title a {
+  color: var(--text-secondary);
+}
+
+/* ─── Live Feed Status Buttons (replace Select button) ────────────────── */
+
+/* Base style for all status buttons */
+.btn-added,
+.btn-published,
+.btn-status-fetching,
+.btn-status-rewriting,
+.btn-status-ready,
+.btn-status-failed {
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: default;
   white-space: nowrap;
-  opacity: 1;
   flex-shrink: 0;
   margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+
+/* In Drafts — solid blue, clearly different from the blue Select button */
+.btn-added {
+  background: rgba(59, 130, 246, 0.25);
+  color: #60a5fa;
+  border: 2px solid rgba(59, 130, 246, 0.5);
+}
+
+/* Extracting — blue with pulse animation */
+.btn-status-fetching {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 2px solid rgba(59, 130, 246, 0.4);
+  animation: pulse-status 1.5s ease-in-out infinite;
+}
+
+/* Rewriting — purple with pulse animation */
+.btn-status-rewriting {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 2px solid rgba(168, 85, 247, 0.4);
+  animation: pulse-status 1.5s ease-in-out infinite;
+}
+
+/* Ready — green outline, waiting to publish */
+.btn-status-ready {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 2px solid rgba(16, 185, 129, 0.4);
+}
+
+/* Published — solid green, most prominent */
+.btn-published {
+  background: rgba(16, 185, 129, 0.3);
+  color: #10b981;
+  border: 2px solid rgba(16, 185, 129, 0.6);
+  font-weight: 800;
+}
+
+/* Failed — red warning */
+.btn-status-failed {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 2px solid rgba(239, 68, 68, 0.4);
+}
+
+@keyframes pulse-status {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ─── Show Only New Toggle ────────────────────────────────────────────── */
+.filter-toggle-btn {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.filter-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+.filter-toggle-btn.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.4);
 }
 
 /* ─── Empty State ────────────────────────────────────────────────────── */

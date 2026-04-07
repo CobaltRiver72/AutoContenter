@@ -699,7 +699,7 @@
       })
       .catch(function () { /* silent */ });
 
-    // Refresh transient statuses every 30s (fetching, rewriting, adding)
+    // Refresh transient statuses every 10s (fetching, rewriting, adding)
     var statusRefreshTimer = setInterval(function () {
       if (state.currentPage !== 'feed') return;
       var hasTransient = false;
@@ -710,7 +710,7 @@
       }
       if (Object.keys(pendingAddUrls).length > 0) hasTransient = true;
       if (hasTransient) loadDraftStatuses();
-    }, 30000);
+    }, 10000);
     state.refreshTimers.push(statusRefreshTimer);
   }
 
@@ -778,7 +778,7 @@
           '<option value="ml">Malayalam</option>' +
           '<option value="pa">Punjabi</option>' +
         '</select>' +
-        '<button id="feedFilterNew" class="btn btn-sm" style="font-size:12px;padding:5px 12px;margin-left:6px">Show Only New</button>' +
+        '<button id="feedFilterNew" class="filter-toggle-btn" style="margin-left:6px">' + (showOnlyNew ? '&#128308; New Only' : '&#9898; All Articles') + '</button>' +
       '</div>';
 
     // Insert after page header
@@ -803,11 +803,11 @@
 
     var newBtn = $('feedFilterNew');
     if (newBtn) {
+      if (showOnlyNew) newBtn.classList.add('active');
       newBtn.addEventListener('click', function () {
         showOnlyNew = !showOnlyNew;
-        newBtn.textContent = showOnlyNew ? 'Show All' : 'Show Only New';
-        newBtn.style.background = showOnlyNew ? '#6366f1' : '';
-        newBtn.style.color = showOnlyNew ? '#fff' : '';
+        newBtn.className = 'filter-toggle-btn' + (showOnlyNew ? ' active' : '');
+        newBtn.innerHTML = showOnlyNew ? '&#128308; New Only' : '&#9898; All Articles';
         reRenderFeed();
       });
     }
@@ -1004,6 +1004,7 @@
   }
 
   function updateCardStatusBadge(card, url) {
+    // Remove old small badge if present (we're using the button now)
     var existing = card.querySelector('.draft-status-badge');
     if (existing) existing.remove();
 
@@ -1011,55 +1012,49 @@
     var pending = pendingAddUrls[url] || false;
     if (!status && !pending) return;
 
-    var badge = document.createElement('span');
-    badge.className = 'draft-status-badge';
+    // ─── Replace the Select button with a permanent status label ───
+    var selectBtn = card.querySelector('.article-select-btn, .btn-selected, .btn-added, .btn-published, .btn-status-fetching, .btn-status-rewriting, .btn-status-ready, .btn-status-failed');
+    if (!selectBtn) return;
+
+    selectBtn.disabled = true;
+    selectBtn.style.cursor = 'default';
 
     if (pending) {
-      badge.className += ' status-adding';
-      badge.textContent = 'Adding...';
+      selectBtn.className = 'btn-status-fetching';
+      selectBtn.textContent = 'Adding...';
     } else if (status.status === 'published' || status.wp_post_url) {
-      badge.className += ' status-published';
-      badge.innerHTML = '&#10003; Published';
+      selectBtn.className = 'btn-published';
+      selectBtn.innerHTML = '&#10003; Published';
     } else if (status.status === 'ready') {
-      badge.className += ' status-ready';
-      badge.textContent = 'Ready';
+      selectBtn.className = 'btn-status-ready';
+      selectBtn.innerHTML = '&#10003; Ready';
     } else if (status.status === 'rewriting') {
-      badge.className += ' status-rewriting';
-      badge.textContent = 'Rewriting...';
+      selectBtn.className = 'btn-status-rewriting';
+      selectBtn.textContent = 'Rewriting...';
     } else if (status.status === 'fetching') {
-      badge.className += ' status-fetching';
-      badge.textContent = 'Extracting...';
+      selectBtn.className = 'btn-status-fetching';
+      selectBtn.textContent = 'Extracting...';
     } else if (status.status === 'failed') {
-      badge.className += ' status-failed';
-      badge.textContent = 'Failed';
+      selectBtn.className = 'btn-status-failed';
+      selectBtn.innerHTML = '&#10007; Failed';
     } else {
-      badge.className += ' status-draft';
-      badge.textContent = 'In Drafts';
+      // Default: draft or any other status = "In Drafts"
+      selectBtn.className = 'btn-added';
+      selectBtn.innerHTML = '&#10003; In Drafts';
     }
 
-    var metaDiv = card.querySelector('.article-meta');
-    if (metaDiv) metaDiv.insertBefore(badge, metaDiv.firstChild);
-
-    // Card border state
+    // ─── Card-level visual treatment ───
     card.classList.remove('card-in-drafts', 'card-published', 'card-failed');
     if (status) {
-      if (status.status === 'published' || status.wp_post_url) card.classList.add('card-published');
-      else if (status.status === 'failed') card.classList.add('card-failed');
-      else card.classList.add('card-in-drafts');
-    }
-
-    // Disable select button for already-added articles
-    var selectBtn = card.querySelector('.article-select-btn, .btn-selected');
-    if (selectBtn && status && !pending) {
-      selectBtn.disabled = true;
-      selectBtn.style.cursor = 'not-allowed';
       if (status.status === 'published' || status.wp_post_url) {
-        selectBtn.innerHTML = '&#10003; Published';
-        selectBtn.className = 'btn-published';
+        card.classList.add('card-published');
+      } else if (status.status === 'failed') {
+        card.classList.add('card-failed');
       } else {
-        selectBtn.innerHTML = '&#10003; Added';
-        selectBtn.className = 'btn-added';
+        card.classList.add('card-in-drafts');
       }
+    } else if (pending) {
+      card.classList.add('card-in-drafts');
     }
   }
 
@@ -1101,35 +1096,103 @@
     var fullContentHtml = '';
     if (article.content_markdown) {
       var rawContent = article.content_markdown;
+
       // Detect JSON content_markdown and extract text from chunks
-      if (typeof rawContent === 'string' && rawContent.charAt(0) === '{') {
+      if (typeof rawContent === 'string' && (rawContent.charAt(0) === '{' || rawContent.charAt(0) === '[')) {
         try {
           var parsed = JSON.parse(rawContent);
           var parts = [];
-          if (parsed.chunks && Array.isArray(parsed.chunks)) {
-            for (var ci = 0; ci < parsed.chunks.length; ci++) {
-              var chunk = parsed.chunks[ci];
-              var t = chunk.text || chunk.content || chunk.value || '';
-              if (t) parts.push(t);
+
+          // Helper: recursively extract text from any structure
+          function extractTexts(obj) {
+            if (!obj) return;
+            if (typeof obj === 'string') { parts.push(obj); return; }
+            if (Array.isArray(obj)) {
+              for (var ai = 0; ai < obj.length; ai++) extractTexts(obj[ai]);
+              return;
             }
-          } else if (parsed.text) {
-            parts.push(parsed.text);
-          } else if (parsed.content) {
-            parts.push(parsed.content);
+            if (typeof obj === 'object') {
+              // Prioritize known text fields
+              if (obj.text) parts.push(obj.text);
+              else if (obj.content) parts.push(typeof obj.content === 'string' ? obj.content : '');
+              else if (obj.value) parts.push(typeof obj.value === 'string' ? obj.value : '');
+              // Recurse into chunks array
+              if (obj.chunks && Array.isArray(obj.chunks)) {
+                for (var ci = 0; ci < obj.chunks.length; ci++) {
+                  extractTexts(obj.chunks[ci]);
+                }
+              }
+              // Recurse into paragraphs, blocks, sections
+              var arrayKeys = ['paragraphs', 'blocks', 'sections', 'items', 'children'];
+              for (var ki = 0; ki < arrayKeys.length; ki++) {
+                if (obj[arrayKeys[ki]] && Array.isArray(obj[arrayKeys[ki]])) {
+                  extractTexts(obj[arrayKeys[ki]]);
+                }
+              }
+            }
           }
-          if (parts.length > 0) rawContent = parts.join(' ');
-        } catch (e) { /* not JSON, use as-is */ }
+
+          extractTexts(parsed);
+          if (parts.length > 0) {
+            rawContent = parts.join(' ').replace(/\s+/g, ' ').trim();
+          } else {
+            // Could not extract any text — show nothing rather than raw JSON
+            rawContent = '';
+          }
+        } catch (e) {
+          // Not valid JSON — if it starts with { but is truncated, hide it
+          if (rawContent.indexOf('"chunks"') !== -1 || rawContent.indexOf('"text"') !== -1) {
+            rawContent = ''; // Truncated JSON, don't show garbage
+          }
+          // Otherwise use as-is (might be markdown starting with a heading)
+        }
       }
-      var stripped = stripMarkdown(rawContent);
-      var previewText = truncate(stripped, 200);
-      previewHtml = '<div class="article-preview">' + escapeHtml(previewText) + '</div>';
-      if (stripped.length > 200) {
-        fullContentHtml = '<div class="article-full">' + escapeHtml(stripped) + '</div>';
+
+      if (rawContent) {
+        var stripped = stripMarkdown(rawContent);
+        var previewText = truncate(stripped, 200);
+        previewHtml = '<div class="article-preview">' + escapeHtml(previewText) + '</div>';
+        if (stripped.length > 200) {
+          fullContentHtml = '<div class="article-full">' + escapeHtml(stripped) + '</div>';
+        }
       }
     }
 
-    var selectBtnClass = isSelected ? 'btn-selected' : 'article-select-btn';
-    var selectBtnText = isSelected ? '&#10003; Selected' : 'Select &#9654;';
+    // Determine button state: check draft status cache FIRST
+    var knownStatus = article.url ? draftStatusCache[article.url] : null;
+    var isPending = article.url ? pendingAddUrls[article.url] : false;
+    var selectBtnClass, selectBtnText;
+
+    if (isPending) {
+      selectBtnClass = 'btn-status-fetching';
+      selectBtnText = 'Adding...';
+    } else if (knownStatus) {
+      if (knownStatus.status === 'published' || knownStatus.wp_post_url) {
+        selectBtnClass = 'btn-published';
+        selectBtnText = '&#10003; Published';
+      } else if (knownStatus.status === 'ready') {
+        selectBtnClass = 'btn-status-ready';
+        selectBtnText = '&#10003; Ready';
+      } else if (knownStatus.status === 'rewriting') {
+        selectBtnClass = 'btn-status-rewriting';
+        selectBtnText = 'Rewriting...';
+      } else if (knownStatus.status === 'fetching') {
+        selectBtnClass = 'btn-status-fetching';
+        selectBtnText = 'Extracting...';
+      } else if (knownStatus.status === 'failed') {
+        selectBtnClass = 'btn-status-failed';
+        selectBtnText = '&#10007; Failed';
+      } else {
+        selectBtnClass = 'btn-added';
+        selectBtnText = '&#10003; In Drafts';
+      }
+    } else if (isSelected) {
+      selectBtnClass = 'btn-selected';
+      selectBtnText = '&#10003; Selected';
+    } else {
+      selectBtnClass = 'article-select-btn';
+      selectBtnText = 'Select &#9654;';
+    }
 
     card.innerHTML =
       '<div class="article-card-top">' +
@@ -1158,8 +1221,8 @@
     card._articleData = article;
 
     // Click card or button to toggle selection
-    var selectBtn = card.querySelector('.article-select-btn, .btn-selected');
-    if (selectBtn) {
+    var selectBtn = card.querySelector('.article-select-btn, .btn-selected, .btn-added, .btn-published, .btn-status-fetching, .btn-status-rewriting, .btn-status-ready, .btn-status-failed');
+    if (selectBtn && !knownStatus && !isPending) {
       selectBtn.addEventListener('click', function (e) {
         e.stopPropagation();
         toggleSelectArticle(artKey, article, card);
@@ -1168,6 +1231,9 @@
     card.addEventListener('click', function (e) {
       // Don't toggle if user clicked a link or expand button
       if (e.target.tagName === 'A' || e.target.classList.contains('expand-btn')) return;
+      // Don't toggle if article is already in pipeline
+      var artUrl = article && article.url;
+      if (artUrl && (draftStatusCache[artUrl] || pendingAddUrls[artUrl])) return;
       toggleSelectArticle(artKey, article, card);
     });
 
@@ -1188,8 +1254,14 @@
       card.appendChild(expandBtn);
     }
 
-    // Apply draft status badge if known
-    if (article.url) updateCardStatusBadge(card, article.url);
+    // Apply status treatment if article is already in pipeline
+    if (article.url) {
+      updateCardStatusBadge(card, article.url);
+      // Also set disabled on button if pre-rendered as status
+      if (knownStatus || isPending) {
+        if (selectBtn) selectBtn.disabled = true;
+      }
+    }
 
     if (prepend) {
       container.insertBefore(card, container.firstChild);
