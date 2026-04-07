@@ -1145,17 +1145,37 @@ function createApiRouter(deps) {
   });
 
   // GET /api/drafts/status?url=... — Check draft status for a single URL
+  // GET /api/drafts/status?url=... — Check draft status for a single URL
   router.get('/drafts/status', function (req, res) {
     try {
       var url = req.query.url;
-      if (!url) return res.json({ exists: false });
-      var row = db.prepare('SELECT id, status, wp_post_url, wp_post_id FROM drafts WHERE source_url = ?').get(url);
+      if (!url) return res.json({ exists: false, draft: null });
+
+      var row = db.prepare(
+        'SELECT id, status, wp_post_url, wp_post_id FROM drafts WHERE source_url = ?'
+      ).get(url);
+
       if (row) {
-        return res.json({ exists: true, draft_id: row.id, status: row.status, wp_post_url: row.wp_post_url, wp_post_id: row.wp_post_id });
+        // Return BOTH flat fields (backward compat) AND a `draft` object (for SSE handler)
+        var draftObj = {
+          draft_id: row.id,
+          status: row.status,
+          wp_post_url: row.wp_post_url || null,
+          wp_post_id: row.wp_post_id || null
+        };
+        return res.json({
+          exists: true,
+          draft_id: row.id,
+          status: row.status,
+          wp_post_url: row.wp_post_url || null,
+          wp_post_id: row.wp_post_id || null,
+          draft: draftObj
+        });
       }
-      return res.json({ exists: false });
+      return res.json({ exists: false, draft: null });
     } catch (err) {
-      return res.json({ exists: false });
+      logger.error('api', 'GET /api/drafts/status failed: ' + err.message);
+      return res.json({ exists: false, draft: null });
     }
   });
 

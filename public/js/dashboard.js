@@ -621,8 +621,12 @@
           if (article.url && !draftStatusCache[article.url]) {
             fetchApi('/api/drafts/status?url=' + encodeURIComponent(article.url))
               .then(function (d) {
-                if (d.draft) {
-                  draftStatusCache[article.url] = d.draft;
+                // Support both response formats:
+                // New: { draft: { draft_id, status, wp_post_url } }
+                // Old: { exists: true, draft_id, status, wp_post_url }
+                var draftData = d.draft || (d.exists ? { draft_id: d.draft_id, status: d.status, wp_post_url: d.wp_post_url } : null);
+                if (draftData) {
+                  draftStatusCache[article.url] = draftData;
                   var c = document.querySelector('.article-card[data-article-url="' + CSS.escape(article.url) + '"]');
                   if (c) updateCardStatusBadge(c, article.url);
                 }
@@ -705,7 +709,7 @@
       var hasTransient = false;
       var cacheKeys = Object.keys(draftStatusCache);
       for (var ti = 0; ti < cacheKeys.length; ti++) {
-        var st = draftStatusCache[cacheKeys[ti]].status;
+        var st = draftStatusCache[cacheKeys[ti]] && draftStatusCache[cacheKeys[ti]].status;
         if (st === 'fetching' || st === 'rewriting') { hasTransient = true; break; }
       }
       if (Object.keys(pendingAddUrls).length > 0) hasTransient = true;
@@ -1018,6 +1022,7 @@
 
     selectBtn.disabled = true;
     selectBtn.style.cursor = 'default';
+    selectBtn.removeAttribute('onclick');
 
     if (pending) {
       selectBtn.className = 'btn-status-fetching';
@@ -1390,9 +1395,16 @@
             if (articles[k].url) delete pendingAddUrls[articles[k].url];
           }
           updateAllCardStatuses();
-          var msg = data.created + ' article(s) added to drafts!';
-          if (data.skipped > 0) msg += ' (' + data.skipped + ' duplicates skipped)';
-          showToast(msg, 'success');
+          var msg = '';
+          if (data.created > 0) {
+            msg = data.created + ' article(s) added to drafts!';
+            if (data.skipped > 0) msg += ' (' + data.skipped + ' already in pipeline)';
+          } else if (data.skipped > 0) {
+            msg = 'All ' + data.skipped + ' article(s) already in your pipeline — no duplicates added.';
+          } else {
+            msg = 'No articles were added.';
+          }
+          showToast(msg, data.created > 0 ? 'success' : 'warning');
           clearSelection();
           showGoToPublishedPrompt(data.created);
         } else {
