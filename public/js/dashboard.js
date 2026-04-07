@@ -2868,36 +2868,75 @@
   };
 
   window.__deleteSelectedDrafts = function () {
-    if (_selectedDraftCount === 0) return;
+    var count = Object.keys(_selectedDraftIds).length;
+    if (count === 0) return;
 
-    if (!confirm('Delete ' + _selectedDraftCount + ' selected draft(s)? This cannot be undone. Published articles will be skipped.')) {
+    if (!confirm('Delete ' + count + ' selected draft(s)? This cannot be undone. Published articles will be skipped.')) {
       return;
     }
 
-    var ids = [];
+    var allIds = [];
     for (var k in _selectedDraftIds) {
-      if (_selectedDraftIds[k]) ids.push(parseInt(k, 10));
+      if (_selectedDraftIds[k]) allIds.push(parseInt(k, 10));
+    }
+    if (allIds.length === 0) return;
+
+    // Split into chunks of 500 to respect backend limits
+    var CHUNK_SIZE = 500;
+    var chunks = [];
+    for (var i = 0; i < allIds.length; i += CHUNK_SIZE) {
+      chunks.push(allIds.slice(i, i + CHUNK_SIZE));
     }
 
-    fetchApi('/api/drafts/batch-delete', {
-      method: 'POST',
-      body: { ids: ids }
-    })
-      .then(function (data) {
-        if (data.success) {
-          showToast('Deleted ' + data.deletedCount + ' draft(s)' +
-            (data.skippedPublished > 0 ? ' (' + data.skippedPublished + ' published skipped)' : ''), 'success');
-          _selectedDraftIds = {};
-          _selectedDraftCount = 0;
-          _selectModeActive = false;
-          loadPublished();
-        } else {
-          showToast('Delete failed: ' + (data.error || 'Unknown error'), 'error');
-        }
+    var totalDeleted = 0;
+    var totalSkipped = 0;
+    var totalErrors = 0;
+    var currentChunk = 0;
+
+    if (chunks.length > 1) {
+      showToast('Deleting ' + allIds.length + ' drafts in ' + chunks.length + ' batches...', 'info');
+    }
+
+    function processNextChunk() {
+      if (currentChunk >= chunks.length) {
+        var msg = 'Deleted ' + totalDeleted + ' draft(s)';
+        if (totalSkipped > 0) msg += ' (' + totalSkipped + ' published skipped)';
+        if (totalErrors > 0) msg += ' (' + totalErrors + ' errors)';
+        showToast(msg, totalErrors > 0 ? 'warning' : 'success');
+        _selectedDraftIds = {};
+        _selectedDraftCount = 0;
+        _selectModeActive = false;
+        loadPublished();
+        return;
+      }
+
+      var chunk = chunks[currentChunk];
+      currentChunk++;
+
+      if (chunks.length > 1) {
+        showToast('Batch ' + currentChunk + '/' + chunks.length + ' — deleting ' + chunk.length + ' drafts...', 'info');
+      }
+
+      fetchApi('/api/drafts/batch-delete', {
+        method: 'POST',
+        body: { ids: chunk }
       })
-      .catch(function (err) {
-        showToast('Delete failed: ' + err.message, 'error');
-      });
+        .then(function (data) {
+          if (data.success) {
+            totalDeleted += (data.deletedCount || 0);
+            totalSkipped += (data.skippedPublished || 0);
+          } else {
+            totalErrors += chunk.length;
+          }
+          setTimeout(processNextChunk, 200);
+        })
+        .catch(function (err) {
+          totalErrors += chunk.length;
+          setTimeout(processNextChunk, 200);
+        });
+    }
+
+    processNextChunk();
   };
 
   function _updateSelectUI() {
