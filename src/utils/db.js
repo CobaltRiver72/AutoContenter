@@ -150,6 +150,16 @@ function runMigrations() {
       // Column already exists — ignore
     }
 
+    // Add page_category and language columns to articles if they don't exist
+    try {
+      db.exec('ALTER TABLE articles ADD COLUMN page_category TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE articles ADD COLUMN language TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    db.exec('CREATE INDEX IF NOT EXISTS idx_articles_title ON articles(title)');
+
     // Add new columns to published table if they don't exist
     try {
       db.exec('ALTER TABLE published ADD COLUMN word_count INTEGER DEFAULT 0');
@@ -273,6 +283,25 @@ function runMigrations() {
         updated_at TEXT DEFAULT (datetime('now'))
       )
     `);
+
+    // One-time fix: clean known-wrong model IDs from settings
+    var wrongModelIds = {
+      'claude-opus-4-6-20250610': 'claude-opus-4-6',
+      'claude-sonnet-4-6-20250610': 'claude-sonnet-4-6',
+      'claude-opus-4-20250610': 'claude-opus-4-20250514',
+      'claude-sonnet-4-20250610': 'claude-sonnet-4-20250514',
+    };
+    var wrongIds = Object.keys(wrongModelIds);
+    for (var wi = 0; wi < wrongIds.length; wi++) {
+      try {
+        var fixResult = db.prepare(
+          "UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'ANTHROPIC_MODEL' AND value = ?"
+        ).run(wrongModelIds[wrongIds[wi]], wrongIds[wi]);
+        if (fixResult.changes > 0) {
+          console.log('[db] Fixed stale model ID: ' + wrongIds[wi] + ' → ' + wrongModelIds[wrongIds[wi]]);
+        }
+      } catch (e) { /* silent */ }
+    }
 
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {

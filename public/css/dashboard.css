@@ -1392,6 +1392,52 @@ select:focus {
   margin-top: 2px;
 }
 
+/* ─── Empty State ────────────────────────────────────────────────────── */
+.empty-state {
+  text-align: left;
+  padding: 24px;
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.empty-state h3 {
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.empty-state p {
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.empty-state-tips ul {
+  color: var(--text-secondary);
+  padding-left: 20px;
+  margin-bottom: 12px;
+}
+.empty-state-tips li {
+  margin-bottom: 4px;
+}
+
+/* ─── Stat Card Mini ─────────────────────────────────────────────────── */
+.stat-card-mini {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  text-align: center;
+}
+.stat-card-mini .stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.stat-card-mini .stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
 /* ─── Draft Cards ─────────────────────────────────────────────────────── */
 .drafts-list {
   display: flex;

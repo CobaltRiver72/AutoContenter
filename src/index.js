@@ -57,6 +57,9 @@ async function boot() {
       var articleId = buffer.addArticle(article);
       if (!articleId) return; // duplicate or failed insert
 
+      // Attach ID back to article for similarity engine
+      article.id = articleId;
+
       // Only match trends if the module is ready
       var trendsMatch = null;
       if (trends.enabled && trends.ready) {
@@ -66,10 +69,18 @@ async function boot() {
       var bufferArticles = buffer.getRecentArticles(config.BUFFER_HOURS);
       var matches = similarity.findMatches(article, bufferArticles);
 
+      // Debug: Log similarity results for monitoring
+      if (matches.length > 0) {
+        logger.info('index', 'Similarity matches for "' + (article.title || article.url).substring(0, 60) + '": ' + matches.length + ' match(es), best score: ' + matches[0].score);
+      }
+
       if (matches.length >= config.MIN_SOURCES_THRESHOLD - 1) {
         var cluster = similarity.createOrUpdateCluster(article, matches, trendsMatch);
-        if (similarity.shouldPublish(cluster)) {
-          scheduler.enqueue(cluster);
+        if (cluster) {
+          logger.info('index', 'Cluster ' + cluster.id + ' ready: "' + (cluster.topic || '').substring(0, 60) + '" (' + cluster.article_count + ' articles)');
+          if (similarity.shouldPublish(cluster)) {
+            scheduler.enqueue(cluster);
+          }
         }
       }
     } catch (err) {

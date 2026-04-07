@@ -583,6 +583,16 @@
 
         try {
           var article = JSON.parse(e.data);
+
+          // Don't update the visible feed while search is active
+          if (searchActive) {
+            state.feedArticles.unshift(article);
+            if (state.feedArticles.length > 500) state.feedArticles.pop();
+            state.feedCount++;
+            updateFeedCounter();
+            return;
+          }
+
           state.feedArticles.unshift(article);
           state.feedCount++;
           state.feedHourlyCount++;
@@ -665,8 +675,9 @@
     if (bulkClearSelBtn) { bulkClearSelBtn.onclick = function () { clearSelection(); }; }
     if (bulkFetchBtn) { bulkFetchBtn.onclick = function () { bulkFetchAndAddToDrafts(); }; }
 
-    // Render feed filters
+    // Render feed filters and search
     renderFeedFilters();
+    initFeedSearch();
 
     // Load initial articles from buffer
     fetchApi('/api/feed?page=1')
@@ -740,21 +751,35 @@
     filtersDiv.className = 'feed-filters';
     filtersDiv.style.marginBottom = '12px';
     filtersDiv.innerHTML =
-      '<input type="text" id="feedFilterDomain" placeholder="Filter by domain..." style="width:180px;font-size:12px;padding:5px 10px">' +
-      '<select id="feedFilterLang" style="font-size:12px;padding:5px 10px">' +
-        '<option value="">All Languages</option>' +
-        '<option value="en">English</option>' +
-        '<option value="hi">Hindi</option>' +
-        '<option value="ta">Tamil</option>' +
-        '<option value="te">Telugu</option>' +
-        '<option value="bn">Bengali</option>' +
-        '<option value="mr">Marathi</option>' +
-        '<option value="gu">Gujarati</option>' +
-        '<option value="kn">Kannada</option>' +
-        '<option value="ml">Malayalam</option>' +
-        '<option value="pa">Punjabi</option>' +
-      '</select>' +
-      '<button id="feedFilterNew" class="btn btn-sm" style="font-size:12px;padding:5px 12px;margin-left:6px">Show Only New</button>';
+      '<div class="feed-search-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+        '<input type="text" id="feedSearchKeyword" placeholder="Search titles by keyword..." ' +
+          'style="flex:1;min-width:220px;font-size:13px;padding:6px 12px;background:var(--input-bg,#1a1a2e);color:var(--text-primary,#fff);border:1px solid var(--border,#2a2a4a);border-radius:4px">' +
+        '<button id="feedSearchBtn" class="btn btn-sm btn-primary" style="white-space:nowrap">Search</button>' +
+        '<button id="feedSearchClear" class="btn btn-sm btn-secondary" style="white-space:nowrap;display:none">Clear</button>' +
+      '</div>' +
+      '<div id="feedSearchResults" style="display:none;margin-bottom:8px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">' +
+          '<span id="feedSearchCount" style="font-size:12px;color:var(--text-muted,#888)"></span>' +
+          '<span id="feedSearchSource" style="font-size:11px;color:var(--text-muted,#666)"></span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="feed-filter-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<input type="text" id="feedFilterDomain" placeholder="Filter by domain..." style="width:180px;font-size:12px;padding:5px 10px">' +
+        '<select id="feedFilterLang" style="font-size:12px;padding:5px 10px">' +
+          '<option value="">All Languages</option>' +
+          '<option value="en">English</option>' +
+          '<option value="hi">Hindi</option>' +
+          '<option value="ta">Tamil</option>' +
+          '<option value="te">Telugu</option>' +
+          '<option value="bn">Bengali</option>' +
+          '<option value="mr">Marathi</option>' +
+          '<option value="gu">Gujarati</option>' +
+          '<option value="kn">Kannada</option>' +
+          '<option value="ml">Malayalam</option>' +
+          '<option value="pa">Punjabi</option>' +
+        '</select>' +
+        '<button id="feedFilterNew" class="btn btn-sm" style="font-size:12px;padding:5px 12px;margin-left:6px">Show Only New</button>' +
+      '</div>';
 
     // Insert after page header
     pageHeader.parentNode.insertBefore(filtersDiv, pageHeader.nextSibling);
@@ -785,6 +810,156 @@
         newBtn.style.color = showOnlyNew ? '#fff' : '';
         reRenderFeed();
       });
+    }
+  }
+
+  // ─── Keyword Search for Live Feed ───────────────────────────────────────
+
+  var searchActive = false;
+
+  function initFeedSearch() {
+    var searchInput = $('feedSearchKeyword');
+    var searchBtn = $('feedSearchBtn');
+    var clearBtn = $('feedSearchClear');
+
+    if (!searchInput || !searchBtn) return;
+
+    searchBtn.addEventListener('click', function () {
+      performFeedSearch(searchInput.value.trim());
+    });
+
+    searchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        performFeedSearch(searchInput.value.trim());
+      }
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        searchInput.value = '';
+        clearFeedSearch();
+      });
+    }
+  }
+
+  function performFeedSearch(query) {
+    if (!query || query.length < 2) {
+      showToast('Enter at least 2 characters to search', 'warning');
+      return;
+    }
+
+    var clearBtn = $('feedSearchClear');
+    var resultsDiv = $('feedSearchResults');
+    var countSpan = $('feedSearchCount');
+    var sourceSpan = $('feedSearchSource');
+
+    // Client-side search in loaded feed articles
+    var keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+    var localMatches = state.feedArticles.filter(function (article) {
+      var title = (article.title || '').toLowerCase();
+      return keywords.every(function (kw) { return title.indexOf(kw) !== -1; });
+    });
+
+    searchActive = true;
+    if (clearBtn) clearBtn.style.display = '';
+    if (resultsDiv) resultsDiv.style.display = '';
+    if (countSpan) countSpan.textContent = 'Searching...';
+
+    // Also search the database
+    fetchApi('/api/articles/search?q=' + encodeURIComponent(query) + '&limit=100')
+      .then(function (data) {
+        var dbResults = data.articles || [];
+
+        // Merge and deduplicate by URL
+        var seen = {};
+        var merged = [];
+        var i;
+
+        for (i = 0; i < localMatches.length; i++) {
+          var lKey = localMatches[i].url || localMatches[i].firehose_event_id;
+          if (!seen[lKey]) { seen[lKey] = true; merged.push(localMatches[i]); }
+        }
+        for (i = 0; i < dbResults.length; i++) {
+          var dKey = dbResults[i].url || dbResults[i].firehose_event_id;
+          if (!seen[dKey]) { seen[dKey] = true; merged.push(dbResults[i]); }
+        }
+
+        var feedList = $('feedList');
+        if (feedList) {
+          feedList.innerHTML = '';
+          if (merged.length === 0) {
+            feedList.innerHTML = '<p class="placeholder-text">No articles found matching "' + escapeHtml(query) + '"</p>';
+          } else {
+            for (i = 0; i < merged.length; i++) {
+              renderArticleCard(feedList, merged[i], false);
+            }
+          }
+        }
+
+        if (countSpan) countSpan.textContent = merged.length + ' article(s) found for "' + query + '"';
+        if (sourceSpan) sourceSpan.textContent = localMatches.length + ' from live feed, ' + dbResults.length + ' from database';
+
+        // Offer to create Firehose rule
+        if (merged.length > 0 && countSpan && countSpan.parentNode) {
+          var existingRuleBtn = countSpan.parentNode.querySelector('.create-rule-btn');
+          if (existingRuleBtn) existingRuleBtn.remove();
+          var ruleBtn = document.createElement('button');
+          ruleBtn.className = 'btn btn-sm btn-secondary create-rule-btn';
+          ruleBtn.style.marginLeft = '8px';
+          ruleBtn.textContent = 'Create Firehose Rule';
+          ruleBtn.onclick = function () { createFirehoseRuleFromSearch(query); };
+          countSpan.parentNode.appendChild(ruleBtn);
+        }
+      })
+      .catch(function (err) {
+        var feedList = $('feedList');
+        if (feedList) {
+          feedList.innerHTML = '';
+          for (var k = 0; k < localMatches.length; k++) {
+            renderArticleCard(feedList, localMatches[k], false);
+          }
+        }
+        if (countSpan) countSpan.textContent = localMatches.length + ' article(s) found (local only)';
+      });
+  }
+
+  function clearFeedSearch() {
+    searchActive = false;
+    var clearBtn = $('feedSearchClear');
+    var resultsDiv = $('feedSearchResults');
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (resultsDiv) resultsDiv.style.display = 'none';
+    reRenderFeed();
+  }
+
+  function createFirehoseRuleFromSearch(query) {
+    var keywords = query.split(/\s+/).filter(Boolean);
+    var titleClauses = keywords.map(function (kw) {
+      return kw.indexOf(' ') !== -1 ? 'title:"' + kw + '"' : 'title:' + kw.toLowerCase();
+    });
+    var ruleValue = 'language:en AND (' + titleClauses.join(' OR ') + ')';
+    var tag = 'search-' + keywords.slice(0, 3).join('-').toLowerCase().replace(/[^a-z0-9-]/g, '');
+
+    var tagInput = $('ruleTag');
+    var queryInput = $('ruleQuery');
+
+    if (tagInput && queryInput) {
+      tagInput.value = tag;
+      queryInput.value = ruleValue;
+      showToast('Rule populated — review and click "Add Rule" to activate', 'info');
+      var ruleForm = document.querySelector('.rule-form');
+      if (ruleForm) ruleForm.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(ruleValue).then(function () {
+          showToast('Lucene rule copied to clipboard', 'success');
+        }).catch(function () {
+          showToast('Rule: ' + ruleValue, 'info');
+        });
+      } else {
+        showToast('Rule: ' + ruleValue, 'info');
+      }
     }
   }
 
@@ -1572,8 +1747,26 @@
     var container = $('clustersList');
     var pagination = $('clustersPagination');
     var statusFilter = $('clusterStatusFilter');
+    var statsContainer = $('clusterStats');
 
     if (container) container.innerHTML = '<p class="placeholder-text">Loading...</p>';
+
+    // Fetch cluster stats
+    fetchApi('/api/clusters/stats')
+      .then(function (stats) {
+        if (statsContainer) {
+          statsContainer.innerHTML =
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:16px">' +
+              '<div class="stat-card-mini"><div class="stat-value">' + (stats.totalClusters || 0) + '</div><div class="stat-label">Total Clusters</div></div>' +
+              '<div class="stat-card-mini"><div class="stat-value">' + (stats.detected || 0) + '</div><div class="stat-label">Detected</div></div>' +
+              '<div class="stat-card-mini"><div class="stat-value">' + (stats.published || 0) + '</div><div class="stat-label">Published</div></div>' +
+              '<div class="stat-card-mini"><div class="stat-value">' + (stats.avgArticlesPerCluster || '--') + '</div><div class="stat-label">Avg Articles</div></div>' +
+              '<div class="stat-card-mini"><div class="stat-value">' + (stats.bufferSize || 0) + '</div><div class="stat-label">Buffer Articles</div></div>' +
+              '<div class="stat-card-mini"><div class="stat-value">' + (stats.uniqueDomains || 0) + '</div><div class="stat-label">Unique Domains</div></div>' +
+            '</div>';
+        }
+      })
+      .catch(function () { /* silent — stats are optional */ });
 
     var filterValue = statusFilter ? statusFilter.value : '';
     var url = '/api/clusters?page=' + state.clustersPage +
@@ -1605,7 +1798,29 @@
     if (!container) return;
 
     if (clusters.length === 0) {
-      container.innerHTML = '<p class="placeholder-text">No clusters found</p>';
+      container.innerHTML =
+        '<div class="empty-state">' +
+          '<h3>No Clusters Yet</h3>' +
+          '<p>Clusters are created automatically when 2+ articles from different sources cover the same topic within the buffer window.</p>' +
+          '<div class="empty-state-tips">' +
+            '<p><strong>How clustering works:</strong></p>' +
+            '<ul>' +
+              '<li>Articles arrive from the Firehose in real-time</li>' +
+              '<li>Each article is fingerprinted (title + content + category)</li>' +
+              '<li>The similarity engine compares new articles against recent ones using TF-IDF</li>' +
+              '<li>When similarity exceeds the threshold, a cluster is formed</li>' +
+              '<li>Clusters can be auto-published or manually reviewed here</li>' +
+            '</ul>' +
+            '<p><strong>Tips to get clusters:</strong></p>' +
+            '<ul>' +
+              '<li>Make sure the Firehose is connected and streaming articles</li>' +
+              '<li>Use broad Firehose rules that capture articles from multiple domains</li>' +
+              '<li>Lower the Similarity Threshold in Settings (try 0.15-0.20)</li>' +
+              '<li>Increase the Buffer Window to give more time for matches</li>' +
+              '<li>Breaking news stories cluster fastest (multiple outlets cover them)</li>' +
+            '</ul>' +
+          '</div>' +
+        '</div>';
       return;
     }
 
@@ -2506,7 +2721,7 @@
     var standardGroups = {
       'Firehose': ['FIREHOSE_TOKEN'],
       'WordPress': ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS'],
-      'Pipeline': ['MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
+      'Pipeline': ['MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
       'InfraNodus': ['INFRANODUS_ENABLED', 'INFRANODUS_API_KEY'],
       'Source Tiers': ['TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES'],
@@ -2523,6 +2738,7 @@
     var booleanKeys = {
       TRENDS_ENABLED: true,
       INFRANODUS_ENABLED: true,
+      ALLOW_SAME_DOMAIN_CLUSTERS: true,
     };
 
     var html = '';
@@ -2776,7 +2992,15 @@
         el = $('ai-provider'); if (el) el.value = data.provider || 'openrouter';
         el = $('anthropic-key');
         if (el && data.anthropicKey) el.placeholder = data.anthropicKey;
-        el = $('anthropic-model'); if (el) el.value = data.anthropicModel || 'claude-haiku-4-5-20251001';
+        el = $('anthropic-model');
+        if (el && data.anthropicModel) {
+          el.value = data.anthropicModel;
+          // Check if the model is valid (exists in dropdown)
+          if (el.selectedIndex === -1 || el.value !== data.anthropicModel) {
+            showToast('Warning: Invalid Anthropic model "' + data.anthropicModel + '" was saved. Resetting to default.', 'warning');
+            el.selectedIndex = 0;
+          }
+        }
         el = $('openai-key');
         if (el && data.openaiKey) el.placeholder = data.openaiKey;
         el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o';

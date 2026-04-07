@@ -63,7 +63,7 @@ class SimilarityEngine {
         return [];
       }
 
-      const threshold = this.config.SIMILARITY_THRESHOLD || 0.35;
+      const threshold = this.config.SIMILARITY_THRESHOLD || 0.20;
       const tfidf = new TfIdf();
 
       // Add all buffer article fingerprints to the corpus (index 0..N-1)
@@ -77,18 +77,25 @@ class SimilarityEngine {
       const newDocIndex = bufferArticles.length;
       const matches = [];
 
+      const allowSameDomain = this.config.ALLOW_SAME_DOMAIN_CLUSTERS === 'true' || this.config.ALLOW_SAME_DOMAIN_CLUSTERS === true;
+
       // Compute cosine similarity between new article and each buffer article
       for (let i = 0; i < bufferArticles.length; i++) {
         // Skip same article (by ID or URL)
         if (bufferArticles[i].id === newArticle.id) continue;
         if (bufferArticles[i].url === newArticle.url) continue;
 
-        // Require different domain
-        if (bufferArticles[i].domain === newArticle.domain) continue;
+        const isSameDomain = bufferArticles[i].domain === newArticle.domain;
+
+        // Skip same-domain if not allowed
+        if (isSameDomain && !allowSameDomain) continue;
 
         const score = this._cosineSimilarity(tfidf, newDocIndex, i);
 
-        if (score > threshold) {
+        // Same-domain matches need higher threshold to avoid noise
+        const effectiveThreshold = isSameDomain ? threshold * 1.5 : threshold;
+
+        if (score > effectiveThreshold) {
           matches.push({
             article: bufferArticles[i],
             score: Math.round(score * 10000) / 10000,

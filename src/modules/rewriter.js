@@ -255,6 +255,33 @@ class ArticleRewriter {
       maxTokens:        parseInt(this._getSetting('MAX_TOKENS')  || process.env.MAX_TOKENS           || '4096', 10),
       temperature:      parseFloat(this._getSetting('TEMPERATURE') || process.env.TEMPERATURE        || '0.7'),
     };
+
+    // Validate model IDs against known models — fix stale DB values
+    this._cfg.anthropicModel = this._validateModelId('anthropic', this._cfg.anthropicModel, 'claude-haiku-4-5-20251001');
+    this._cfg.openaiModel = this._validateModelId('openai', this._cfg.openaiModel, 'gpt-4o');
+    this._cfg.openrouterModel = this._validateModelId('openrouter', this._cfg.openrouterModel, 'qwen/qwen3.6-plus:free');
+  }
+
+  _validateModelId(provider, currentId, defaultId) {
+    if (!currentId) return defaultId;
+
+    var knownModels = AI_MODELS[provider] || [];
+    var isValid = knownModels.some(function(m) { return m.id === currentId; });
+
+    if (!isValid) {
+      this.logger.warn('rewriter',
+        'Invalid ' + provider + ' model ID "' + currentId + '" in settings. ' +
+        'Resetting to default: "' + defaultId + '". ' +
+        'Valid: ' + knownModels.map(function(m) { return m.id; }).join(', ')
+      );
+      var dbKeyMap = { anthropic: 'ANTHROPIC_MODEL', openai: 'OPENAI_MODEL', openrouter: 'OPENROUTER_MODEL' };
+      try {
+        this._setSetting(dbKeyMap[provider], defaultId);
+      } catch (e) { /* silent */ }
+      return defaultId;
+    }
+
+    return currentId;
   }
 
   // ─── Settings API (called by routes) ────────────────────────────────────

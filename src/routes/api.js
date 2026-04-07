@@ -175,6 +175,86 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/articles/search ──────────────────────────────────────────────
+
+  router.get('/articles/search', function (req, res) {
+    try {
+      var query = (req.query.q || '').trim();
+      if (!query || query.length < 2) {
+        return res.status(400).json({ error: 'Query must be at least 2 characters' });
+      }
+
+      var limit = Math.min(parseInt(req.query.limit) || 100, 500);
+
+      var keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+      var whereClauses = [];
+      var params = [];
+
+      for (var i = 0; i < keywords.length; i++) {
+        whereClauses.push('LOWER(title) LIKE ?');
+        params.push('%' + keywords[i] + '%');
+      }
+
+      var sql = 'SELECT id, firehose_event_id, url, domain, title, publish_time, ' +
+                'page_category, language, authority_tier, cluster_id, received_at ' +
+                'FROM articles WHERE ' + whereClauses.join(' AND ') +
+                ' ORDER BY received_at DESC LIMIT ?';
+      params.push(limit);
+
+      var stmt = db.prepare(sql);
+      var articles = stmt.all.apply(stmt, params);
+
+      res.json({
+        articles: articles,
+        total: articles.length,
+        query: query,
+        keywords: keywords
+      });
+    } catch (err) {
+      logger.error('api', 'Article search failed', err.message);
+      res.status(500).json({ error: 'Search failed' });
+    }
+  });
+
+  // ─── GET /api/clusters/stats ────────────────────────────────────────────────
+
+  router.get('/clusters/stats', function (req, res) {
+    try {
+      var totalClusters = db.prepare('SELECT COUNT(*) as count FROM clusters').get().count;
+      var detected = db.prepare("SELECT COUNT(*) as count FROM clusters WHERE status = 'detected'").get().count;
+      var published = db.prepare("SELECT COUNT(*) as count FROM clusters WHERE status = 'published'").get().count;
+      var failed = db.prepare("SELECT COUNT(*) as count FROM clusters WHERE status = 'failed'").get().count;
+      var skipped = db.prepare("SELECT COUNT(*) as count FROM clusters WHERE status = 'skipped'").get().count;
+
+      var avgResult = db.prepare('SELECT AVG(article_count) as avg FROM clusters').get();
+      var avgArticles = avgResult && avgResult.avg ? Math.round(avgResult.avg * 10) / 10 : 0;
+
+      var bufferHours = require('../utils/config').getConfig().BUFFER_HOURS || 6;
+      var bufferSize = db.prepare(
+        "SELECT COUNT(*) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours')"
+      ).get(bufferHours).count;
+
+      var uniqueDomains = db.prepare(
+        "SELECT COUNT(DISTINCT domain) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours')"
+      ).get(bufferHours).count;
+
+      res.json({
+        totalClusters: totalClusters,
+        detected: detected,
+        published: published,
+        failed: failed,
+        skipped: skipped,
+        avgArticlesPerCluster: avgArticles,
+        bufferSize: bufferSize,
+        uniqueDomains: uniqueDomains,
+        bufferHours: bufferHours
+      });
+    } catch (err) {
+      logger.error('api', 'Failed to fetch cluster stats', err.message);
+      res.status(500).json({ error: 'Failed to fetch cluster stats' });
+    }
+  });
+
   // ─── GET /api/clusters ────────────────────────────────────────────────────
 
   router.get('/clusters', function (req, res) {

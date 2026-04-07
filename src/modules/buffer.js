@@ -56,9 +56,9 @@ class ArticleBuffer {
       if (!this._stmts.insert) {
         this._stmts.insert = this.db.prepare(`
           INSERT OR IGNORE INTO articles
-            (firehose_event_id, url, domain, title, publish_time, content_markdown, fingerprint, authority_tier, received_at)
+            (firehose_event_id, url, domain, title, publish_time, content_markdown, fingerprint, authority_tier, page_category, language, received_at)
           VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         `);
       }
 
@@ -70,7 +70,9 @@ class ArticleBuffer {
         article.publish_time || null,
         typeof article.content_markdown === 'string' ? article.content_markdown : (article.content_markdown ? JSON.stringify(article.content_markdown) : null),
         fingerprint,
-        article.authority_tier || 3
+        article.authority_tier || 3,
+        article.page_category ? (Array.isArray(article.page_category) ? article.page_category.join(',') : article.page_category) : null,
+        article.language || null
       );
 
       if (result.changes === 0) {
@@ -246,30 +248,107 @@ class ArticleBuffer {
   // ─── Private Helpers ────────────────────────────────────────────────────────
 
   /**
-   * Build a fingerprint from article title + first 500 words of content.
-   * Strips markdown, lowercases, and trims.
+   * Build a fingerprint from article title + extracted content.
+   * Handles Firehose JSON content_markdown (chunks format) + plain markdown.
+   * Also includes page_category for topic clustering.
    *
    * @param {object} article
    * @returns {string}
    */
   _buildFingerprint(article) {
     const title = String(article.title || '').trim();
-    const content = String(article.content_markdown || '')
-      // Strip common markdown symbols
+
+    // Extract text from content_markdown (may be JSON from Firehose)
+    let rawContent = String(article.content_markdown || '');
+    let extractedText = '';
+
+    if (rawContent.trim().startsWith('{') || rawContent.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(rawContent);
+        extractedText = this._extractTextFromJson(parsed);
+      } catch (e) {
+        extractedText = rawContent;
+      }
+    } else {
+      extractedText = rawContent;
+    }
+
+    // Strip markdown formatting
+    extractedText = extractedText
       .replace(/[#*_\[\]()>`~|\\]/g, ' ')
       .replace(/!\[.*?\]\(.*?\)/g, '')
       .replace(/\[([^\]]*)\]\(.*?\)/g, '$1')
       .replace(/```[\s\S]*?```/g, '')
-      .replace(/`[^`]*`/g, '');
+      .replace(/`[^`]*`/g, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/https?:\/\/\S+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    // Take first 500 words of content
-    const contentWords = content
+    // Take first 500 words of extracted content
+    const contentWords = extractedText
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 500)
       .join(' ');
 
-    return `${title} ${contentWords}`.toLowerCase().trim();
+    // Include page_category for topic clustering
+    let categoryText = '';
+    if (article.page_category) {
+      const cats = Array.isArray(article.page_category)
+        ? article.page_category
+        : [article.page_category];
+      categoryText = cats
+        .join(' ')
+        .replace(/[\/]/g, ' ')
+        .replace(/[_]/g, ' ')
+        .toLowerCase()
+        .trim();
+    }
+
+    // Repeat title 3x to weight it heavily since content may be thin
+    const titleWeighted = (title + ' ' + title + ' ' + title).trim();
+    return `${titleWeighted} ${categoryText} ${contentWords}`.toLowerCase().trim();
+  }
+
+  /**
+   * Recursively extract text from a JSON object (handles Firehose chunk format).
+   *
+   * @param {*} obj
+   * @returns {string}
+   */
+  _extractTextFromJson(obj) {
+    if (!obj) return '';
+    if (typeof obj === 'string') return obj;
+    if (Array.isArray(obj)) {
+      return obj.map(item => this._extractTextFromJson(item)).join(' ');
+    }
+    if (typeof obj === 'object') {
+      let texts = [];
+      const textKeys = ['text', 'content', 'value', 'body', 'title', 'heading',
+                        'paragraph', 'description', 'summary', 'markdown'];
+      for (const key of textKeys) {
+        if (obj[key]) {
+          texts.push(this._extractTextFromJson(obj[key]));
+        }
+      }
+      if (obj.chunks && Array.isArray(obj.chunks)) {
+        for (const chunk of obj.chunks) {
+          texts.push(this._extractTextFromJson(chunk));
+        }
+      }
+      if (texts.length === 0) {
+        for (const [key, val] of Object.entries(obj)) {
+          if (typeof val === 'string' && val.length > 10) {
+            texts.push(val);
+          } else if (typeof val === 'object') {
+            texts.push(this._extractTextFromJson(val));
+          }
+        }
+      }
+      return texts.filter(Boolean).join(' ');
+    }
+    return String(obj);
   }
 }
 

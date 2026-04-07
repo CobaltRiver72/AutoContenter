@@ -389,11 +389,18 @@ class PublishScheduler {
     if (!clusterId) return;
 
     try {
-      this.db.prepare('UPDATE clusters SET status = ?, updated_at = ? WHERE id = ?').run(
+      this.db.prepare('UPDATE clusters SET status = ? WHERE id = ?').run(
         status,
-        new Date().toISOString(),
         clusterId
       );
+      if (status === 'published') {
+        try {
+          this.db.prepare('UPDATE clusters SET published_at = ? WHERE id = ?').run(
+            new Date().toISOString(),
+            clusterId
+          );
+        } catch (e) { /* published_at column might not exist */ }
+      }
     } catch (err) {
       this.logger.error('Failed to update cluster status', {
         error: err.message,
