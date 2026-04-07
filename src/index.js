@@ -128,6 +128,16 @@ async function boot() {
   // Trust Hostinger reverse proxy
   app.set('trust proxy', 1);
 
+  // Force HTTPS in production
+  if (process.env.NODE_ENV === 'production' || config.FORCE_HTTPS === true || config.FORCE_HTTPS === 'true') {
+    app.use(function (req, res, next) {
+      if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+        return next();
+      }
+      res.redirect(301, 'https://' + req.headers.host + req.url);
+    });
+  }
+
   // Security headers
   app.use(helmet({
     contentSecurityPolicy: {
@@ -182,8 +192,11 @@ async function boot() {
   });
   app.use('/api', checkAuth, apiRouter);
 
-  // Static files
-  app.use(express.static(path.resolve(__dirname, '..', 'public')));
+  // Static assets — accessible without auth for login page to work
+  app.use('/css', express.static(path.resolve(__dirname, '..', 'public', 'css')));
+  app.use('/js', express.static(path.resolve(__dirname, '..', 'public', 'js')));
+  app.use('/img', express.static(path.resolve(__dirname, '..', 'public', 'img')));
+  app.use('/fonts', express.static(path.resolve(__dirname, '..', 'public', 'fonts')));
 
   // Global error handler — NEVER expose stack traces
   app.use(function(err, req, res, next) {

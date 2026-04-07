@@ -41,6 +41,7 @@ var DEFAULTS = {
   TRENDS_ENABLED: 'false',
   INFRANODUS_API_KEY: '',
   INFRANODUS_ENABLED: 'false',
+  FORCE_HTTPS: 'false',
 };
 
 // Numeric keys that should be parsed as numbers
@@ -60,7 +61,7 @@ var NUMERIC_KEYS = [
 var CSV_KEYS = ['TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES'];
 
 // Boolean keys that should be parsed as booleans
-var BOOLEAN_KEYS = ['TRENDS_ENABLED', 'INFRANODUS_ENABLED', 'ENABLE_FALLBACK'];
+var BOOLEAN_KEYS = ['TRENDS_ENABLED', 'INFRANODUS_ENABLED', 'ENABLE_FALLBACK', 'FORCE_HTTPS'];
 
 /**
  * Build the config object from environment variables and defaults.

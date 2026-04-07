@@ -246,6 +246,22 @@ function validateRewriteOutput(html, originalContent) {
     warnings.push('No HTML paragraph or heading tags found');
   }
 
+  // Check for raw HTML entities (AI escaped HTML instead of writing tags)
+  if (html.indexOf('&lt;strong&gt;') !== -1 || html.indexOf('&lt;p&gt;') !== -1 ||
+      html.indexOf('&lt;h2&gt;') !== -1 || html.indexOf('&lt;em&gt;') !== -1) {
+    warnings.push('HTML entities found where real tags expected — AI may have escaped HTML');
+  }
+
+  // Check for h1 tags (should be h2+ in article body)
+  if (/<h1[\s>]/i.test(html)) {
+    warnings.push('Content contains <h1> tags — should use <h2> for article body headings');
+  }
+
+  // Check for markdown leaking into HTML output
+  if (html.indexOf('## ') !== -1 || html.indexOf('**') !== -1 || html.indexOf('```') !== -1) {
+    warnings.push('Markdown syntax detected in HTML output — AI may have mixed formats');
+  }
+
   return {
     valid: errors.length === 0,
     errors: errors,
@@ -462,6 +478,7 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
     var model = result.model || result.aiModel || 'unknown';
     var provider = result.provider || result.aiProvider || opts.provider || '';
     var tokensUsed = result.tokensUsed || 0;
+    var faqData = result.faq || result.faqs || [];
 
     // Validate AI output
     var validation = validateRewriteOutput(html, content);
@@ -486,11 +503,12 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
       "  ai_model_used = ?," +
       "  ai_provider = ?," +
       "  ai_tokens_used = ?," +
+      "  faq_json = ?," +
       "  error_message = NULL," +
       "  status = 'ready'," +
       "  updated_at = datetime('now')" +
       " WHERE id = ?"
-    ).run(html, title, wordCount, model, provider, tokensUsed, draftId);
+    ).run(html, title, wordCount, model, provider, tokensUsed, faqData.length > 0 ? JSON.stringify(faqData) : null, draftId);
 
     logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ')');
   } catch (err) {

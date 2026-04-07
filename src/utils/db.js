@@ -150,6 +150,11 @@ function runMigrations() {
       // Column already exists — ignore
     }
 
+    // Add faq_json column to drafts
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN faq_json TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
     // Add page_category and language columns to articles if they don't exist
     try {
       db.exec('ALTER TABLE articles ADD COLUMN page_category TEXT DEFAULT NULL');

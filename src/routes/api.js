@@ -406,9 +406,33 @@ function createApiRouter(deps) {
         settings[row.key] = row.value;
       });
 
-      // Merge with current config defaults for display (filter out secrets)
+      // SECURITY: Mask ALL sensitive values before sending to frontend
+      var SENSITIVE_KEYS = [
+        'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY',
+        'FIREHOSE_TOKEN', 'FIREHOSE_MANAGEMENT_KEY',
+        'WP_APP_PASSWORD', 'WP_USERNAME',
+        'DASHBOARD_PASSWORD', 'DASHBOARD_PASSWORD_HASH',
+        'INFRANODUS_API_KEY', 'SESSION_SECRET'
+      ];
+
+      var safeSettings = {};
+      var settingKeys = Object.keys(settings);
+      for (var i = 0; i < settingKeys.length; i++) {
+        var sKey = settingKeys[i];
+        if (SENSITIVE_KEYS.indexOf(sKey) !== -1) {
+          if (settings[sKey] && settings[sKey].length > 4) {
+            safeSettings[sKey] = '••••••••' + settings[sKey].slice(-4);
+          } else if (settings[sKey]) {
+            safeSettings[sKey] = '••••••••';
+          } else {
+            safeSettings[sKey] = '';
+          }
+        } else {
+          safeSettings[sKey] = settings[sKey];
+        }
+      }
+
       var config = getConfig();
-      var SENSITIVE_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'FIREHOSE_TOKEN', 'WP_APP_PASSWORD', 'WP_USERNAME', 'DASHBOARD_PASSWORD'];
       var safeConfig = {};
       var configKeys = Object.keys(config);
       for (var k = 0; k < configKeys.length; k++) {
@@ -418,7 +442,8 @@ function createApiRouter(deps) {
           safeConfig[configKeys[k]] = config[configKeys[k]];
         }
       }
-      res.json({ settings: settings, config: safeConfig });
+
+      res.json({ settings: safeSettings, config: safeConfig });
     } catch (err) {
       logger.error('api', 'Failed to fetch settings', err.message);
       res.status(500).json({ error: 'Failed to fetch settings' });
@@ -434,19 +459,68 @@ function createApiRouter(deps) {
         return res.status(400).json({ error: 'Request body must be an object of key-value pairs' });
       }
 
+      // SECURITY: Only allow known settings keys
+      var ALLOWED_KEYS = [
+        'FIREHOSE_TOKEN',
+        'WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS',
+        'MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS',
+        'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES',
+        'TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES',
+        'INFRANODUS_ENABLED', 'INFRANODUS_API_KEY',
+        'TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES',
+        'PORT',
+      ];
+
+      var BLOCKED_KEYS = [
+        'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY',
+        'DASHBOARD_PASSWORD', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET',
+        'FIREHOSE_MANAGEMENT_KEY',
+        'DB_PATH', 'DATA_DIR', 'LOG_PATH', 'NODE_ENV',
+      ];
+
+      var entries = Object.entries(updates);
+      var validEntries = [];
+      var rejected = [];
+
+      for (var i = 0; i < entries.length; i++) {
+        var entryKey = entries[i][0];
+        var entryVal = entries[i][1];
+
+        if (BLOCKED_KEYS.indexOf(entryKey) !== -1) {
+          rejected.push(entryKey + ' (blocked)');
+          continue;
+        }
+        if (ALLOWED_KEYS.indexOf(entryKey) === -1) {
+          rejected.push(entryKey + ' (unknown)');
+          continue;
+        }
+        // Skip masked/placeholder values
+        if (typeof entryVal === 'string' && (entryVal === '••••••••' || entryVal.indexOf('••••') === 0)) {
+          continue;
+        }
+        validEntries.push([entryKey, String(entryVal)]);
+      }
+
+      if (rejected.length > 0) {
+        logger.warn('api', 'Settings update rejected keys: ' + rejected.join(', '));
+      }
+
+      if (validEntries.length === 0) {
+        return res.json({ success: true, updated: 0, message: 'No valid settings to update' });
+      }
+
       var upsertStmt = db.prepare(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
       );
 
-      var insertMany = db.transaction(function (entries) {
-        for (var i = 0; i < entries.length; i++) {
-          upsertStmt.run(entries[i][0], String(entries[i][1]));
+      var insertMany = db.transaction(function (items) {
+        for (var j = 0; j < items.length; j++) {
+          upsertStmt.run(items[j][0], items[j][1]);
         }
       });
 
-      var entries = Object.entries(updates);
-      insertMany(entries);
+      insertMany(validEntries);
 
       // Reload config with new overrides
       var { loadRuntimeOverrides } = require('../utils/config');
@@ -454,14 +528,14 @@ function createApiRouter(deps) {
 
       // Re-initialize publisher if any WP credentials changed
       var wpKeys = ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_POST_STATUS', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY'];
-      var hasWpChange = entries.some(function (e) { return wpKeys.indexOf(e[0]) !== -1; });
+      var hasWpChange = validEntries.some(function (e) { return wpKeys.indexOf(e[0]) !== -1; });
       if (hasWpChange && publisher && typeof publisher.reinit === 'function') {
         publisher.reinit();
         logger.info('api', 'Publisher re-initialized after WP settings change');
       }
 
-      logger.info('api', 'Settings updated', { keys: entries.map(function (e) { return e[0]; }) });
-      res.json({ success: true, updated: entries.length });
+      logger.info('api', 'Settings updated', { keys: validEntries.map(function (e) { return e[0]; }) });
+      res.json({ success: true, updated: validEntries.length });
     } catch (err) {
       logger.error('api', 'Failed to update settings', err.message);
       res.status(500).json({ error: 'Failed to update settings' });
@@ -1461,10 +1535,18 @@ function createApiRouter(deps) {
             content: body.html || draft.rewritten_html || '',
             excerpt: draft.extracted_excerpt || '',
             metaDescription: draft.meta_description || draft.extracted_excerpt || '',
-            slug: draft.target_keyword ? draft.target_keyword.replace(/[^a-z0-9]+/gi, '-').toLowerCase() : '',
+            slug: (function () {
+              var source = draft.target_keyword || draft.rewritten_title || draft.extracted_title || draft.source_title || '';
+              return source.toLowerCase()
+                .replace(/[^\w\s-]/g, '')
+                .replace(/\s+/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, '')
+                .slice(0, 70);
+            })(),
             targetKeyword: draft.target_keyword || '',
             relatedKeywords: [],
-            faq: [],
+            faq: (function() { try { return draft.faq_json ? JSON.parse(draft.faq_json) : []; } catch (e) { return []; } })(),
             wordCount: draft.rewritten_word_count || 0,
             aiModel: draft.ai_model_used || 'manual',
             tokensUsed: 0,

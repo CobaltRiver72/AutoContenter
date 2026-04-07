@@ -38,6 +38,141 @@ function generateFilename(slug, imageUrl) {
   return safeName + ext;
 }
 
+/**
+ * Sanitize AI-generated HTML before publishing to WordPress.
+ */
+function sanitizeHtmlForWP(html) {
+  if (!html) return '';
+  var cleaned = html;
+
+  // Remove document-level wrappers
+  cleaned = cleaned
+    .replace(/<!DOCTYPE[^>]*>/gi, '')
+    .replace(/<\/?html[^>]*>/gi, '')
+    .replace(/<\/?head[^>]*>/gi, '')
+    .replace(/<\/?body[^>]*>/gi, '')
+    .replace(/<meta[^>]*>/gi, '')
+    .replace(/<title[^>]*>.*?<\/title>/gi, '');
+
+  // Remove inline styles
+  cleaned = cleaned.replace(/\s+style\s*=\s*"[^"]*"/gi, '');
+  cleaned = cleaned.replace(/\s+style\s*=\s*'[^']*'/gi, '');
+
+  // Remove class attributes (except faq- classes)
+  cleaned = cleaned.replace(/\s+class\s*=\s*"(?!faq-)[^"]*"/gi, '');
+  cleaned = cleaned.replace(/\s+class\s*=\s*'(?!faq-)[^']*'/gi, '');
+
+  // Fix orphaned inline elements (not wrapped in block tags)
+  var lines = cleaned.split('\n');
+  var fixedLines = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    var startsWithInline = /^<(strong|em|b|i|a|span|mark|small|sub|sup|code)\b/i.test(line);
+    var startsWithBlock = /^<(p|h[1-6]|div|ul|ol|li|blockquote|table|tr|td|th|thead|tbody|figure|figcaption|section|article|nav|header|footer|script|pre|hr)\b/i.test(line);
+    var isClosingTag = /^<\/(p|h[1-6]|div|ul|ol|li|blockquote|table|script|pre|section)\s*>/i.test(line);
+    var isEmptyLine = !line.replace(/<[^>]+>/g, '').trim();
+
+    if (startsWithInline && !isEmptyLine) {
+      fixedLines.push('<p>' + line + '</p>');
+    } else if (!startsWithBlock && !isClosingTag && !isEmptyLine && line.length > 5 && !line.startsWith('<!--') && !line.startsWith('<script')) {
+      if (line.indexOf('<') === -1 || /^[^<]+</.test(line)) {
+        fixedLines.push('<p>' + line + '</p>');
+      } else {
+        fixedLines.push(line);
+      }
+    } else {
+      fixedLines.push(line);
+    }
+  }
+  cleaned = fixedLines.join('\n');
+
+  // Remove empty paragraphs/headings
+  cleaned = cleaned.replace(/<p>\s*<\/p>/gi, '');
+  cleaned = cleaned.replace(/<h[1-6]>\s*<\/h[1-6]>/gi, '');
+
+  // Fix double-wrapped paragraphs
+  cleaned = cleaned.replace(/<p>\s*<p>/gi, '<p>');
+  cleaned = cleaned.replace(/<\/p>\s*<\/p>/gi, '</p>');
+
+  // Convert h1 to h2
+  cleaned = cleaned.replace(/<h1(\s|>)/gi, '<h2$1');
+  cleaned = cleaned.replace(/<\/h1>/gi, '</h2>');
+
+  // Remove non-schema script tags
+  cleaned = cleaned.replace(/<script(?!\s+type\s*=\s*["']application\/ld\+json["'])[^>]*>[\s\S]*?<\/script>/gi, '');
+
+  // Trim excessive whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+
+  return cleaned;
+}
+
+/**
+ * Fix alt text on in-content images.
+ */
+function fixContentImageAlts(html, targetKeyword, title) {
+  if (!html) return html;
+  var imgCount = 0;
+  return html.replace(/<img([^>]*)>/gi, function (match, attrs) {
+    imgCount++;
+    var altMatch = attrs.match(/alt\s*=\s*["']([^"']*?)["']/i);
+    var existingAlt = altMatch ? altMatch[1].trim() : '';
+    var isGeneric = !existingAlt || existingAlt === 'image' || existingAlt === 'photo' ||
+      existingAlt === 'Featured Image' || /^IMG_?\d+$/i.test(existingAlt) ||
+      /^DSC_?\d+$/i.test(existingAlt) || /^\d+\.jpg$/i.test(existingAlt);
+
+    if (isGeneric) {
+      var newAlt = targetKeyword
+        ? targetKeyword + (imgCount > 1 ? ' - image ' + imgCount : '')
+        : (title || 'Article image').slice(0, 100) + (imgCount > 1 ? ' - ' + imgCount : '');
+      if (altMatch) {
+        var newAttrs = attrs.replace(/alt\s*=\s*["'][^"']*?["']/i, 'alt="' + newAlt.replace(/"/g, '&quot;') + '"');
+        return '<img' + newAttrs + '>';
+      } else {
+        return '<img alt="' + newAlt.replace(/"/g, '&quot;') + '"' + attrs + '>';
+      }
+    }
+    return match;
+  });
+}
+
+/**
+ * Generate SEO-optimized filename for featured image.
+ */
+function generateSeoFilename(targetKeyword, title, imageUrl) {
+  var ext = path.extname(imageUrl || '').toLowerCase().split('?')[0] || '.jpg';
+  if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'].indexOf(ext) === -1) ext = '.jpg';
+
+  var source = (targetKeyword || title || 'featured-image').trim();
+  var slug = source.toLowerCase()
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60);
+
+  if (slug.length < 5) slug = 'featured-' + Date.now().toString(36);
+  return slug + ext;
+}
+
+/**
+ * Generate SEO-optimized alt text for featured image.
+ */
+function generateSeoAltText(targetKeyword, title, excerpt) {
+  if (targetKeyword && targetKeyword.length > 5) {
+    var alt = targetKeyword;
+    if (title && title.toLowerCase().indexOf(targetKeyword.toLowerCase()) === -1) {
+      var titlePart = title.split(/[,\-|–—:]/).map(function (s) { return s.trim(); }).filter(Boolean)[0] || '';
+      if (titlePart && titlePart.length < 60) alt = targetKeyword + ' - ' + titlePart;
+    }
+    return alt.slice(0, 125);
+  }
+  if (title) return title.replace(/<[^>]+>/g, '').slice(0, 125);
+  return 'Featured news article image';
+}
+
 function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName, schemaTypes, targetDomain) {
   var schemas = [];
   var types = (schemaTypes || 'NewsArticle,FAQPage').split(',');
@@ -263,7 +398,12 @@ class WordPressPublisher {
     if (featuredImageUrl) {
       try {
         this.logger.info('publisher', 'Uploading featured image: ' + featuredImageUrl.substring(0, 100) + '...');
-        var imageResult = await this.uploadImage(featuredImageUrl, rewrittenArticle.title || 'Featured Image');
+        var imageResult = await this.uploadImage(featuredImageUrl, {
+          targetKeyword: rewrittenArticle.targetKeyword || '',
+          title: rewrittenArticle.title || '',
+          excerpt: rewrittenArticle.excerpt || '',
+          slug: rewrittenArticle.slug || '',
+        });
         wpImageId = imageResult.mediaId;
         this.logger.info('publisher', 'Featured image uploaded: mediaId=' + wpImageId);
       } catch (imgErr) {
@@ -281,20 +421,28 @@ class WordPressPublisher {
     }
     var schemaHtml = buildSchemaMarkup(rewrittenArticle, '', siteName, rewrittenArticle.schemaTypes, rewrittenArticle.targetDomain);
 
-    // Step 3: Create the WordPress post
-    var postContent = (rewrittenArticle.content || '');
+    // Step 3: Create the WordPress post — sanitize and optimize content
+    var postContent = sanitizeHtmlForWP(rewrittenArticle.content || '');
+    postContent = fixContentImageAlts(postContent, rewrittenArticle.targetKeyword || '', rewrittenArticle.title || '');
     if (schemaHtml) {
       postContent += '\n\n' + schemaHtml;
     }
 
     var postData = {
       title: rewrittenArticle.title,
+      slug: rewrittenArticle.slug || '',
       content: postContent,
       excerpt: rewrittenArticle.excerpt,
       status: this.config.WP_POST_STATUS || 'draft',
       author: parseInt(this.config.WP_AUTHOR_ID, 10) || 1,
       categories: [parseInt(this.config.WP_DEFAULT_CATEGORY, 10) || 1],
       featured_media: wpImageId || 0,
+      meta: {
+        _yoast_wpseo_metadesc: rewrittenArticle.metaDescription || '',
+        _yoast_wpseo_focuskw: rewrittenArticle.targetKeyword || '',
+        rank_math_description: rewrittenArticle.metaDescription || '',
+        rank_math_focus_keyword: rewrittenArticle.targetKeyword || '',
+      },
     };
 
     var postResult = await this.createPost(postData);
@@ -303,7 +451,7 @@ class WordPressPublisher {
     if (postResult.wpPostUrl && schemaHtml) {
       try {
         var updatedSchema = buildSchemaMarkup(rewrittenArticle, postResult.wpPostUrl, siteName, rewrittenArticle.schemaTypes, rewrittenArticle.targetDomain);
-        var updatedContent = (rewrittenArticle.content || '') + '\n\n' + updatedSchema;
+        var updatedContent = sanitizeHtmlForWP(rewrittenArticle.content || '') + '\n\n' + updatedSchema;
         await this._wpRequest('post', '/wp/v2/posts/' + postResult.wpPostId, { content: updatedContent });
       } catch (schemaErr) {
         this.logger.warn('publisher', 'Schema URL update failed (non-critical): ' + schemaErr.message);
@@ -350,10 +498,11 @@ class WordPressPublisher {
   }
 
   /**
-   * Upload an image to WP media library using multi-method fallback.
+   * Upload an image to WP media library with SEO-optimized filename, alt text, title, caption, description.
    */
-  async uploadImage(imageUrl, altText) {
-    // Download the image first
+  async uploadImage(imageUrl, seoData) {
+    seoData = seoData || {};
+
     var imageResponse = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
       timeout: WP_TIMEOUT_MS,
@@ -362,24 +511,45 @@ class WordPressPublisher {
 
     var imageBuffer = Buffer.from(imageResponse.data);
     var mimeType = guessMimeType(imageUrl);
-    var filename = generateFilename(altText, imageUrl);
 
-    // Upload via _wpRequest with binary content type
+    var filename = generateSeoFilename(
+      seoData.targetKeyword || '',
+      seoData.title || '',
+      imageUrl
+    );
+
+    var altText = generateSeoAltText(
+      seoData.targetKeyword || '',
+      seoData.title || '',
+      seoData.excerpt || ''
+    );
+
+    this.logger.info('publisher', 'Uploading image: filename="' + filename + '", alt="' + altText.substring(0, 50) + '..."');
+
     var uploadRes = await this._wpRequest('post', '/wp/v2/media', imageBuffer, {
       'Content-Type': mimeType,
       'Content-Disposition': 'attachment; filename="' + filename + '"',
     });
 
-    // Set alt text (non-critical)
-    if (uploadRes.data.id && altText) {
+    // Set ALL media SEO fields
+    if (uploadRes.data.id) {
       try {
-        await this._wpRequest('post', '/wp/v2/media/' + uploadRes.data.id, { alt_text: altText });
-      } catch (e) { /* ignore */ }
+        var mediaUpdate = {
+          alt_text: altText,
+          title: seoData.targetKeyword || seoData.title || altText,
+          caption: seoData.excerpt ? seoData.excerpt.slice(0, 200) : '',
+          description: 'Featured image for: ' + (seoData.title || '').slice(0, 200),
+        };
+        await this._wpRequest('post', '/wp/v2/media/' + uploadRes.data.id, mediaUpdate);
+      } catch (e) {
+        this.logger.warn('publisher', 'Failed to set image SEO data: ' + e.message);
+      }
     }
 
     return {
       mediaId: uploadRes.data.id,
       mediaUrl: uploadRes.data.source_url || (uploadRes.data.guid && uploadRes.data.guid.rendered) || '',
+      filename: filename,
     };
   }
 

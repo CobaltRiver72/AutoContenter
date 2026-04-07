@@ -15,9 +15,34 @@ var _db = null;
  */
 function setupSession(db) {
   var config = getConfig();
+  var crypto = require('crypto');
   _db = db || null;
 
-  var secret = config.DASHBOARD_PASSWORD || 'hdf-autopub-fallback-secret';
+  // Generate or load a persistent session secret (NOT the dashboard password)
+  var secret = null;
+
+  if (_db) {
+    try {
+      var row = _db.prepare("SELECT value FROM settings WHERE key = 'SESSION_SECRET'").get();
+      if (row && row.value) {
+        secret = row.value;
+      } else {
+        secret = crypto.randomBytes(32).toString('hex');
+        _db.prepare(
+          "INSERT INTO settings (key, value, updated_at) VALUES ('SESSION_SECRET', ?, datetime('now')) " +
+          "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ).run(secret);
+      }
+    } catch (e) {
+      // Fall through to hash-based secret
+    }
+  }
+
+  if (!secret) {
+    secret = crypto.createHash('sha256')
+      .update((config.DASHBOARD_PASSWORD || 'hdf-autopub') + __dirname + (process.env.HOME || ''))
+      .digest('hex');
+  }
 
   return session({
     secret: secret,

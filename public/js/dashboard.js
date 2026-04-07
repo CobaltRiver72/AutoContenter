@@ -2634,9 +2634,18 @@
         for (var i = 0; i < inputs.length; i++) {
           var key = inputs[i].getAttribute('data-setting-key');
           var val = inputs[i].type === 'checkbox' ? (inputs[i].checked ? 'true' : 'false') : inputs[i].value;
-          // Skip masked sensitive values (not changed by user)
-          if (inputs[i].type === 'password' && (val === '' || val === '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022')) continue;
+          // Skip masked/placeholder sensitive values (user didn't change them)
+          if (inputs[i].type === 'password') {
+            if (!val || val === '' || val.indexOf('\u2022') !== -1 || val.indexOf('••••') !== -1) {
+              continue;
+            }
+          }
           updates[key] = val;
+        }
+
+        if (Object.keys(updates).length === 0) {
+          showToast('No changes to save', 'info');
+          return;
         }
 
         saveBtn.disabled = true;
