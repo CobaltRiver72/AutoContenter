@@ -2340,29 +2340,94 @@ select:focus {
 
 .published-toolbar {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+/* ─── Extraction Progress Bar ─────────────────────────────────────── */
+
+.extraction-progress-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+
+.extraction-progress-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.extraction-progress-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.extraction-progress-stats {
+  display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
 }
 
-.batch-actions {
+.ep-stat {
+  font-size: 12px;
+  font-weight: 500;
+}
+.ep-extracted { color: #4a7aff; }
+.ep-fetching { color: #f59e0b; }
+.ep-failed { color: #ef4444; }
+.ep-total { color: var(--text-muted); }
+
+.extraction-progress-bar {
   display: flex;
-  gap: 8px;
-  flex-shrink: 0;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--border);
+  gap: 1px;
+}
+
+.extraction-progress-bar > div {
+  height: 100%;
+  transition: width 0.5s ease;
+  min-width: 0;
+}
+.ep-bar-published { background: #22c55e; }
+.ep-bar-ready { background: #10b981; }
+.ep-bar-extracted { background: #4a7aff; }
+.ep-bar-fetching { background: #f59e0b; }
+.ep-bar-failed { background: #ef4444; }
+
+.extraction-progress-percent {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  text-align: right;
+}
+
+/* ─── Action Buttons Bar ──────────────────────────────────────────── */
+
+.batch-actions-bar {
+  display: flex;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.batch-extract-btn {
+.action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  border: 1px solid var(--accent);
-  border-radius: 20px;
-  background: transparent;
-  color: var(--accent);
+  gap: 8px;
+  padding: 8px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -2370,57 +2435,114 @@ select:focus {
   white-space: nowrap;
 }
 
-.batch-extract-btn:hover {
-  background: var(--accent);
-  color: #fff;
+.action-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-body);
 }
 
-.batch-extract-btn:disabled {
-  opacity: 0.6;
+.action-btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.batch-extract-btn.batch-success {
-  border-color: #22c55e;
-  color: #22c55e;
+.action-btn:disabled:hover {
+  border-color: var(--border);
+  background: var(--bg-card);
 }
 
-.batch-retry-failed {
+.action-btn-icon {
+  font-size: 15px;
+}
+
+.action-btn-text {
+  font-size: 13px;
+}
+
+/* ─── Button Variants ─────────────────────────────────────────────── */
+
+.action-btn-primary {
+  border-color: #4a7aff;
+  color: #4a7aff;
+}
+.action-btn-primary:hover {
+  background: #4a7aff;
+  color: #fff;
+}
+
+.action-btn-danger {
   border-color: #ef4444;
   color: #ef4444;
 }
-
-.batch-retry-failed:hover {
+.action-btn-danger:hover {
   background: #ef4444;
   color: #fff;
 }
 
-.batch-badge {
+.action-btn-ai {
+  border-color: #a855f7;
+  color: #a855f7;
+}
+.action-btn-ai:hover {
+  background: #a855f7;
+  color: #fff;
+}
+
+/* ─── Button States ───────────────────────────────────────────────── */
+
+.action-btn-loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.action-btn-loading .action-btn-icon {
+  animation: spinIcon 1s linear infinite;
+}
+
+@keyframes spinIcon {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.action-btn-success {
+  border-color: #22c55e !important;
+  color: #22c55e !important;
+}
+
+/* ─── Badge Styles ────────────────────────────────────────────────── */
+
+.action-btn-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: var(--accent);
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 11px;
+  background: #4a7aff;
   color: #fff;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1;
 }
 
-.batch-badge-red {
+.action-btn-badge-red {
   background: #ef4444;
 }
 
-.batch-extract-btn:hover .batch-badge {
-  background: #fff;
-  color: var(--accent);
+.action-btn-badge-purple {
+  background: #a855f7;
 }
 
-.batch-retry-failed:hover .batch-badge-red {
-  background: #fff;
-  color: #ef4444;
+.action-btn-primary:hover .action-btn-badge {
+  background: rgba(255,255,255,0.3);
+}
+
+.action-btn-danger:hover .action-btn-badge-red {
+  background: rgba(255,255,255,0.3);
+}
+
+.action-btn-ai:hover .action-btn-badge-purple {
+  background: rgba(255,255,255,0.3);
 }
 
 @media (max-width: 768px) {
@@ -2431,4 +2553,5 @@ select:focus {
   .draft-card.has-image { flex-direction: column; }
   .draft-card-image { width: 100%; height: 140px; }
   .published-toolbar { flex-direction: column; }
+  .batch-actions-bar { flex-direction: column; }
 }

@@ -2132,11 +2132,33 @@
       if (counts[st] !== undefined) counts[st]++;
     }
 
-    // Count un-extracted articles for the batch button badge
+    // ─── Count stats for buttons and progress bar ────────────────
     var unextractedCount = counts.fetching + counts.failed;
+    var extractedCount = counts.draft + counts.rewriting + counts.ready + counts.published;
+    var totalExtractionTarget = counts.all;
+    var extractionPercent = totalExtractionTarget > 0 ? Math.round((extractedCount / totalExtractionTarget) * 100) : 0;
+
+    // Count clusters ready for rewrite (all sources extracted, not yet rewritten)
+    var readyForRewriteCount = 0;
+    for (var rci = 0; rci < clusterIds.length; rci++) {
+      var rcGroup = clusterMap[clusterIds[rci]];
+      var rcDrafts = rcGroup.drafts;
+      var allExtracted = true;
+      var hasRewrite = false;
+      for (var rdi = 0; rdi < rcDrafts.length; rdi++) {
+        if (rcDrafts[rdi].extraction_status !== 'success' && rcDrafts[rdi].extraction_status !== 'cached' && rcDrafts[rdi].extraction_status !== 'fallback') {
+          allExtracted = false;
+        }
+        if (rcDrafts[rdi].cluster_role === 'primary' && rcDrafts[rdi].rewritten_html) {
+          hasRewrite = true;
+        }
+      }
+      if (allExtracted && !hasRewrite) readyForRewriteCount++;
+    }
 
     var filterHTML =
       '<div class="published-toolbar">' +
+        // ─── Row 1: Filter buttons ───────────────────────────────
         '<div class="status-filters">' +
           '<button class="filter-btn active" data-filter="all">All (' + counts.all + ')</button>' +
           '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterIds.length + ')</button>' +
@@ -2149,15 +2171,47 @@
           '<button class="filter-btn" data-filter="published">Published (' + counts.published + ')</button>' +
           (counts.failed > 0 ? '<button class="filter-btn" data-filter="failed">&#10060; Failed (' + counts.failed + ')</button>' : '') +
         '</div>' +
-        '<div class="batch-actions">' +
-          '<button class="batch-extract-btn" id="batchExtractBtn" title="Re-queue all pending and stuck articles for extraction">' +
-            '&#9889; Extract All' +
-            (unextractedCount > 0 ? ' <span class="batch-badge">' + unextractedCount + '</span>' : '') +
+
+        // ─── Row 2: Extraction Progress Bar ──────────────────────
+        '<div class="extraction-progress-section">' +
+          '<div class="extraction-progress-header">' +
+            '<span class="extraction-progress-label">Extraction Progress</span>' +
+            '<span class="extraction-progress-stats">' +
+              '<span class="ep-stat ep-extracted">' + extractedCount + ' extracted</span>' +
+              '<span class="ep-stat ep-fetching">' + counts.fetching + ' fetching</span>' +
+              (counts.failed > 0 ? '<span class="ep-stat ep-failed">' + counts.failed + ' failed</span>' : '') +
+              '<span class="ep-stat ep-total">' + counts.all + ' total</span>' +
+            '</span>' +
+          '</div>' +
+          '<div class="extraction-progress-bar">' +
+            '<div class="ep-bar-published" style="width:' + (totalExtractionTarget > 0 ? Math.round(counts.published / totalExtractionTarget * 100) : 0) + '%"></div>' +
+            '<div class="ep-bar-ready" style="width:' + (totalExtractionTarget > 0 ? Math.round((counts.ready + counts.rewriting) / totalExtractionTarget * 100) : 0) + '%"></div>' +
+            '<div class="ep-bar-extracted" style="width:' + (totalExtractionTarget > 0 ? Math.round(counts.draft / totalExtractionTarget * 100) : 0) + '%"></div>' +
+            '<div class="ep-bar-fetching" style="width:' + (totalExtractionTarget > 0 ? Math.round(counts.fetching / totalExtractionTarget * 100) : 0) + '%"></div>' +
+            '<div class="ep-bar-failed" style="width:' + (totalExtractionTarget > 0 ? Math.round(counts.failed / totalExtractionTarget * 100) : 0) + '%"></div>' +
+          '</div>' +
+          '<div class="extraction-progress-percent">' + extractionPercent + '% complete</div>' +
+        '</div>' +
+
+        // ─── Row 3: Action Buttons ───────────────────────────────
+        '<div class="batch-actions-bar">' +
+          '<button class="action-btn action-btn-primary" id="batchExtractBtn">' +
+            '<span class="action-btn-icon">&#9889;</span>' +
+            '<span class="action-btn-text">Extract All</span>' +
+            (unextractedCount > 0 ? '<span class="action-btn-badge">' + unextractedCount + '</span>' : '') +
           '</button>' +
           (counts.failed > 0 ?
-            '<button class="batch-extract-btn batch-retry-failed" id="batchRetryFailedBtn" title="Retry all failed extractions">' +
-              '&#128260; Retry Failed <span class="batch-badge batch-badge-red">' + counts.failed + '</span>' +
+            '<button class="action-btn action-btn-danger" id="batchRetryFailedBtn">' +
+              '<span class="action-btn-icon">&#128260;</span>' +
+              '<span class="action-btn-text">Retry Failed</span>' +
+              '<span class="action-btn-badge action-btn-badge-red">' + counts.failed + '</span>' +
             '</button>' : '') +
+          '<button class="action-btn action-btn-ai" id="batchRewriteBtn"' +
+            (readyForRewriteCount === 0 ? ' disabled title="No clusters ready — extract articles first"' : '') + '>' +
+            '<span class="action-btn-icon">&#129302;</span>' +
+            '<span class="action-btn-text">Rewrite All Extracted</span>' +
+            (readyForRewriteCount > 0 ? '<span class="action-btn-badge action-btn-badge-purple">' + readyForRewriteCount + '</span>' : '') +
+          '</button>' +
         '</div>' +
       '</div>';
 
@@ -2230,9 +2284,9 @@
       batchExtractBtn.addEventListener('click', function () {
         var btn = this;
         if (btn.disabled) return;
-
         btn.disabled = true;
-        btn.innerHTML = '&#9889; Queuing...';
+        btn.querySelector('.action-btn-text').textContent = 'Queuing...';
+        btn.classList.add('action-btn-loading');
 
         fetchApi('/api/drafts/batch-extract', {
           method: 'POST',
@@ -2241,35 +2295,28 @@
         })
         .then(function (data) {
           if (data.success) {
-            var stats = data.stats;
-            btn.innerHTML = '&#9989; Queued ' + stats.totalReQueued + ' articles';
-            btn.classList.add('batch-success');
-
-            // Refresh the published list after a short delay
-            setTimeout(function () {
-              loadPublished();
-            }, 2000);
-
-            // Reset button after 5 seconds
+            btn.querySelector('.action-btn-text').textContent = 'Queued ' + data.stats.totalReQueued;
+            btn.classList.remove('action-btn-loading');
+            btn.classList.add('action-btn-success');
+            setTimeout(function () { loadPublished(); }, 2000);
             setTimeout(function () {
               btn.disabled = false;
-              btn.classList.remove('batch-success');
-              btn.innerHTML = '&#9889; Extract All';
+              btn.classList.remove('action-btn-success');
+              btn.querySelector('.action-btn-text').textContent = 'Extract All';
             }, 5000);
           } else {
-            btn.innerHTML = '&#10060; ' + (data.error || 'Failed');
+            btn.querySelector('.action-btn-text').textContent = data.error || 'Failed';
+            btn.classList.remove('action-btn-loading');
             setTimeout(function () {
               btn.disabled = false;
-              btn.innerHTML = '&#9889; Extract All';
+              btn.querySelector('.action-btn-text').textContent = 'Extract All';
             }, 3000);
           }
         })
-        .catch(function (err) {
-          btn.innerHTML = '&#10060; Error';
+        .catch(function () {
+          btn.querySelector('.action-btn-text').textContent = 'Error';
+          btn.classList.remove('action-btn-loading');
           btn.disabled = false;
-          setTimeout(function () {
-            btn.innerHTML = '&#9889; Extract All';
-          }, 3000);
         });
       });
     }
@@ -2280,9 +2327,9 @@
       batchRetryBtn.addEventListener('click', function () {
         var btn = this;
         if (btn.disabled) return;
-
         btn.disabled = true;
-        btn.innerHTML = '&#128260; Retrying...';
+        btn.querySelector('.action-btn-text').textContent = 'Retrying...';
+        btn.classList.add('action-btn-loading');
 
         fetchApi('/api/drafts/batch-extract', {
           method: 'POST',
@@ -2291,33 +2338,72 @@
         })
         .then(function (data) {
           if (data.success) {
-            var stats = data.stats;
-            btn.innerHTML = '&#9989; Retrying ' + stats.failedReQueued + ' failed';
-            btn.classList.add('batch-success');
-
-            setTimeout(function () {
-              loadPublished();
-            }, 2000);
-
+            btn.querySelector('.action-btn-text').textContent = 'Retrying ' + data.stats.failedReQueued;
+            btn.classList.remove('action-btn-loading');
+            btn.classList.add('action-btn-success');
+            setTimeout(function () { loadPublished(); }, 2000);
             setTimeout(function () {
               btn.disabled = false;
-              btn.classList.remove('batch-success');
-              btn.innerHTML = '&#128260; Retry Failed';
+              btn.classList.remove('action-btn-success');
+              btn.querySelector('.action-btn-text').textContent = 'Retry Failed';
             }, 5000);
           } else {
-            btn.innerHTML = '&#10060; ' + (data.error || 'Failed');
+            btn.querySelector('.action-btn-text').textContent = data.error || 'Failed';
+            btn.classList.remove('action-btn-loading');
             setTimeout(function () {
               btn.disabled = false;
-              btn.innerHTML = '&#128260; Retry Failed';
+              btn.querySelector('.action-btn-text').textContent = 'Retry Failed';
             }, 3000);
           }
         })
-        .catch(function (err) {
-          btn.innerHTML = '&#10060; Error';
+        .catch(function () {
+          btn.querySelector('.action-btn-text').textContent = 'Error';
+          btn.classList.remove('action-btn-loading');
           btn.disabled = false;
-          setTimeout(function () {
-            btn.innerHTML = '&#128260; Retry Failed';
-          }, 3000);
+        });
+      });
+    }
+
+    // ─── Rewrite All Extracted button handler ──────────────────────
+    var batchRewriteBtn = container.querySelector('#batchRewriteBtn');
+    if (batchRewriteBtn) {
+      batchRewriteBtn.addEventListener('click', function () {
+        var btn = this;
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.querySelector('.action-btn-text').textContent = 'Starting rewrites...';
+        btn.classList.add('action-btn-loading');
+
+        fetchApi('/api/drafts/batch-rewrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        })
+        .then(function (data) {
+          if (data.success) {
+            var stats = data.stats;
+            btn.querySelector('.action-btn-text').textContent = 'Rewriting ' + stats.clustersQueued + ' clusters';
+            btn.classList.remove('action-btn-loading');
+            btn.classList.add('action-btn-success');
+            setTimeout(function () { loadPublished(); }, 3000);
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.classList.remove('action-btn-success');
+              btn.querySelector('.action-btn-text').textContent = 'Rewrite All Extracted';
+            }, 8000);
+          } else {
+            btn.querySelector('.action-btn-text').textContent = data.error || 'Failed';
+            btn.classList.remove('action-btn-loading');
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.querySelector('.action-btn-text').textContent = 'Rewrite All Extracted';
+            }, 3000);
+          }
+        })
+        .catch(function () {
+          btn.querySelector('.action-btn-text').textContent = 'Error';
+          btn.classList.remove('action-btn-loading');
+          btn.disabled = false;
         });
       });
     }

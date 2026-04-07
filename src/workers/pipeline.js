@@ -375,6 +375,104 @@ class Pipeline {
     }
   }
 
+  // ─── MANUAL REWRITE METHODS ──────────────────────────────────────────
+
+  /**
+   * Manually trigger rewrite for a specific cluster.
+   * Called from the API when admin clicks "Rewrite" button.
+   * @param {number} clusterId
+   * @returns {Promise<object>} result
+   */
+  async rewriteClusterManual(clusterId) {
+    this.logger.info(MODULE, 'Manual rewrite triggered for cluster #' + clusterId);
+
+    // Find the primary draft for this cluster
+    var primary = this.db.prepare(
+      "SELECT * FROM drafts WHERE cluster_id = ? AND cluster_role = 'primary'"
+    ).get(clusterId);
+
+    if (!primary) {
+      throw new Error('No primary draft found for cluster #' + clusterId);
+    }
+
+    // Check if all sources are extracted
+    var unextracted = this.db.prepare(
+      "SELECT COUNT(*) as cnt FROM drafts WHERE cluster_id = ? AND extraction_status NOT IN ('success','cached','fallback')"
+    ).get(clusterId);
+
+    if (unextracted.cnt > 0) {
+      throw new Error('Cluster #' + clusterId + ' has ' + unextracted.cnt + ' un-extracted sources. Extract first.');
+    }
+
+    // Load cluster info for _rewriteCluster
+    var cluster = this.db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
+
+    // Call the existing _rewriteCluster method with proper clusterInfo shape
+    await this._rewriteCluster({
+      cluster_id: clusterId,
+      topic: cluster ? cluster.topic : '',
+      trends_boosted: cluster ? cluster.trends_boosted : 0,
+    });
+
+    return { success: true, primaryDraftId: primary.id, clusterId: clusterId };
+  }
+
+  /**
+   * Manually trigger rewrite for ALL extracted clusters at once.
+   * Called from the API when admin clicks "Rewrite All" button.
+   * @returns {Promise<object>} result with count
+   */
+  async rewriteAllExtractedClusters() {
+    // Find all clusters where:
+    // - Primary draft exists and is NOT yet rewritten
+    // - ALL source drafts are extracted
+    var readyClusters = this.db.prepare(
+      "SELECT DISTINCT d.cluster_id FROM drafts d " +
+      "WHERE d.cluster_role = 'primary' " +
+      "AND d.status = 'draft' " +
+      "AND (d.rewritten_html IS NULL OR d.rewritten_html = '') " +
+      "AND d.cluster_id IS NOT NULL " +
+      "AND d.cluster_id NOT IN (" +
+      "  SELECT cluster_id FROM drafts " +
+      "  WHERE cluster_id = d.cluster_id " +
+      "  AND extraction_status NOT IN ('success','cached','fallback')" +
+      ")"
+    ).all();
+
+    this.logger.info(MODULE, 'Batch rewrite: found ' + readyClusters.length + ' clusters ready for rewrite');
+
+    var results = { queued: 0, failed: 0, errors: [] };
+    var self = this;
+
+    for (var i = 0; i < readyClusters.length; i++) {
+      var clusterId = readyClusters[i].cluster_id;
+      try {
+        var cluster = this.db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
+
+        // Fire and forget — let them run in the background
+        this._rewriteCluster({
+          cluster_id: clusterId,
+          topic: cluster ? cluster.topic : '',
+          trends_boosted: cluster ? cluster.trends_boosted : 0,
+        }).catch(function (err) {
+          self.logger.warn(MODULE, 'Rewrite failed for cluster: ' + err.message);
+        });
+
+        results.queued++;
+
+        // Throttle: wait 2 seconds between starting rewrites to avoid API rate limits
+        if (i < readyClusters.length - 1) {
+          await new Promise(function (resolve) { setTimeout(resolve, 2000); });
+        }
+      } catch (err) {
+        results.failed++;
+        results.errors.push('Cluster #' + clusterId + ': ' + err.message);
+      }
+    }
+
+    return results;
+  }
+
   // ─── PUBLISH WORKER LOOP ────────────────────────────────────────────
 
   async _publishLoop() {
@@ -619,13 +717,13 @@ class Pipeline {
       });
     }, this.EXTRACTION_POLL_MS);
 
-    // Rewrite loop — controlled concurrency
-    this._rewriteTimer = setInterval(function () {
-      self._rewriteLoop().catch(function (err) {
-        self.logger.error(MODULE, 'Rewrite loop crash: ' + err.message);
-        self._rewriteRunning = false;
-      });
-    }, this.REWRITE_POLL_MS);
+    // ─── REWRITE LOOP DISABLED — Manual trigger only ─────────────
+    // The rewrite loop no longer auto-polls. Rewriting is triggered
+    // manually via POST /api/drafts/batch-rewrite or individual
+    // POST /api/clusters/:clusterId/rewrite buttons in the UI.
+    // The _rewriteCluster() method is still available for manual use.
+    this._rewriteTimer = null;
+    this.logger.info(MODULE, 'Rewrite loop: MANUAL MODE (no auto-polling)');
 
     // Publish loop — strict rate limit
     this._publishTimer = setInterval(function () {

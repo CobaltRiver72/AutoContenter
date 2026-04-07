@@ -1690,6 +1690,64 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/drafts/batch-rewrite ─────────────────────────────────────
+  //
+  // Triggers AI rewrite for ALL clusters that have finished extraction.
+  // Does NOT auto-run — only triggered when admin clicks the button.
+  //
+  router.post('/drafts/batch-rewrite', async function (req, res) {
+    try {
+      if (!scheduler || typeof scheduler.rewriteAllExtractedClusters !== 'function') {
+        return res.status(500).json({ success: false, error: 'Pipeline not available or missing rewriteAllExtractedClusters method' });
+      }
+
+      var result = await scheduler.rewriteAllExtractedClusters();
+
+      logger.info('api', 'Batch rewrite: queued=' + result.queued + ', failed=' + result.failed);
+
+      res.json({
+        success: true,
+        message: 'Batch rewrite started',
+        stats: {
+          clustersQueued: result.queued,
+          clustersFailed: result.failed,
+          errors: result.errors.slice(0, 5)
+        }
+      });
+    } catch (err) {
+      logger.error('api', 'Batch rewrite failed: ' + err.message);
+      res.status(500).json({ success: false, error: 'Batch rewrite failed: ' + err.message });
+    }
+  });
+
+  // ─── POST /api/clusters/:clusterId/rewrite ──────────────────────────────
+  //
+  // Triggers AI rewrite for a SINGLE cluster.
+  //
+  router.post('/clusters/:clusterId/rewrite', async function (req, res) {
+    try {
+      var clusterId = parseInt(req.params.clusterId, 10);
+      if (isNaN(clusterId)) {
+        return res.status(400).json({ success: false, error: 'Invalid cluster ID' });
+      }
+
+      if (!scheduler || typeof scheduler.rewriteClusterManual !== 'function') {
+        return res.status(500).json({ success: false, error: 'Pipeline not available' });
+      }
+
+      var result = await scheduler.rewriteClusterManual(clusterId);
+
+      res.json({
+        success: true,
+        message: 'Rewrite started for cluster #' + clusterId,
+        primaryDraftId: result.primaryDraftId
+      });
+    } catch (err) {
+      logger.error('api', 'Cluster rewrite failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // POST /api/drafts/:id/rewrite — Trigger AI rewrite
   router.post('/drafts/:id/rewrite', function (req, res) {
     try {
