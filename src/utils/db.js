@@ -309,6 +309,26 @@ function runMigrations() {
     // Index for cluster lookups
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster ON drafts(cluster_id)');
 
+    // ─── Pipeline V2: Worker columns for job claiming ────────────────────
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN locked_by TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN locked_at TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN lease_expires_at TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec("ALTER TABLE drafts ADD COLUMN next_run_at TEXT DEFAULT (datetime('now'))");
+    } catch (e) { /* already exists */ }
+
+    // ─── Pipeline V2: Performance indexes (CRITICAL for worker speed) ────
+    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_status_next_run ON drafts(status, next_run_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_lease ON drafts(lease_expires_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster_status ON drafts(cluster_id, status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_mode_status ON drafts(mode, status)');
+
     // One-time fix: clean known-wrong model IDs from settings
     var wrongModelIds = {
       'claude-opus-4-6-20250610': 'claude-opus-4-6',
@@ -391,9 +411,26 @@ function recoverStuckDrafts(logger) {
   }
 }
 
+function recoverStaleLocks() {
+  try {
+    var stale = db.prepare(
+      "UPDATE drafts SET locked_by = NULL, locked_at = NULL, lease_expires_at = NULL " +
+      "WHERE locked_by IS NOT NULL AND lease_expires_at < datetime('now')"
+    ).run();
+    if (stale.changes > 0) {
+      console.log('[db] Released ' + stale.changes + ' stale job locks');
+    }
+    return stale.changes;
+  } catch (e) {
+    console.warn('[db] recoverStaleLocks failed:', e.message);
+    return 0;
+  }
+}
+
 module.exports = {
   db,
   closeDb,
   runMigrations,
   recoverStuckDrafts,
+  recoverStaleLocks,
 };

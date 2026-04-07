@@ -28,7 +28,7 @@ var { ArticleBuffer } = require('./modules/buffer');
 var { SimilarityEngine } = require('./modules/similarity');
 var { ArticleRewriter } = require('./modules/rewriter');
 var { WordPressPublisher } = require('./modules/publisher');
-var { PublishScheduler } = require('./modules/scheduler');
+var { Pipeline } = require('./workers/pipeline');
 var { ContentExtractor } = require('./modules/extractor');
 var { InfranodusAnalyzer } = require('./modules/infranodus');
 var { setupSession, checkAuth } = require('./routes/auth');
@@ -42,7 +42,7 @@ var similarity = new SimilarityEngine(config, db, logger);
 var rewriter = new ArticleRewriter(config, logger);
 var publisher = new WordPressPublisher(config, logger);
 var extractor = new ContentExtractor(config, db, logger);
-var scheduler = new PublishScheduler(config, db, rewriter, publisher, logger, extractor);
+var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
 
 // ─── 6. Clustering queue (debounce rapid SSE events) ──────────────────────
@@ -298,7 +298,7 @@ async function boot() {
   // ─── Start scheduler ────────────────────────────────────────────────────
 
   scheduler.start();
-  logger.info('index', 'Publish scheduler started');
+  logger.info('index', 'Pipeline V2 workers started (extract:15 rewrite:3 publish:rate-limited)');
 
   // ─── Periodic buffer cleanup ─────────────────────────────────────────────
 

@@ -664,4 +664,4 @@ class PublishScheduler {
   }
 }
 
-module.exports = { PublishScheduler };
+module.exports = { PublishScheduler_Legacy: PublishScheduler };
