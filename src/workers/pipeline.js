@@ -24,11 +24,16 @@ class Pipeline {
     this.extractor = extractor;
 
     // Worker config
-    this.EXTRACTION_CONCURRENCY = 15;
+    this.EXTRACTION_CONCURRENCY = 5;   // Tuned for 4GB RAM — JSDOM uses 50-100MB per parse
     this.EXTRACTION_POLL_MS = 2000;
     this.REWRITE_CONCURRENCY = 3;
     this.REWRITE_POLL_MS = 5000;
     this.PUBLISH_POLL_MS = 30000;
+
+    // ─── Memory safety (for 4GB server) ─────────────────────────────────
+    this.MEMORY_LIMIT_MB = 3200;            // Pause extraction if RSS exceeds this
+    this.RAMP_UP_INITIAL = 2;               // Start with only 2 concurrent on cold start
+    this.RAMP_UP_INTERVAL_MS = 30000;       // Add 1 more worker every 30 seconds
 
     // Track active workers
     this._extractionRunning = false;
@@ -37,6 +42,10 @@ class Pipeline {
 
     // Publish rate limiting (in-memory, same as old scheduler)
     this.publishHistory = [];
+
+    // Ramp-up state
+    this._currentMaxExtractions = this.RAMP_UP_INITIAL;
+    this._rampUpTimer = null;
 
     // Interval handles
     this._extractionTimer = null;
@@ -119,6 +128,18 @@ class Pipeline {
     ).run(draftId);
   }
 
+  // ─── MEMORY WATCHDOG ─────────────────────────────────────────────────
+
+  _checkMemory() {
+    var memUsage = process.memoryUsage();
+    var rssMB = Math.round(memUsage.rss / 1024 / 1024);
+    if (rssMB > this.MEMORY_LIMIT_MB) {
+      this.logger.warn(MODULE, 'MEMORY HIGH: RSS=' + rssMB + 'MB (limit=' + this.MEMORY_LIMIT_MB + 'MB). Pausing extraction 30s');
+      return false;
+    }
+    return true;
+  }
+
   // ─── EXTRACTION WORKER LOOP ──────────────────────────────────────────
 
   async _extractionLoop() {
@@ -126,6 +147,17 @@ class Pipeline {
     this._extractionRunning = true;
 
     try {
+      // Memory guard
+      if (!this._checkMemory()) {
+        this._extractionRunning = false;
+        var self = this;
+        setTimeout(function () {
+          self._extractionLoop().catch(function (err) {
+            self.logger.error(MODULE, 'Extraction error after memory pause: ' + err.message);
+          });
+        }, 30000);
+        return;
+      }
       // Backpressure: pause extraction if too many drafts waiting for rewrite
       var draftBacklog = this.db.prepare(
         "SELECT COUNT(*) as count FROM drafts WHERE mode = 'auto' AND status = 'draft' AND cluster_role = 'primary'"
@@ -135,8 +167,8 @@ class Pipeline {
         return;
       }
 
-      // Claim a batch of fetching drafts
-      var jobs = this.claimJobs('fetching', 'extractor', this.EXTRACTION_CONCURRENCY);
+      // Claim a batch of fetching drafts (use ramp-up limited count)
+      var jobs = this.claimJobs('fetching', 'extractor', this._currentMaxExtractions);
 
       if (jobs.length === 0) return;
 
@@ -539,7 +571,9 @@ class Pipeline {
       if (stale.changes > 0) {
         this.logger.info(MODULE, 'Released ' + stale.changes + ' stale locks from previous session');
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      this.logger.warn(MODULE, 'Could not release stale locks (columns may not exist yet): ' + e.message);
+    }
 
     // Recover drafts stuck in 'rewriting' (server crashed mid-rewrite)
     try {
@@ -551,7 +585,9 @@ class Pipeline {
       if (stuck.changes > 0) {
         this.logger.info(MODULE, 'Recovered ' + stuck.changes + ' stuck rewriting drafts');
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      this.logger.warn(MODULE, 'Could not recover stuck rewriting drafts (columns may not exist yet): ' + e.message);
+    }
 
     this.logger.info(MODULE, 'Pipeline V2 initialized (extract:' + this.EXTRACTION_CONCURRENCY +
       ' rewrite:' + this.REWRITE_CONCURRENCY + ' publish:rate-limited)');
@@ -561,6 +597,19 @@ class Pipeline {
     var self = this;
 
     this.logger.info(MODULE, 'Starting Pipeline V2 workers...');
+
+    // ─── Gradual ramp-up: prevents cold-start memory spike ──────────
+    this._currentMaxExtractions = this.RAMP_UP_INITIAL;
+    this.logger.info(MODULE, 'Starting with ' + this.RAMP_UP_INITIAL + ' concurrent extractions, ramping to ' + this.EXTRACTION_CONCURRENCY);
+    this._rampUpTimer = setInterval(function () {
+      if (self._currentMaxExtractions < self.EXTRACTION_CONCURRENCY) {
+        self._currentMaxExtractions += 1;
+        self.logger.info(MODULE, 'Ramp-up: extractions now ' + self._currentMaxExtractions + '/' + self.EXTRACTION_CONCURRENCY);
+      } else {
+        clearInterval(self._rampUpTimer);
+        self._rampUpTimer = null;
+      }
+    }, this.RAMP_UP_INTERVAL_MS);
 
     // Extraction loop — fast, high concurrency
     this._extractionTimer = setInterval(function () {
@@ -590,6 +639,7 @@ class Pipeline {
   }
 
   stop() {
+    if (this._rampUpTimer) { clearInterval(this._rampUpTimer); this._rampUpTimer = null; }
     if (this._extractionTimer) { clearInterval(this._extractionTimer); this._extractionTimer = null; }
     if (this._rewriteTimer) { clearInterval(this._rewriteTimer); this._rewriteTimer = null; }
     if (this._publishTimer) { clearInterval(this._publishTimer); this._publishTimer = null; }

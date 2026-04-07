@@ -309,25 +309,50 @@ function runMigrations() {
     // Index for cluster lookups
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster ON drafts(cluster_id)');
 
-    // ─── Pipeline V2: Worker columns for job claiming ────────────────────
-    try {
-      db.exec('ALTER TABLE drafts ADD COLUMN locked_by TEXT DEFAULT NULL');
-    } catch (e) { /* already exists */ }
-    try {
-      db.exec('ALTER TABLE drafts ADD COLUMN locked_at TEXT DEFAULT NULL');
-    } catch (e) { /* already exists */ }
-    try {
-      db.exec('ALTER TABLE drafts ADD COLUMN lease_expires_at TEXT DEFAULT NULL');
-    } catch (e) { /* already exists */ }
-    try {
-      db.exec("ALTER TABLE drafts ADD COLUMN next_run_at TEXT DEFAULT (datetime('now'))");
-    } catch (e) { /* already exists */ }
+    // ─── Pipeline V2: Add worker columns (safe for existing DBs) ────────
+    // SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN
+    // So we check if each column exists first using PRAGMA table_info
+    (function addPipelineV2Columns() {
+      try {
+        var tableInfo = db.prepare('PRAGMA table_info(drafts)').all();
+        var existingColumns = {};
+        for (var pi = 0; pi < tableInfo.length; pi++) {
+          existingColumns[tableInfo[pi].name] = true;
+        }
 
-    // ─── Pipeline V2: Performance indexes (CRITICAL for worker speed) ────
-    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_status_next_run ON drafts(status, next_run_at)');
-    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_lease ON drafts(lease_expires_at)');
-    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster_status ON drafts(cluster_id, status)');
-    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_mode_status ON drafts(mode, status)');
+        var columnsToAdd = [
+          { name: 'locked_by', type: 'TEXT DEFAULT NULL' },
+          { name: 'locked_at', type: 'TEXT DEFAULT NULL' },
+          { name: 'lease_expires_at', type: 'TEXT DEFAULT NULL' },
+          { name: 'next_run_at', type: 'TEXT DEFAULT NULL' },
+        ];
+
+        for (var ci = 0; ci < columnsToAdd.length; ci++) {
+          var col = columnsToAdd[ci];
+          if (!existingColumns[col.name]) {
+            try {
+              db.exec('ALTER TABLE drafts ADD COLUMN ' + col.name + ' ' + col.type);
+              console.log('[db] Added column: drafts.' + col.name);
+            } catch (alterErr) {
+              if (alterErr.message && alterErr.message.indexOf('duplicate column') === -1) {
+                console.error('[db] Failed to add column ' + col.name + ':', alterErr.message);
+              }
+            }
+          }
+        }
+
+        // ─── Performance indexes (safe with IF NOT EXISTS) ──────────
+        db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_status_next_run ON drafts(status, next_run_at)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_lease ON drafts(locked_by, lease_expires_at)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster_status ON drafts(cluster_id, extraction_status)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_mode_status ON drafts(mode, status)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_extraction_pending ON drafts(extraction_status, status, locked_by)');
+
+        console.log('[db] Pipeline V2 migration complete');
+      } catch (migrationErr) {
+        console.error('[db] Pipeline V2 migration error:', migrationErr.message);
+      }
+    })();
 
     // One-time fix: clean known-wrong model IDs from settings
     var wrongModelIds = {
