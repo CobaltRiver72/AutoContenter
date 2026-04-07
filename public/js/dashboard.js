@@ -23,6 +23,10 @@
     logsPage: 1,
   };
 
+  // Multi-select state for Live Feed
+  var selectedArticles = {};
+  var selectedCount = 0;
+
   // ─── Rule Templates ────────────────────────────────────────────────────
 
   // ─── Firehose Lucene Rule Reference ──────────────────────────────────
@@ -630,8 +634,17 @@
         state.feedHourlyCount = 0;
         state.feedHourlyStart = Date.now();
         updateFeedCounter();
+        clearSelection();
       };
     }
+
+    // Bulk action bar buttons
+    var bulkSelectAllBtn = $('bulkSelectAllBtn');
+    var bulkClearSelBtn = $('bulkClearBtn');
+    var bulkFetchBtn = $('bulkFetchBtn');
+    if (bulkSelectAllBtn) { bulkSelectAllBtn.onclick = function () { selectAllVisible(); }; }
+    if (bulkClearSelBtn) { bulkClearSelBtn.onclick = function () { clearSelection(); }; }
+    if (bulkFetchBtn) { bulkFetchBtn.onclick = function () { bulkFetchAndAddToDrafts(); }; }
 
     // Render feed filters
     renderFeedFilters();
@@ -736,8 +749,12 @@
   }
 
   function renderArticleCard(container, article, prepend) {
+    var artKey = article.url || article.firehose_event_id || article.id || '';
+    var isSelected = !!selectedArticles[artKey];
+
     var card = document.createElement('div');
-    card.className = 'article-card';
+    card.className = 'article-card' + (isSelected ? ' feed-card-selected' : '');
+    card.setAttribute('data-article-key', artKey);
 
     var tierClass = 'badge-tier' + (article.authority_tier || 3);
     var tierLabel = 'T' + (article.authority_tier || 3);
@@ -775,11 +792,14 @@
       }
     }
 
+    var selectBtnClass = isSelected ? 'btn-selected' : 'article-select-btn';
+    var selectBtnText = isSelected ? '&#10003; Selected' : 'Select &#9654;';
+
     card.innerHTML =
       '<div class="article-card-top">' +
         '<div class="article-card-content">' +
           '<div class="article-title">' +
-            '<a href="' + escapeHtml(article.url || '#') + '" target="_blank" rel="noopener">' +
+            '<a href="' + escapeHtml(article.url || '#') + '" target="_blank" rel="noopener" onclick="event.stopPropagation();">' +
               escapeHtml(truncate(article.title || article.url || 'Untitled', 120)) +
             '</a>' +
           '</div>' +
@@ -793,26 +813,35 @@
             '<span>' + formatTime(article.publish_time || article.received_at) + '</span>' +
           '</div>' +
         '</div>' +
-        '<button class="article-select-btn" data-article-url="' + escapeHtml(article.url || '') + '">Select &#9654;</button>' +
+        '<button class="' + selectBtnClass + '">' + selectBtnText + '</button>' +
       '</div>' +
       previewHtml +
       fullContentHtml;
 
-    // Add select button click handler
-    var selectBtn = card.querySelector('.article-select-btn');
+    // Store article data on card for selectAll
+    card._articleData = article;
+
+    // Click card or button to toggle selection
+    var selectBtn = card.querySelector('.article-select-btn, .btn-selected');
     if (selectBtn) {
       selectBtn.addEventListener('click', function (e) {
         e.stopPropagation();
-        selectArticle(article, e.target);
+        toggleSelectArticle(artKey, article, card);
       });
     }
+    card.addEventListener('click', function (e) {
+      // Don't toggle if user clicked a link or expand button
+      if (e.target.tagName === 'A' || e.target.classList.contains('expand-btn')) return;
+      toggleSelectArticle(artKey, article, card);
+    });
 
     // Add expand button if there is full content
     if (fullContentHtml) {
       var expandBtn = document.createElement('button');
       expandBtn.className = 'expand-btn';
       expandBtn.textContent = 'Show more';
-      expandBtn.addEventListener('click', function () {
+      expandBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
         var fullDiv = card.querySelector('.article-full');
         if (fullDiv) {
           var isOpen = fullDiv.classList.contains('open');
@@ -830,38 +859,127 @@
     }
   }
 
-  // ─── Select Article (Manual Draft) ──────────────────────────────────────
+  // ─── Multi-Select for Live Feed ──────────────────────────────────────────
 
-  function selectArticle(articleData, btn) {
-    fetchApi('/api/drafts', {
-      method: 'POST',
-      body: {
-        article_id: articleData.id || null,
-        url: articleData.url,
-        domain: articleData.domain,
-        title: articleData.title,
-        content_markdown: articleData.content_markdown || '',
-        language: articleData.language,
-        page_category: Array.isArray(articleData.page_category) ? articleData.page_category.join(', ') : (articleData.page_category || ''),
-        publish_time: articleData.publish_time,
+  function toggleSelectArticle(key, article, card) {
+    if (selectedArticles[key]) {
+      delete selectedArticles[key];
+      selectedCount--;
+      if (card) {
+        card.classList.remove('feed-card-selected');
+        var btn = card.querySelector('.btn-selected, .article-select-btn');
+        if (btn) { btn.className = 'article-select-btn'; btn.innerHTML = 'Select &#9654;'; }
       }
-    })
-      .then(function (result) {
-        if (result.success) {
-          showToast('Draft created — fetching content...', 'success');
-          if (btn) {
-            btn.textContent = '\u2713 Selected';
-            btn.classList.add('selected');
-          }
-          setTimeout(function () { navigateTo('published'); }, 1000);
+    } else {
+      selectedArticles[key] = article;
+      selectedCount++;
+      if (card) {
+        card.classList.add('feed-card-selected');
+        var btn2 = card.querySelector('.article-select-btn, .btn-selected');
+        if (btn2) { btn2.className = 'btn-selected'; btn2.innerHTML = '&#10003; Selected'; }
+      }
+    }
+    updateBulkActionBar();
+  }
+
+  function clearSelection() {
+    selectedArticles = {};
+    selectedCount = 0;
+    var cards = document.querySelectorAll('.feed-card-selected');
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].classList.remove('feed-card-selected');
+      var btn = cards[i].querySelector('.btn-selected');
+      if (btn) { btn.className = 'article-select-btn'; btn.innerHTML = 'Select &#9654;'; }
+    }
+    updateBulkActionBar();
+  }
+
+  function selectAllVisible() {
+    var feedList = $('feedList');
+    if (!feedList) return;
+    var cards = feedList.querySelectorAll('.article-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var key = card.getAttribute('data-article-key');
+      var article = card._articleData;
+      if (key && article && !selectedArticles[key]) {
+        selectedArticles[key] = article;
+        selectedCount++;
+        card.classList.add('feed-card-selected');
+        var btn = card.querySelector('.article-select-btn');
+        if (btn) { btn.className = 'btn-selected'; btn.innerHTML = '&#10003; Selected'; }
+      }
+    }
+    updateBulkActionBar();
+  }
+
+  function updateBulkActionBar() {
+    var bar = $('bulkActionBar');
+    var countEl = $('bulkCount');
+    if (!bar) return;
+    if (selectedCount > 0) {
+      bar.style.display = 'flex';
+      if (countEl) countEl.textContent = selectedCount + ' selected';
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+
+  function bulkFetchAndAddToDrafts() {
+    var keys = Object.keys(selectedArticles);
+    if (keys.length === 0) { showToast('No articles selected', 'warning'); return; }
+
+    var btn = $('bulkFetchBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Fetching ' + keys.length + ' articles...'; btn.style.opacity = '0.7'; }
+
+    var articles = [];
+    for (var i = 0; i < keys.length; i++) {
+      var a = selectedArticles[keys[i]];
+      articles.push({
+        article_id: a.id || null,
+        url: a.url || '',
+        domain: a.domain || '',
+        title: a.title || 'Untitled',
+        content_markdown: a.content_markdown || '',
+        language: a.language || null,
+        page_category: Array.isArray(a.page_category) ? a.page_category.join(', ') : (a.page_category || ''),
+        publish_time: a.publish_time || null,
+      });
+    }
+
+    fetchApi('/api/drafts/bulk-create', { method: 'POST', body: { articles: articles } })
+      .then(function (data) {
+        if (data.success) {
+          var msg = data.created + ' article(s) added to drafts!';
+          if (data.skipped > 0) msg += ' (' + data.skipped + ' duplicates skipped)';
+          showToast(msg, 'success');
+          clearSelection();
+          showGoToPublishedPrompt(data.created);
         } else {
-          showToast('Failed: ' + (result.error || result.message || 'Unknown error'), 'error');
+          showToast('Failed: ' + (data.error || 'Unknown'), 'error');
         }
       })
-      .catch(function (err) {
-        showToast('Network error: ' + err.message, 'error');
+      .catch(function (err) { showToast('Failed: ' + err.message, 'error'); })
+      .finally(function () {
+        if (btn) { btn.disabled = false; btn.textContent = 'Fetch & Add to Drafts'; btn.style.opacity = '1'; }
       });
   }
+
+  function showGoToPublishedPrompt(count) {
+    var toast = document.createElement('div');
+    toast.className = 'bulk-success-toast';
+    toast.innerHTML =
+      '<div>' +
+        '<div style="color:#10b981;font-weight:bold;font-size:14px;">' + count + ' articles added!</div>' +
+        '<div style="color:#888;font-size:12px;margin-top:4px;">Content extraction started in background.</div>' +
+      '</div>' +
+      '<button class="btn btn-sm" style="background:#10b981;color:#fff;border:none;white-space:nowrap;" onclick="window.__goToPublished();this.parentElement.remove();">Go to Published</button>' +
+      '<button style="background:none;border:none;color:#666;cursor:pointer;font-size:18px;padding:4px;" onclick="this.parentElement.remove();">&times;</button>';
+    document.body.appendChild(toast);
+    setTimeout(function () { if (toast.parentElement) toast.remove(); }, 10000);
+  }
+
+  window.__goToPublished = function () { navigateTo('published'); };
 
   // ─── Firehose Rules Page ───────────────────────────────────────────────
 

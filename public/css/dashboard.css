@@ -1242,6 +1242,70 @@ select:focus {
 .article-select-btn:hover { background: var(--accent-hover); }
 .article-select-btn.selected { background: var(--green); opacity: 1; }
 
+/* Selected card state */
+.btn-selected {
+  background: var(--green);
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.btn-selected:hover { background: #16a34a; }
+.feed-card-selected {
+  border-color: var(--green) !important;
+  background: rgba(34, 197, 94, 0.05);
+}
+
+/* Bulk action bar */
+.bulk-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--green);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.bulk-count {
+  font-weight: 600;
+  color: var(--green);
+  font-size: 0.85rem;
+  margin-right: auto;
+}
+.bulk-action-bar .btn { font-size: 0.8rem; }
+
+/* Bulk success toast */
+.bulk-success-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--green);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  animation: slideInToast 0.3s ease-out;
+}
+@keyframes slideInToast {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 /* ─── Draft Cards ─────────────────────────────────────────────────────── */
 .drafts-list {
   display: flex;

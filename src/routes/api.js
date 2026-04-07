@@ -1013,6 +1013,83 @@ function createApiRouter(deps) {
     }
   });
 
+  // POST /api/drafts/bulk-create — Create multiple drafts from Live Feed selection
+  router.post('/drafts/bulk-create', function (req, res) {
+    try {
+      var articles = req.body && req.body.articles;
+      if (!articles || !Array.isArray(articles) || articles.length === 0) {
+        return res.status(400).json({ success: false, error: 'No articles provided' });
+      }
+      if (articles.length > 50) {
+        return res.status(400).json({ success: false, error: 'Maximum 50 articles at once' });
+      }
+
+      var draftConfig = getConfig();
+      var draftPlatform = (draftConfig.WP_URL && draftConfig.WP_USERNAME && draftConfig.WP_APP_PASSWORD) ? 'wordpress' : 'blogspot';
+
+      var insertStmt = db.prepare(
+        "INSERT INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual')"
+      );
+      var checkDup = db.prepare('SELECT id FROM drafts WHERE source_url = ?');
+
+      var created = 0;
+      var skipped = 0;
+      var createdIds = [];
+
+      for (var i = 0; i < articles.length; i++) {
+        var a = articles[i];
+        var url = a.url || '';
+        if (!url) { skipped++; continue; }
+
+        // Skip duplicates
+        if (checkDup.get(url)) {
+          skipped++;
+          continue;
+        }
+
+        try {
+          var result = insertStmt.run(
+            a.article_id || null,
+            url,
+            a.domain || null,
+            a.title || null,
+            a.content_markdown || '',
+            a.language || null,
+            a.page_category || null,
+            a.publish_time || null,
+            draftPlatform
+          );
+          createdIds.push(result.lastInsertRowid);
+          created++;
+        } catch (insertErr) {
+          logger.warn('api', 'Bulk draft insert failed for ' + url + ': ' + insertErr.message);
+          skipped++;
+        }
+      }
+
+      // Trigger extraction for all new drafts (async, non-blocking)
+      if (createdIds.length > 0) {
+        logger.info('api', 'Bulk created ' + created + ' drafts, triggering extraction...');
+        (async function () {
+          for (var j = 0; j < createdIds.length; j++) {
+            try {
+              await extractDraftContent(createdIds[j], draftDeps);
+            } catch (err) {
+              logger.warn('api', 'Bulk extraction failed for draft ' + createdIds[j] + ': ' + err.message);
+            }
+          }
+          logger.info('api', 'Bulk extraction complete for ' + createdIds.length + ' drafts');
+        })();
+      }
+
+      return res.json({ success: true, created: created, skipped: skipped, total: articles.length, draftIds: createdIds });
+    } catch (err) {
+      logger.error('api', 'POST /api/drafts/bulk-create failed: ' + err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // GET /api/drafts — List all drafts
   router.get('/drafts', function (req, res) {
     try {
