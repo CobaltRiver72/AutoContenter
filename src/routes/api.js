@@ -1572,6 +1572,30 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/drafts/stats ──────────────────────────────────────────────
+  //
+  // Returns counts by extraction status for the batch extract button badge.
+  //
+  router.get('/drafts/stats', function (req, res) {
+    try {
+      var stats = db.prepare(
+        "SELECT " +
+        "  COUNT(*) as total, " +
+        "  SUM(CASE WHEN extraction_status = 'pending' THEN 1 ELSE 0 END) as pending, " +
+        "  SUM(CASE WHEN extraction_status = 'failed' THEN 1 ELSE 0 END) as failed, " +
+        "  SUM(CASE WHEN extraction_status IN ('success','cached','fallback') THEN 1 ELSE 0 END) as extracted, " +
+        "  SUM(CASE WHEN status = 'fetching' AND locked_by IS NOT NULL THEN 1 ELSE 0 END) as in_progress, " +
+        "  SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) as published, " +
+        "  SUM(CASE WHEN status = 'rewriting' THEN 1 ELSE 0 END) as rewriting " +
+        "FROM drafts"
+      ).get();
+
+      res.json({ success: true, stats: stats });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // GET /api/drafts/:id — Get single draft
   router.get('/drafts/:id', function (req, res) {
     try {
@@ -1612,6 +1636,59 @@ function createApiRouter(deps) {
       return res.json({ success: true });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/drafts/batch-delete ──────────────────────────────────────
+  //
+  // Deletes specific drafts by ID array.
+  // Body: { ids: [1, 2, 3, ...] }
+  // Safety: won't delete drafts with status 'published'.
+  //
+  router.post('/drafts/batch-delete', function (req, res) {
+    try {
+      var ids = req.body && req.body.ids;
+
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ success: false, error: 'ids must be a non-empty array' });
+      }
+
+      // Sanitize: only allow positive integers
+      var safeIds = ids
+        .map(function (id) { return parseInt(id, 10); })
+        .filter(function (id) { return !isNaN(id) && id > 0; });
+
+      if (safeIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'No valid draft IDs provided' });
+      }
+
+      // Cap at 500 per request to avoid mega-queries
+      if (safeIds.length > 500) {
+        return res.status(400).json({ success: false, error: 'Maximum 500 drafts per batch delete' });
+      }
+
+      // Build parameterized placeholders: (?, ?, ?, ...)
+      var placeholders = safeIds.map(function () { return '?'; }).join(', ');
+
+      // Safety: exclude published drafts
+      var deleteStmt = db.prepare(
+        'DELETE FROM drafts WHERE id IN (' + placeholders + ') AND status != \'published\''
+      );
+
+      var result = deleteStmt.run.apply(deleteStmt, safeIds);
+
+      logger.info('api', 'Batch delete: removed ' + result.changes + ' of ' + safeIds.length + ' requested drafts');
+
+      res.json({
+        success: true,
+        message: 'Deleted ' + result.changes + ' drafts',
+        deletedCount: result.changes,
+        requestedCount: safeIds.length,
+        skippedPublished: safeIds.length - result.changes
+      });
+    } catch (err) {
+      logger.error('api', 'Batch delete error: ' + err.message);
+      res.status(500).json({ success: false, error: 'Batch delete failed: ' + err.message });
     }
   });
 
@@ -1767,30 +1844,6 @@ function createApiRouter(deps) {
     } catch (err) {
       logger.error('api', 'Batch extract failed: ' + err.message);
       res.status(500).json({ success: false, error: 'Batch extract failed: ' + err.message });
-    }
-  });
-
-  // ─── GET /api/drafts/stats ──────────────────────────────────────────────
-  //
-  // Returns counts by extraction status for the batch extract button badge.
-  //
-  router.get('/drafts/stats', function (req, res) {
-    try {
-      var stats = db.prepare(
-        "SELECT " +
-        "  COUNT(*) as total, " +
-        "  SUM(CASE WHEN extraction_status = 'pending' THEN 1 ELSE 0 END) as pending, " +
-        "  SUM(CASE WHEN extraction_status = 'failed' THEN 1 ELSE 0 END) as failed, " +
-        "  SUM(CASE WHEN extraction_status IN ('success','cached','fallback') THEN 1 ELSE 0 END) as extracted, " +
-        "  SUM(CASE WHEN status = 'fetching' AND locked_by IS NOT NULL THEN 1 ELSE 0 END) as in_progress, " +
-        "  SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) as published, " +
-        "  SUM(CASE WHEN status = 'rewriting' THEN 1 ELSE 0 END) as rewriting " +
-        "FROM drafts"
-      ).get();
-
-      res.json({ success: true, stats: stats });
-    } catch (err) {
-      res.status(500).json({ success: false, error: err.message });
     }
   });
 

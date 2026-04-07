@@ -32,6 +32,11 @@
   var pendingAddUrls = {};
   var showOnlyNew = false;
 
+  // ─── Multi-select state for Published page ────────────────────────────
+  var _selectedDraftIds = {};
+  var _selectedDraftCount = 0;
+  var _selectModeActive = false;
+
   // ─── Rule Templates ────────────────────────────────────────────────────
 
   // ─── Firehose Lucene Rule Reference ──────────────────────────────────
@@ -2079,6 +2084,10 @@
   var publishedPollInterval = null;
 
   function loadPublished() {
+    _selectedDraftIds = {};
+    _selectedDraftCount = 0;
+    _selectModeActive = false;
+
     var container = $('publishedList');
     var pagination = $('publishedPagination');
 
@@ -2195,6 +2204,9 @@
 
         // ─── Row 3: Action Buttons ───────────────────────────────
         '<div class="batch-actions-bar">' +
+          '<button id="select-mode-btn" class="action-btn action-btn-select" onclick="window.__toggleSelectMode()">' +
+            '&#9745; Select' +
+          '</button>' +
           '<button class="action-btn action-btn-primary" id="batchExtractBtn">' +
             '<span class="action-btn-icon">&#9889;</span>' +
             '<span class="action-btn-text">Extract All</span>' +
@@ -2243,7 +2255,17 @@
       cardsHTML += renderDraftCard(manualDrafts[mi]);
     }
 
-    container.innerHTML = filterHTML + '<div class="drafts-list">' + cardsHTML + '</div>';
+    var multiSelectBarHTML =
+      '<div id="multi-select-bar" class="multi-select-bar">' +
+        '<div class="multi-select-bar-inner">' +
+          '<span class="select-count-label"><span class="select-count">0</span> selected</span>' +
+          '<button class="action-btn action-btn-select-all" onclick="window.__selectAllDrafts()">Select All</button>' +
+          '<button class="action-btn action-btn-deselect" onclick="window.__deselectAllDrafts()">Deselect All</button>' +
+          '<button class="action-btn action-btn-danger" onclick="window.__deleteSelectedDrafts()">&#128465; Delete Selected</button>' +
+        '</div>' +
+      '</div>';
+
+    container.innerHTML = filterHTML + '<div class="drafts-list">' + cardsHTML + '</div>' + multiSelectBarHTML;
 
     // Attach filter listeners
     var filterBtns = container.querySelectorAll('.filter-btn');
@@ -2601,6 +2623,13 @@
     if (draft.status === 'failed') cardClass += ' compact-failed';
 
     return '<div class="' + cardClass + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
+      (draft.status !== 'published' ?
+        '<input type="checkbox" class="draft-select-checkbox" data-draft-id="' + draft.id + '" ' +
+          'onclick="window.__toggleDraftSelect(' + draft.id + ', event)" ' +
+          'style="' + (_selectModeActive ? '' : 'display:none') + '" ' +
+          (_selectedDraftIds[draft.id] ? 'checked' : '') +
+        '/>'
+        : '') +
       '<div class="compact-card-left">' +
         '<div class="compact-card-header">' +
           '<span class="compact-status' + (isPulsing ? ' pulsing' : '') + '" style="background:' + statusColor + '">' + statusLabel + '</span>' +
@@ -2794,6 +2823,117 @@
         showToast('Error: ' + err.message, 'error');
       });
   };
+
+  // ─── Multi-select helpers ──────────────────────────────────────────────
+
+  window.__toggleSelectMode = function () {
+    _selectModeActive = !_selectModeActive;
+    _selectedDraftIds = {};
+    _selectedDraftCount = 0;
+    _updateSelectUI();
+  };
+
+  window.__toggleDraftSelect = function (draftId, event) {
+    if (event) event.stopPropagation();
+    draftId = parseInt(draftId, 10);
+    if (_selectedDraftIds[draftId]) {
+      delete _selectedDraftIds[draftId];
+      _selectedDraftCount--;
+    } else {
+      _selectedDraftIds[draftId] = true;
+      _selectedDraftCount++;
+    }
+    _updateSelectUI();
+  };
+
+  window.__selectAllDrafts = function () {
+    var checkboxes = document.querySelectorAll('.draft-select-checkbox');
+    for (var i = 0; i < checkboxes.length; i++) {
+      var id = parseInt(checkboxes[i].dataset.draftId, 10);
+      if (!isNaN(id)) {
+        _selectedDraftIds[id] = true;
+        checkboxes[i].checked = true;
+      }
+    }
+    _selectedDraftCount = Object.keys(_selectedDraftIds).length;
+    _updateSelectUI();
+  };
+
+  window.__deselectAllDrafts = function () {
+    _selectedDraftIds = {};
+    _selectedDraftCount = 0;
+    var checkboxes = document.querySelectorAll('.draft-select-checkbox');
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = false; }
+    _updateSelectUI();
+  };
+
+  window.__deleteSelectedDrafts = function () {
+    if (_selectedDraftCount === 0) return;
+
+    if (!confirm('Delete ' + _selectedDraftCount + ' selected draft(s)? This cannot be undone. Published articles will be skipped.')) {
+      return;
+    }
+
+    var ids = [];
+    for (var k in _selectedDraftIds) {
+      if (_selectedDraftIds[k]) ids.push(parseInt(k, 10));
+    }
+
+    fetchApi('/api/drafts/batch-delete', {
+      method: 'POST',
+      body: { ids: ids }
+    })
+      .then(function (data) {
+        if (data.success) {
+          showToast('Deleted ' + data.deletedCount + ' draft(s)' +
+            (data.skippedPublished > 0 ? ' (' + data.skippedPublished + ' published skipped)' : ''), 'success');
+          _selectedDraftIds = {};
+          _selectedDraftCount = 0;
+          _selectModeActive = false;
+          loadPublished();
+        } else {
+          showToast('Delete failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Delete failed: ' + err.message, 'error');
+      });
+  };
+
+  function _updateSelectUI() {
+    var bar = document.getElementById('multi-select-bar');
+    if (bar) {
+      if (_selectedDraftCount > 0) {
+        bar.classList.add('visible');
+        var countEl = bar.querySelector('.select-count');
+        if (countEl) countEl.textContent = _selectedDraftCount;
+      } else {
+        bar.classList.remove('visible');
+      }
+    }
+
+    var allCheckboxes = document.querySelectorAll('.draft-select-checkbox');
+    for (var i = 0; i < allCheckboxes.length; i++) {
+      var id = parseInt(allCheckboxes[i].dataset.draftId, 10);
+      allCheckboxes[i].checked = !!_selectedDraftIds[id];
+      if (_selectModeActive) {
+        allCheckboxes[i].style.display = '';
+      } else {
+        allCheckboxes[i].style.display = 'none';
+      }
+    }
+
+    var toggleBtn = document.getElementById('select-mode-btn');
+    if (toggleBtn) {
+      if (_selectModeActive) {
+        toggleBtn.classList.add('active');
+        toggleBtn.innerHTML = '&#10005; Cancel Select';
+      } else {
+        toggleBtn.classList.remove('active');
+        toggleBtn.innerHTML = '&#9745; Select';
+      }
+    }
+  }
 
   function startPublishedPolling() {
     if (publishedPollInterval) clearInterval(publishedPollInterval);
