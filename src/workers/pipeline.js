@@ -198,6 +198,16 @@ class Pipeline {
           .catch(function (err) {
             self.logger.warn(MODULE, 'Extraction #' + draft.id + ' failed: ' + err.message);
             self.stats.extractionsFailed++;
+            // Reset extraction_status so it doesn't stay stuck in 'extracting'
+            try {
+              self.db.prepare(
+                "UPDATE drafts SET extraction_status = 'failed', " +
+                "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+                "updated_at = datetime('now') WHERE id = ? AND extraction_status = 'extracting'"
+              ).run(draft.id);
+            } catch (dbErr) {
+              self.logger.error(MODULE, 'Failed to reset extraction_status for #' + draft.id + ': ' + dbErr.message);
+            }
             self._failOrRetry(draft, 'fetching', err.message);
           });
       });

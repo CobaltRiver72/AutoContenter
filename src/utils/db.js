@@ -437,6 +437,21 @@ function recoverStuckDrafts(logger) {
     if (stuck.length > 0 && logger) {
       logger.info('recovery', 'Recovered ' + stuck.length + ' stuck draft(s) on startup');
     }
+
+    // ─── Recover drafts stuck in extraction_status = 'extracting' ──────
+    // If extraction_status is 'extracting' but locked_by is NULL or lease expired,
+    // the extraction was interrupted. Reset to 'pending' so they get re-queued.
+    var stuckExtracting = db.prepare(
+      "UPDATE drafts SET extraction_status = 'pending', " +
+      "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+      "updated_at = datetime('now') " +
+      "WHERE extraction_status = 'extracting' " +
+      "AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
+    ).run();
+
+    if (stuckExtracting.changes > 0) {
+      if (logger) logger.info('recovery', 'Recovered ' + stuckExtracting.changes + ' drafts stuck in extracting state');
+    }
   } catch (err) {
     console.error('[db] Stuck draft recovery failed:', err.message);
   }
@@ -451,6 +466,19 @@ function recoverStaleLocks() {
     if (stale.changes > 0) {
       console.log('[db] Released ' + stale.changes + ' stale job locks');
     }
+
+    // Also reset any extraction_status stuck in 'extracting' with no active lease
+    var staleExtraction = db.prepare(
+      "UPDATE drafts SET extraction_status = 'pending', " +
+      "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+      "updated_at = datetime('now') " +
+      "WHERE extraction_status = 'extracting'"
+    ).run();
+
+    if (staleExtraction.changes > 0) {
+      console.log('[db] Recovered ' + staleExtraction.changes + ' stale extracting locks on startup');
+    }
+
     return stale.changes;
   } catch (e) {
     console.warn('[db] recoverStaleLocks failed:', e.message);

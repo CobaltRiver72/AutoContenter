@@ -1639,6 +1639,34 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/drafts/recover-stuck ─────────────────────────────────────
+  //
+  // Recovers all drafts stuck in extraction_status = 'extracting'
+  // by resetting them to 'pending' so the extraction loop picks them up again.
+  //
+  router.post('/drafts/recover-stuck', function (req, res) {
+    try {
+      var result = db.prepare(
+        "UPDATE drafts SET extraction_status = 'pending', " +
+        "status = 'fetching', " +
+        "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+        "updated_at = datetime('now') " +
+        "WHERE extraction_status = 'extracting'"
+      ).run();
+
+      logger.info('api', 'Manual recovery: reset ' + result.changes + ' stuck extracting drafts');
+
+      res.json({
+        success: true,
+        message: 'Recovered ' + result.changes + ' stuck drafts',
+        recoveredCount: result.changes
+      });
+    } catch (err) {
+      logger.error('api', 'Recovery error: ' + err.message);
+      res.status(500).json({ success: false, error: 'Recovery failed: ' + err.message });
+    }
+  });
+
   // ─── POST /api/drafts/batch-delete ──────────────────────────────────────
   //
   // Deletes specific drafts by ID array.
