@@ -158,24 +158,6 @@ class ArticleBuffer {
   }
 
   /**
-   * Get buffer stats for monitoring.
-   */
-  getStats() {
-    try {
-      var bufferHours = this.config.BUFFER_HOURS || 6;
-      var total = this.db.prepare(
-        "SELECT COUNT(*) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours')"
-      ).get(bufferHours).count;
-      var unclustered = this.db.prepare(
-        "SELECT COUNT(*) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours') AND cluster_id IS NULL"
-      ).get(bufferHours).count;
-      return { totalInBuffer: total, unclustered: unclustered, bufferHours: bufferHours };
-    } catch (err) {
-      return { totalInBuffer: 0, unclustered: 0, bufferHours: 0 };
-    }
-  }
-
-  /**
    * Get all articles belonging to a cluster.
    *
    * @param {number} clusterId

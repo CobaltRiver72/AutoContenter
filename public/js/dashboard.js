@@ -945,8 +945,8 @@
     var ruleValue = 'language:en AND (' + titleClauses.join(' OR ') + ')';
     var tag = 'search-' + keywords.slice(0, 3).join('-').toLowerCase().replace(/[^a-z0-9-]/g, '');
 
-    var tagInput = $('ruleTag');
-    var queryInput = $('ruleQuery');
+    var tagInput = $('ruleTagInput');
+    var queryInput = $('ruleQueryInput');
 
     if (tagInput && queryInput) {
       tagInput.value = tag;
@@ -1946,7 +1946,7 @@
               '<span class="badge ' + statusClass + '">' + escapeHtml(c.status || 'detected') + '</span>' +
               (canPublish ? '<button class="btn btn-sm btn-success" onclick="event.stopPropagation(); window.__publishCluster(' + c.id + ')">Publish</button>' : '') +
               (canSkip ? '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); window.__skipCluster(' + c.id + ')">Skip</button>' : '') +
-              ((c.status === 'queued' || c.status === 'published') ? '<button class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" onclick="event.stopPropagation(); navigateTo(\'published\')">&#128221; View Drafts</button>' : '') +
+              ((c.status === 'queued' || c.status === 'published') ? '<button class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" onclick="event.stopPropagation(); window.__goToPublished()">&#128221; View Drafts</button>' : '') +
             '</div>' +
           '</div>' +
           '<div class="cluster-body" id="cluster-body-' + c.id + '">' +
@@ -2241,10 +2241,12 @@
       .then(function (data) {
         var draft = data.data;
         if (draft && draft.rewritten_html) {
-          var win = window.open('', '_blank');
-          if (!win) { showToast('Popup blocked by browser', 'error'); return; }
-          win.document.write(draft.rewritten_html);
-          win.document.close();
+          // Use a sandboxed iframe blob to prevent XSS from AI-generated content
+          var blob = new Blob([draft.rewritten_html], { type: 'text/html' });
+          var url = URL.createObjectURL(blob);
+          var win = window.open(url, '_blank');
+          if (!win) { showToast('Popup blocked by browser', 'error'); }
+          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
         } else {
           showToast('No rewritten HTML available', 'error');
         }
@@ -3339,25 +3341,28 @@
         showToast('Failed to load logs: ' + err.message, 'error');
       });
 
-    // Filters
-    if (moduleFilter) {
+    // Filters — only attach once (onchange = assignment, not addEventListener)
+    if (moduleFilter && !moduleFilter._logsHandlerSet) {
+      moduleFilter._logsHandlerSet = true;
       moduleFilter.onchange = function () {
         state.logsPage = 1;
         loadLogs();
       };
     }
-    if (levelFilter) {
+    if (levelFilter && !levelFilter._logsHandlerSet) {
+      levelFilter._logsHandlerSet = true;
       levelFilter.onchange = function () {
         state.logsPage = 1;
         loadLogs();
       };
     }
 
-    // Auto-refresh every 10s
-    clearPageTimers();
-    state.refreshTimers.push(setInterval(function () {
-      if (state.currentPage === 'logs') loadLogs();
-    }, 10000));
+    // Auto-refresh every 10s — only create if no existing timer
+    if (!state.refreshTimers.length) {
+      state.refreshTimers.push(setInterval(function () {
+        if (state.currentPage === 'logs') loadLogs();
+      }, 10000));
+    }
   }
 
   function renderLogs(container, logs) {

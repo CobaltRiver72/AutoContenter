@@ -852,10 +852,7 @@ function createApiRouter(deps) {
 
   router.post('/test/rewrite', function (req, res) {
     try {
-      var rewriter;
-      try {
-        rewriter = require('../modules/rewriter');
-      } catch (e) {
+      if (!rewriter || !rewriter.enabled) {
         return res.status(503).json({ error: 'Rewriter module not available' });
       }
 

@@ -331,7 +331,7 @@ class WordPressPublisher {
           var urlParsed = new URL(self.wpBaseUrl);
           var authBaseUrl = urlParsed.protocol + '//' + encodedUser + ':' + encodedPwd + '@' + urlParsed.host + urlParsed.pathname.replace(/\/+$/, '');
           var url2 = authBaseUrl + '/?rest_route=' + encodeURIComponent(restPath);
-          var headers2 = Object.assign({}, extraHeaders || {}, { 'Content-Type': 'application/json' });
+          var headers2 = Object.assign({ 'Content-Type': 'application/json' }, extraHeaders || {});
 
           var res2 = await axios({ method: method, url: url2, data: data, headers: headers2, timeout: WP_TIMEOUT_MS });
           self.logger.info('publisher', 'Method 2 succeeded (' + res2.status + ')');

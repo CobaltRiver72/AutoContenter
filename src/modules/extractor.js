@@ -160,7 +160,7 @@ class ContentExtractor {
     try {
       dom = new JSDOM(html, { url: url });
     } catch (jsdomErr) {
-      this.logger.warn('JSDOM parsing failed for ' + url + ': ' + jsdomErr.message);
+      this.logger.warn(MODULE, 'JSDOM parsing failed for ' + url + ': ' + jsdomErr.message);
       return null;
     }
     try {

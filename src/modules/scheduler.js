@@ -382,6 +382,20 @@ class PublishScheduler {
         primaryDraft.id
       );
 
+      // Attach SEO properties that the publisher needs but rewriter doesn't set
+      rewrittenArticle.schemaTypes = freshPrimary.schema_types || 'NewsArticle,FAQPage,BreadcrumbList';
+      rewrittenArticle.targetDomain = freshPrimary.target_domain || '';
+
+      // Try to find a featured image from cluster articles
+      if (!rewrittenArticle.featuredImage) {
+        for (var fi = 0; fi < freshDrafts.length; fi++) {
+          if (freshDrafts[fi].featured_image) {
+            rewrittenArticle.featuredImage = freshDrafts[fi].featured_image;
+            break;
+          }
+        }
+      }
+
       this.logger.info('scheduler', 'Rewrite complete for primary draft #' + primaryDraft.id + ': "' + (rewrittenArticle.title || '').substring(0, 60) + '"');
 
       // ─── Step 4: Publish to WordPress ────────────────────────────────────
@@ -413,7 +427,9 @@ class PublishScheduler {
       } catch (publishErr) {
         this.logger.error('scheduler', 'WordPress publish failed for cluster #' + clusterId + ': ' + publishErr.message);
 
-        var pubRetry = (freshPrimary.retry_count || 0) + 1;
+        // Re-read retry_count fresh from DB (may have been incremented by rewrite phase)
+        var latestPrimary = this.db.prepare('SELECT retry_count FROM drafts WHERE id = ?').get(primaryDraft.id);
+        var pubRetry = ((latestPrimary ? latestPrimary.retry_count : 0) || 0) + 1;
         if (pubRetry >= 3) {
           this.db.prepare(
             "UPDATE drafts SET status = 'failed', error_message = ?, retry_count = ?, updated_at = datetime('now') WHERE id = ?"

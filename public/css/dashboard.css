@@ -919,7 +919,7 @@ select:focus {
 /* ─── Health Panel ────────────────────────────────────────────────────── */
 .health-panel {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   gap: 10px;
   margin-bottom: 20px;
 }
@@ -2005,10 +2005,10 @@ select:focus {
 .setting-select {
   width: 100%;
   padding: 10px 12px;
-  background: var(--card);
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text);
+  color: var(--text-primary);
   font-size: 14px;
   cursor: pointer;
 }
@@ -2017,8 +2017,8 @@ select:focus {
   outline: none;
 }
 .setting-select option {
-  background: var(--card);
-  color: var(--text);
+  background: var(--bg-card);
+  color: var(--text-primary);
 }
 
 .provider-settings {

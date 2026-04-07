@@ -138,8 +138,16 @@ function createDashboardRouter() {
     var password = req.body.password || '';
 
     if (password && verifyPassword(password)) {
-      req.session.authenticated = true;
-      return res.redirect('/');
+      // Regenerate session to prevent session fixation
+      var oldSession = req.session;
+      req.session.regenerate(function (err) {
+        if (err) {
+          return res.redirect('/login?error=1');
+        }
+        req.session.authenticated = true;
+        return res.redirect('/');
+      });
+      return;
     }
 
     return res.redirect('/login?error=1');
