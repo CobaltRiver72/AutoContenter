@@ -2086,23 +2086,254 @@ select:focus {
   white-space: nowrap;
 }
 
-/* ─── Cluster draft grouping ─────────────────────────────────────── */
+/* ─── Cluster Group Styles ─────────────────────────────────────────── */
 
-.cluster-badge {
-  display: inline-block;
-  font-weight: 600;
-  letter-spacing: 0.3px;
+.cluster-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  margin-bottom: 16px;
+  overflow: hidden;
 }
 
-.cluster-role-badge {
-  display: inline-block;
-  font-weight: 600;
-  letter-spacing: 0.3px;
+.cluster-group-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
 }
 
-/* Visual grouping: cluster drafts have a left border */
-.draft-card[data-cluster]:not([data-cluster=""]) {
-  border-left: 3px solid #6366f1;
+.cluster-header-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.cluster-id-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.cluster-status-pill {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  color: #fff;
+  font-weight: 500;
+}
+
+.cluster-article-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cluster-wp-link {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: auto;
+}
+.cluster-wp-link:hover { text-decoration: underline; }
+
+.cluster-header-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 10px 0;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+/* Progress bar */
+.cluster-progress-bar {
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border);
+}
+.progress-segment { height: 100%; transition: width 0.3s; }
+.progress-published { background: #22c55e; }
+.progress-ready { background: #10b981; }
+.progress-rewriting { background: #a855f7; }
+.progress-extracted { background: #4a7aff; }
+.progress-fetching { background: #f59e0b; }
+.progress-failed { background: #ef4444; }
+
+/* Sources toggle */
+.cluster-sources-toggle {
+  display: block;
+  width: 100%;
+  padding: 8px 20px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.cluster-sources-toggle:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+.cluster-sources-list {
+  padding: 0 12px 12px 12px;
+}
+
+/* Compact cards inside cluster groups */
+.compact-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.compact-card:last-child { border-bottom: none; }
+
+.compact-primary {
+  background: var(--bg-card);
+}
+
+.compact-source {
+  background: rgba(255,255,255,0.01);
+  padding: 10px 20px;
+}
+
+.compact-card-left { flex: 1; min-width: 0; }
+
+.compact-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.compact-status {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.compact-status.pulsing {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.compact-role-primary {
+  font-size: 10px;
+  padding: 1px 6px;
+  background: #f59e0b;
+  color: #000;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.compact-role-source {
+  font-size: 10px;
+  padding: 1px 6px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-muted);
+  border-radius: 8px;
+}
+
+.compact-domain {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.compact-meta-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.tag-success { background: rgba(34,197,94,0.15); color: #22c55e; }
+.tag-error { background: rgba(239,68,68,0.15); color: #ef4444; }
+.tag-pending { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.tag-ai { background: rgba(168,85,247,0.15); color: #a855f7; }
+
+.compact-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  margin-bottom: 2px;
+}
+
+.compact-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 4px 0 0 0;
+  max-height: 60px;
+  overflow: hidden;
+}
+
+.compact-error {
+  font-size: 11px;
+  color: #ef4444;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: rgba(239,68,68,0.1);
+  border-radius: 4px;
+}
+
+.compact-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-self: center;
+}
+
+.compact-published {
+  opacity: 0.7;
+}
+
+.compact-failed {
+  border-left: 3px solid #ef4444;
+}
+
+/* Section divider for manual drafts */
+.section-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 16px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.section-divider span {
+  white-space: nowrap;
+}
+.section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Filter divider */
+.filter-divider {
+  width: 1px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+/* Extra small buttons for compact cards */
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
 }
 
 @media (max-width: 768px) {

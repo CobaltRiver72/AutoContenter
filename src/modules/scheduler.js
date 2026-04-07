@@ -1,5 +1,7 @@
 'use strict';
 
+var { extractDraftContent } = require('../utils/draft-helpers');
+
 // Queue processing interval (30 seconds)
 var PROCESS_INTERVAL_MS = 30000;
 
@@ -323,59 +325,63 @@ class PublishScheduler {
       }
 
       // ─── Step 2: Extract content for ALL drafts that need it ────────────
+      // Uses the SAME extractDraftContent() as the manual Retry button
+      // This has 3-layer fallback: direct fetch -> cache/archive -> firehose data
       var draftsToExtract = clusterDrafts.filter(function (d) {
-        return d.extraction_status !== 'success' && d.extraction_status !== 'cached';
+        return d.extraction_status !== 'success' && d.extraction_status !== 'cached' && d.extraction_status !== 'fallback';
       });
 
       if (draftsToExtract.length > 0) {
-        this.logger.info('scheduler', 'Extracting content for ' + draftsToExtract.length + '/' + clusterDrafts.length + ' drafts');
+        this.logger.info('scheduler', 'Extracting content for ' + draftsToExtract.length + '/' + clusterDrafts.length + ' drafts (using draft-helpers)');
+
+        var draftDeps = { db: this.db, logger: this.logger, extractor: this.extractor, rewriter: this.rewriter };
 
         for (var e = 0; e < draftsToExtract.length; e++) {
           var draft = draftsToExtract[e];
           try {
-            this.db.prepare("UPDATE drafts SET status = 'fetching', updated_at = datetime('now') WHERE id = ?").run(draft.id);
+            this.logger.info('scheduler', 'Extracting draft #' + draft.id + ' from ' + draft.source_domain);
 
-            if (this.extractor && this.extractor.enabled) {
-              var articleObj = {
-                id: draft.source_article_id || draft.id,
-                url: draft.source_url,
-                domain: draft.source_domain,
-                title: draft.source_title,
-                content_markdown: draft.source_content_markdown,
-              };
+            // Call the SAME function the manual Retry button uses
+            await extractDraftContent(draft.id, draftDeps);
 
-              await this.extractor._extractArticle(articleObj);
-
-              this.db.prepare(
-                "UPDATE drafts SET " +
-                "  extracted_content = ?, extracted_title = ?, extracted_excerpt = ?," +
-                "  extracted_byline = ?, extraction_status = ?, extraction_error = NULL," +
-                "  status = 'draft', updated_at = datetime('now') " +
-                "WHERE id = ?"
-              ).run(
-                articleObj.extracted_content || articleObj.content_markdown || '',
-                articleObj.extracted_title || draft.source_title || '',
-                articleObj.extracted_excerpt || '',
-                articleObj.extracted_byline || '',
-                articleObj.extraction_status || 'success',
-                draft.id
-              );
-
-              this.logger.info('scheduler', 'Extracted content for draft #' + draft.id + ' (' + (articleObj.extracted_content || '').length + ' chars)');
-            } else {
-              // No extractor — use Firehose content as-is
-              this.db.prepare(
-                "UPDATE drafts SET extracted_content = source_content_markdown, extraction_status = 'firehose', status = 'draft', updated_at = datetime('now') WHERE id = ?"
-              ).run(draft.id);
+            // Reload the draft to check what happened
+            var updatedDraft = this.db.prepare('SELECT extraction_status, extracted_content FROM drafts WHERE id = ?').get(draft.id);
+            if (updatedDraft) {
+              var charCount = (updatedDraft.extracted_content || '').length;
+              this.logger.info('scheduler', 'Draft #' + draft.id + ' extraction result: ' + updatedDraft.extraction_status + ' (' + charCount + ' chars)');
             }
           } catch (extractErr) {
             this.logger.warn('scheduler', 'Extraction failed for draft #' + draft.id + ': ' + extractErr.message);
+            // extractDraftContent already handles DB updates on failure, but ensure status is set
             this.db.prepare(
-              "UPDATE drafts SET extraction_status = 'failed', extraction_error = ?, error_message = ?, status = 'draft', updated_at = datetime('now') WHERE id = ?"
-            ).run(extractErr.message, extractErr.message, draft.id);
-            // Continue — we can still rewrite with partial content
+              "UPDATE drafts SET status = CASE WHEN status = 'fetching' THEN 'draft' ELSE status END, updated_at = datetime('now') WHERE id = ?"
+            ).run(draft.id);
           }
         }
+      }
+
+      // Log extraction summary
+      var extractionSummary = this.db.prepare(
+        "SELECT extraction_status, COUNT(*) as count FROM drafts WHERE cluster_id = ? GROUP BY extraction_status"
+      ).all(clusterId);
+      var summaryParts = [];
+      for (var es = 0; es < extractionSummary.length; es++) {
+        summaryParts.push(extractionSummary[es].extraction_status + ':' + extractionSummary[es].count);
+      }
+      this.logger.info('scheduler', 'Cluster #' + clusterId + ' extraction summary: ' + summaryParts.join(', '));
+
+      // Check if at least the primary draft has content
+      var freshPrimaryCheck = this.db.prepare('SELECT extracted_content, extraction_status FROM drafts WHERE id = ?').get(primaryDraft.id);
+      if (!freshPrimaryCheck || !freshPrimaryCheck.extracted_content || freshPrimaryCheck.extracted_content.length < 50) {
+        this.logger.warn('scheduler', 'Primary draft #' + primaryDraft.id + ' has insufficient content (' +
+          (freshPrimaryCheck && freshPrimaryCheck.extracted_content ? freshPrimaryCheck.extracted_content.length : 0) + ' chars, status: ' +
+          (freshPrimaryCheck ? freshPrimaryCheck.extraction_status : 'unknown') + ') — skipping rewrite, will retry next cycle');
+
+        // Reset primary to fetching so it gets picked up again
+        this.db.prepare(
+          "UPDATE drafts SET status = 'fetching', extraction_status = 'pending', updated_at = datetime('now') WHERE id = ? AND extraction_status != 'success'"
+        ).run(primaryDraft.id);
+        return;
       }
 
       // ─── Step 3: Rewrite the PRIMARY draft using ALL sources ────────────

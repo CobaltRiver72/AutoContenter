@@ -1459,6 +1459,7 @@ function createApiRouter(deps) {
     try {
       var status = req.query.status || null;
       var mode = req.query.mode || null;
+      var clusterId = req.query.cluster_id || null;
 
       var query = 'SELECT * FROM drafts';
       var conditions = [];
@@ -1466,6 +1467,7 @@ function createApiRouter(deps) {
 
       if (status) { conditions.push('status = ?'); params.push(status); }
       if (mode) { conditions.push('mode = ?'); params.push(mode); }
+      if (clusterId) { conditions.push('cluster_id = ?'); params.push(clusterId); }
 
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');

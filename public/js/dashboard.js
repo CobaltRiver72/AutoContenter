@@ -2548,25 +2548,24 @@
         publishedPollInterval = null;
         return;
       }
+      // Re-render the entire Published page to pick up status changes in cluster groups
       fetchApi('/api/drafts')
         .then(function (data) {
           var drafts = data.data || [];
-          for (var i = 0; i < drafts.length; i++) {
-            var card = document.querySelector('.draft-card[data-id="' + drafts[i].id + '"]');
-            if (card && card.getAttribute('data-status') !== drafts[i].status) {
-              card.outerHTML = renderDraftCard(drafts[i]);
-            }
-          }
-          var inProgress = drafts.some(function (d) {
-            return d.status === 'fetching' || d.status === 'rewriting';
+          var hasActive = drafts.some(function (d) {
+            return d.status === 'fetching' || d.status === 'rewriting' || d.status === 'ready';
           });
-          if (!inProgress) {
+
+          // Full re-render to correctly update cluster groups and progress bars
+          renderDraftsView(drafts);
+
+          if (!hasActive) {
             clearInterval(publishedPollInterval);
             publishedPollInterval = null;
           }
         })
         .catch(function () { /* silent */ });
-    }, 3000);
+    }, 5000);
   }
 
   // ─── Content Editor ─────────────────────────────────────────────────────
@@ -2587,7 +2586,11 @@
         currentDraft = draft;
 
         // Populate top bar
-        $('editor-title').textContent = 'Draft Editor \u2014 ' + (draft.extracted_title || draft.source_title || 'Untitled');
+        var editorTitleText = 'Draft Editor \u2014 ' + (draft.extracted_title || draft.source_title || 'Untitled');
+        if (draft.cluster_id) {
+          editorTitleText = '\uD83D\uDCDA Cluster #' + draft.cluster_id + ' \u2014 ' + (draft.extracted_title || draft.source_title || 'Untitled');
+        }
+        $('editor-title').textContent = editorTitleText;
         $('editor-status').textContent = draft.status.toUpperCase();
         $('editor-status').style.background = getStatusColor(draft.status);
 
@@ -2626,6 +2629,80 @@
         }
 
         $('source-content').textContent = draft.extracted_content || draft.source_content_markdown || 'No content extracted.';
+
+        // ─── Cluster Sources Panel ───────────────────────────────
+        var clusterSourcesContainer = $('cluster-sources-panel');
+        if (clusterSourcesContainer) clusterSourcesContainer.remove();
+
+        if (draft.cluster_id) {
+          var sourcesPanel = document.createElement('div');
+          sourcesPanel.id = 'cluster-sources-panel';
+          sourcesPanel.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:16px;';
+          sourcesPanel.innerHTML =
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer" onclick="this.parentElement.querySelector(\'.cluster-editor-sources\').style.display = this.parentElement.querySelector(\'.cluster-editor-sources\').style.display === \'none\' ? \'\' : \'none\'; this.querySelector(\'.toggle-arrow\').textContent = this.parentElement.querySelector(\'.cluster-editor-sources\').style.display === \'none\' ? \'\\u25B8\' : \'\\u25BE\'">' +
+              '<span class="toggle-arrow" style="font-size:14px">\u25B8</span>' +
+              '<strong style="color:var(--accent)">Cluster #' + draft.cluster_id + ' Sources</strong>' +
+              '<span style="color:var(--text-muted);font-size:12px">(loading...)</span>' +
+            '</div>' +
+            '<div class="cluster-editor-sources" style="display:none;"></div>';
+
+          var sourceContentEl = $('source-content');
+          if (sourceContentEl && sourceContentEl.parentElement) {
+            sourceContentEl.parentElement.appendChild(sourcesPanel);
+          }
+
+          fetchApi('/api/drafts?cluster_id=' + draft.cluster_id)
+            .then(function (clusterData) {
+              var allDrafts = (clusterData.data || []).filter(function (d) { return d.id !== draft.id; });
+              var countSpan = sourcesPanel.querySelector('span:last-of-type');
+              if (countSpan) countSpan.textContent = '(' + allDrafts.length + ' source' + (allDrafts.length !== 1 ? 's' : '') + ')';
+
+              var sourcesList = sourcesPanel.querySelector('.cluster-editor-sources');
+              if (allDrafts.length === 0) {
+                sourcesList.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">No other sources in this cluster.</p>';
+                return;
+              }
+
+              var html = '';
+              for (var si = 0; si < allDrafts.length; si++) {
+                var sd = allDrafts[si];
+                var sdContent = extractReadableText(sd.extracted_content || sd.source_content_markdown || '');
+                var sdStatusColor = sd.extraction_status === 'success' ? 'var(--green)' :
+                                    sd.extraction_status === 'failed' ? 'var(--red)' : 'var(--text-muted)';
+                var sdChars = (sd.extracted_content || '').length;
+
+                html +=
+                  '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;background:var(--bg-card)">' +
+                    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">' +
+                      '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,0.05);color:var(--text-muted)">' +
+                        escapeHtml(sd.source_domain || '') +
+                      '</span>' +
+                      '<span style="font-size:11px;color:' + sdStatusColor + '">' +
+                        (sd.extraction_status === 'success' ? formatCharCount(sdChars) :
+                         sd.extraction_status === 'failed' ? 'Failed' : (sd.extraction_status || 'pending')) +
+                      '</span>' +
+                      (sd.cluster_role === 'primary' ?
+                        '<span style="font-size:10px;padding:1px 6px;background:#f59e0b;color:#000;border-radius:8px">Primary</span>' : '') +
+                    '</div>' +
+                    '<div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--text-primary)">' +
+                      '<a href="' + escapeHtml(sd.source_url || '#') + '" target="_blank" style="color:var(--accent);text-decoration:none">' +
+                        escapeHtml(sd.extracted_title || sd.source_title || sd.source_url || 'Untitled') +
+                      '</a>' +
+                    '</div>' +
+                    (sdContent ?
+                      '<div style="font-size:12px;color:var(--text-secondary);line-height:1.4;max-height:80px;overflow:hidden">' +
+                        escapeHtml(sdContent.substring(0, 300)) +
+                      '</div>' : '') +
+                  '</div>';
+              }
+
+              sourcesList.innerHTML = html;
+            })
+            .catch(function () {
+              var countSpan = sourcesPanel.querySelector('span:last-of-type');
+              if (countSpan) countSpan.textContent = '(failed to load)';
+            });
+        }
 
         // Settings tab
         $('setting-keyword').value = draft.target_keyword || '';
