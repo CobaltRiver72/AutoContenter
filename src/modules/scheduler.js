@@ -61,7 +61,7 @@ class PublishScheduler {
         this.logger.info('scheduler', 'Recovering ' + stuckDrafts.length + ' stuck auto-drafts from previous session');
 
         var resetStmt = this.db.prepare(
-          "UPDATE drafts SET status = 'fetching', extraction_status = 'pending', updated_at = datetime('now') WHERE id = ?"
+          "UPDATE drafts SET status = 'fetching', extraction_status = 'pending', error_message = 'Recovered from stuck state (server restarted)', retry_count = COALESCE(retry_count, 0), updated_at = datetime('now') WHERE id = ?"
         );
 
         for (var i = 0; i < stuckDrafts.length; i++) {
@@ -182,22 +182,20 @@ class PublishScheduler {
     this._processing = true;
 
     try {
-      // Check rate limits first
-      if (!this.canPublishNow()) {
-        this.logger.debug('scheduler', 'Rate limit active — skipping queue processing');
-        return;
-      }
+      this.logger.debug('scheduler', 'processQueue tick: processing=' + this._processing + ', publishHistory=' + this.publishHistory.length);
 
       // ─── Step 1: Find the next cluster to process ───────────────────────
+      // Include 'ready' status — drafts already extracted+rewritten, just waiting for rate limit
       var nextCluster = this.db.prepare(
         "SELECT DISTINCT d.cluster_id, c.topic, c.trends_boosted, c.priority " +
         "FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
         "WHERE d.mode = 'auto' " +
         "  AND d.cluster_id IS NOT NULL " +
-        "  AND d.status IN ('fetching', 'draft') " +
+        "  AND d.status IN ('fetching', 'draft', 'ready') " +
         "  AND c.status = 'queued' " +
         "ORDER BY " +
+        "  CASE WHEN d.status = 'ready' THEN 0 ELSE 1 END, " +
         "  CASE WHEN c.trends_boosted = 1 THEN 0 ELSE 1 END, " +
         "  c.article_count DESC, " +
         "  c.detected_at ASC " +
@@ -205,7 +203,14 @@ class PublishScheduler {
       ).get();
 
       if (!nextCluster || !nextCluster.cluster_id) {
-        return; // Nothing to process
+        // Log why nothing was found if there are pending drafts
+        var pendingCount = this.db.prepare(
+          "SELECT COUNT(*) as count FROM drafts WHERE mode = 'auto' AND status IN ('fetching', 'draft', 'ready')"
+        ).get();
+        if (pendingCount && pendingCount.count > 0) {
+          this.logger.debug('scheduler', 'No processable clusters found, but ' + pendingCount.count + ' auto-drafts exist — check cluster statuses');
+        }
+        return;
       }
 
       var clusterId = nextCluster.cluster_id;
@@ -239,6 +244,82 @@ class PublishScheduler {
         primaryDraft = clusterDrafts[0];
         this.db.prepare("UPDATE drafts SET cluster_role = 'primary' WHERE id = ?").run(primaryDraft.id);
         sourceDrafts = clusterDrafts.slice(1);
+      }
+
+      // ─── Fast path: Primary already ready (extracted + rewritten), skip to publish ─
+      if (primaryDraft.status === 'ready' && primaryDraft.rewritten_html) {
+        this.logger.info('scheduler', 'Primary draft #' + primaryDraft.id + ' already ready — skipping to publish');
+
+        if (!this.canPublishNow()) {
+          this.logger.info('scheduler', 'Cluster #' + clusterId + ' ready but rate limited — will publish next cycle');
+          return;
+        }
+
+        var savedRewrite = {
+          title: primaryDraft.rewritten_title || primaryDraft.source_title,
+          content: primaryDraft.rewritten_html,
+          slug: (primaryDraft.rewritten_title || primaryDraft.source_title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 60),
+          excerpt: primaryDraft.extracted_excerpt || '',
+          metaDescription: '',
+          targetKeyword: primaryDraft.target_keyword || '',
+          wordCount: primaryDraft.rewritten_word_count || 0,
+          aiModel: primaryDraft.ai_model_used || '',
+          schemaTypes: primaryDraft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList',
+          targetDomain: primaryDraft.target_domain || '',
+          featuredImage: primaryDraft.featured_image || null,
+          faq: [],
+        };
+
+        if (!savedRewrite.featuredImage) {
+          for (var fi2 = 0; fi2 < clusterDrafts.length; fi2++) {
+            if (clusterDrafts[fi2].featured_image) {
+              savedRewrite.featuredImage = clusterDrafts[fi2].featured_image;
+              break;
+            }
+          }
+        }
+
+        var clusterForPublish = {
+          id: clusterId,
+          topic: nextCluster.topic,
+          articles: clusterDrafts.map(function (d) {
+            return {
+              url: d.source_url,
+              domain: d.source_domain,
+              title: d.source_title,
+              content_markdown: d.extracted_content || d.source_content_markdown || '',
+              featured_image: d.featured_image || null,
+            };
+          }),
+        };
+
+        try {
+          var pubResult = await this.publisher.publish(savedRewrite, clusterForPublish, this.db);
+          this.publishHistory.push(Date.now());
+
+          this.db.prepare(
+            "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+          ).run(pubResult.wpPostId, pubResult.wpPostUrl, primaryDraft.id);
+
+          this.db.prepare(
+            "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, published_at = datetime('now'), updated_at = datetime('now') WHERE cluster_id = ? AND id != ?"
+          ).run(pubResult.wpPostId, pubResult.wpPostUrl, clusterId, primaryDraft.id);
+
+          this.db.prepare("UPDATE clusters SET status = 'published', published_at = datetime('now') WHERE id = ?").run(clusterId);
+          this.logger.info('scheduler', 'Cluster #' + clusterId + ' published (from ready state) → WP post #' + pubResult.wpPostId);
+        } catch (pubErr) {
+          this.logger.error('scheduler', 'WP publish failed for ready cluster #' + clusterId + ': ' + pubErr.message);
+          var retryCount2 = (primaryDraft.retry_count || 0) + 1;
+          this.db.prepare(
+            "UPDATE drafts SET error_message = ?, retry_count = ?, updated_at = datetime('now') WHERE id = ?"
+          ).run('WP publish failed: ' + pubErr.message, retryCount2, primaryDraft.id);
+
+          if (retryCount2 >= 3) {
+            this.db.prepare("UPDATE drafts SET status = 'failed' WHERE id = ?").run(primaryDraft.id);
+            this.db.prepare("UPDATE clusters SET status = 'failed' WHERE id = ?").run(clusterId);
+          }
+        }
+        return;
       }
 
       // ─── Step 2: Extract content for ALL drafts that need it ────────────
@@ -398,7 +479,12 @@ class PublishScheduler {
 
       this.logger.info('scheduler', 'Rewrite complete for primary draft #' + primaryDraft.id + ': "' + (rewrittenArticle.title || '').substring(0, 60) + '"');
 
-      // ─── Step 4: Publish to WordPress ────────────────────────────────────
+      // ─── Step 4: Publish to WordPress (rate-limited) ────────────────────
+      if (!this.canPublishNow()) {
+        this.logger.info('scheduler', 'Cluster #' + clusterId + ' is READY but rate limit active — will publish on next cycle');
+        return;
+      }
+
       try {
         var publishResult = await this.publisher.publish(rewrittenArticle, clusterForRewrite, this.db);
 
@@ -455,22 +541,39 @@ class PublishScheduler {
     try {
       var now = Date.now();
       var oneHourAgo = now - 60 * 60 * 1000;
-      var maxPerHour = this.config.MAX_PUBLISH_PER_HOUR || 4;
-      var cooldownMs = (this.config.PUBLISH_COOLDOWN_MINUTES || 10) * 60 * 1000;
 
+      // Parse config with safe defaults — parseInt handles undefined/NaN/0
+      var maxPerHour = parseInt(this.config.MAX_PUBLISH_PER_HOUR, 10);
+      if (isNaN(maxPerHour) || maxPerHour <= 0) maxPerHour = 4;
+
+      var cooldownMinutes = parseInt(this.config.PUBLISH_COOLDOWN_MINUTES, 10);
+      if (isNaN(cooldownMinutes) || cooldownMinutes < 0) cooldownMinutes = 10;
+      var cooldownMs = cooldownMinutes * 60 * 1000;
+
+      // Prune old entries from publish history
       this.publishHistory = this.publishHistory.filter(function (ts) { return ts > oneHourAgo; });
 
-      if (this.publishHistory.length >= maxPerHour) return false;
+      // Check hourly limit
+      if (this.publishHistory.length >= maxPerHour) {
+        this.logger.debug('scheduler', 'Rate limit: ' + this.publishHistory.length + '/' + maxPerHour + ' published this hour');
+        return false;
+      }
 
-      if (this.publishHistory.length > 0) {
+      // Check cooldown since last publish
+      if (this.publishHistory.length > 0 && cooldownMs > 0) {
         var lastPublish = Math.max.apply(null, this.publishHistory);
-        if (now - lastPublish < cooldownMs) return false;
+        var elapsed = now - lastPublish;
+        if (elapsed < cooldownMs) {
+          this.logger.debug('scheduler', 'Rate limit: cooldown ' + Math.round((cooldownMs - elapsed) / 1000) + 's remaining');
+          return false;
+        }
       }
 
       return true;
     } catch (err) {
-      this.logger.error('scheduler', 'Error checking rate limit: ' + err.message);
-      return false;
+      // Error should NOT block publishing — log and allow it
+      this.logger.error('scheduler', 'canPublishNow() error (allowing publish): ' + err.message);
+      return true;
     }
   }
 

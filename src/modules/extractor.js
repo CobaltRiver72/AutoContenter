@@ -188,65 +188,64 @@ class ContentExtractor {
   }
 
   _buildFallbackContent(article) {
-    var parts = [];
+    var raw = article.content_markdown || '';
 
-    if (article.title) {
-      parts.push(article.title);
-    }
+    // Detect JSON content (chunks format from Firehose)
+    if (typeof raw === 'string' && raw.length > 0) {
+      var trimmed = raw.trim();
+      if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+        try {
+          var parsed = JSON.parse(trimmed);
 
-    if (article.content_markdown) {
-      var md = article.content_markdown;
-
-      if (typeof md === 'string') {
-        if (md.charAt(0) === '{' || md.charAt(0) === '[') {
-          try {
-            var parsed = JSON.parse(md);
-            var text = this._extractTextFromDiff(parsed);
-            if (text) parts.push(text);
-          } catch (e) {
-            if (md.length > 50 && md.indexOf('"chunks"') === -1) {
-              parts.push(md);
-            }
+          // Check for empty chunks — no usable content
+          if (parsed && parsed.chunks && Array.isArray(parsed.chunks) && parsed.chunks.length === 0) {
+            // Fall through to title-only fallback
+          } else {
+            // Try to extract text from non-empty JSON
+            var texts = [];
+            this._extractTextsFromJson(parsed, texts);
+            var result = texts.join(' ').trim();
+            if (result.length > 50) return result;
           }
-        } else {
-          parts.push(md);
+        } catch (e) {
+          // Not valid JSON — use as-is if it's substantial
+          if (raw.length > 100) return raw;
         }
+      } else if (raw.length > 100) {
+        // Non-JSON content, use directly
+        return raw;
       }
     }
 
-    return parts.join('\n\n');
+    // Build from title + other available fields
+    var parts = [];
+    if (article.title) parts.push(article.title);
+    if (article.domain) parts.push('Source: ' + article.domain);
+    return parts.join('. ') || '';
   }
 
-  _extractTextFromDiff(diff) {
-    var texts = [];
-
-    if (diff && diff.chunks && Array.isArray(diff.chunks)) {
-      for (var i = 0; i < diff.chunks.length; i++) {
-        var chunk = diff.chunks[i];
-        if (chunk.ins && typeof chunk.ins === 'string') {
-          texts.push(chunk.ins.trim());
-        }
-        if (chunk.add && typeof chunk.add === 'string') {
-          texts.push(chunk.add.trim());
-        }
-        if (chunk.added && typeof chunk.added === 'string') {
-          texts.push(chunk.added.trim());
-        }
-        if (chunk.value && chunk.type === 'ins') {
-          texts.push(chunk.value.trim());
-        }
+  /**
+   * Recursively extract text from JSON structures (chunks format).
+   */
+  _extractTextsFromJson(obj, result) {
+    if (!obj) return;
+    if (typeof obj === 'string') {
+      var cleaned = obj.trim();
+      if (cleaned.length > 2) result.push(cleaned);
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (var i = 0; i < obj.length; i++) {
+        this._extractTextsFromJson(obj[i], result);
+      }
+      return;
+    }
+    if (typeof obj === 'object') {
+      var keys = Object.keys(obj);
+      for (var k = 0; k < keys.length; k++) {
+        this._extractTextsFromJson(obj[keys[k]], result);
       }
     }
-
-    if (diff && diff.added && Array.isArray(diff.added)) {
-      for (var j = 0; j < diff.added.length; j++) {
-        var item = diff.added[j];
-        if (typeof item === 'string') texts.push(item.trim());
-        else if (item && item.text) texts.push(item.text.trim());
-      }
-    }
-
-    return texts.filter(function(t) { return t.length > 20; }).join('\n\n');
   }
 
   _getCachedContent(articleId) {

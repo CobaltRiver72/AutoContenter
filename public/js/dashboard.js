@@ -134,6 +134,51 @@
     return div.innerHTML;
   }
 
+  /**
+   * Extract readable text from content_markdown that might be JSON chunks format.
+   */
+  function extractReadableText(raw) {
+    if (!raw || typeof raw !== 'string') return '';
+    var trimmed = raw.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      return trimmed
+        .replace(/[#*_\[\]()>`~|\\]/g, ' ')
+        .replace(/!\[.*?\]\(.*?\)/g, '')
+        .replace(/\[([^\]]*)\]\(.*?\)/g, '$1')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    try {
+      var parsed = JSON.parse(trimmed);
+      var texts = [];
+      extractTextsFromObj(parsed, texts);
+      var result = texts.join(' ').replace(/\s+/g, ' ').trim();
+      return result || '[Content available]';
+    } catch (e) {
+      return trimmed.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  function extractTextsFromObj(obj, result) {
+    if (!obj) return;
+    if (typeof obj === 'string') { var cl = obj.trim(); if (cl.length > 2) result.push(cl); return; }
+    if (Array.isArray(obj)) { for (var i = 0; i < obj.length; i++) extractTextsFromObj(obj[i], result); return; }
+    if (typeof obj === 'object') {
+      var pKeys = ['text', 'content', 'value', 'body', 'title', 'description', 'summary'];
+      for (var k = 0; k < pKeys.length; k++) { if (obj[pKeys[k]]) extractTextsFromObj(obj[pKeys[k]], result); }
+      var cKeys = ['chunks', 'items', 'children', 'data', 'results', 'blocks', 'paragraphs'];
+      for (var c = 0; c < cKeys.length; c++) { if (obj[cKeys[c]]) extractTextsFromObj(obj[cKeys[c]], result); }
+    }
+  }
+
+  function formatCharCount(chars) {
+    if (chars >= 10000) return Math.round(chars / 1000) + 'k chars';
+    if (chars >= 1000) return (chars / 1000).toFixed(1) + 'k chars';
+    return chars + ' chars';
+  }
+
   function truncate(str, len) {
     if (!str) return '';
     return str.length > len ? str.slice(0, len) + '...' : str;
@@ -2059,35 +2104,60 @@
       container.innerHTML =
         '<div class="feed-empty">' +
           '<div class="feed-empty-icon">&#128221;</div>' +
-          '<div class="feed-empty-title">No drafts yet</div>' +
-          '<div class="feed-empty-desc">Go to <a href="#feed">Live Feed</a> and click "Select" on an article to create a draft.</div>' +
+          '<div class="feed-empty-title">No articles in pipeline</div>' +
+          '<div class="feed-empty-desc">Go to <a href="#feed">Live Feed</a> to select articles, or wait for auto-clusters from the Firehose.</div>' +
         '</div>';
       return;
     }
 
-    // Status filter tabs
-    var counts = { all: drafts.length, fetching: 0, draft: 0, rewriting: 0, ready: 0, published: 0 };
-    var clusterCount = 0;
+    // Separate cluster drafts from manual drafts
+    var clusterMap = {};
+    var manualDrafts = [];
+    for (var i = 0; i < drafts.length; i++) {
+      var d = drafts[i];
+      if (d.cluster_id) {
+        if (!clusterMap[d.cluster_id]) clusterMap[d.cluster_id] = { drafts: [], primary: null };
+        clusterMap[d.cluster_id].drafts.push(d);
+        if (d.cluster_role === 'primary') clusterMap[d.cluster_id].primary = d;
+      } else {
+        manualDrafts.push(d);
+      }
+    }
+    var clusterIds = Object.keys(clusterMap).sort(function (a, b) { return Number(b) - Number(a); });
+
+    // Count statuses
+    var counts = { all: drafts.length, fetching: 0, draft: 0, rewriting: 0, ready: 0, published: 0, failed: 0 };
     for (var c = 0; c < drafts.length; c++) {
       var st = drafts[c].status;
       if (counts[st] !== undefined) counts[st]++;
-      if (drafts[c].cluster_id) clusterCount++;
     }
 
     var filterHTML =
       '<div class="status-filters">' +
         '<button class="filter-btn active" data-filter="all">All (' + counts.all + ')</button>' +
+        '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterIds.length + ')</button>' +
+        '<button class="filter-btn" data-filter="manual">&#128100; Manual (' + manualDrafts.length + ')</button>' +
+        '<span class="filter-divider"></span>' +
         '<button class="filter-btn" data-filter="fetching">Fetching (' + counts.fetching + ')</button>' +
-        '<button class="filter-btn" data-filter="draft">Draft (' + counts.draft + ')</button>' +
+        '<button class="filter-btn" data-filter="draft">Extracted (' + counts.draft + ')</button>' +
         '<button class="filter-btn" data-filter="rewriting">Rewriting (' + counts.rewriting + ')</button>' +
         '<button class="filter-btn" data-filter="ready">Ready (' + counts.ready + ')</button>' +
         '<button class="filter-btn" data-filter="published">Published (' + counts.published + ')</button>' +
-        '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterCount + ')</button>' +
+        (counts.failed > 0 ? '<button class="filter-btn" data-filter="failed">&#10060; Failed (' + counts.failed + ')</button>' : '') +
       '</div>';
 
+    // Render cluster groups
     var cardsHTML = '';
-    for (var i = 0; i < drafts.length; i++) {
-      cardsHTML += renderDraftCard(drafts[i]);
+    for (var ci = 0; ci < clusterIds.length; ci++) {
+      cardsHTML += renderClusterGroup(clusterIds[ci], clusterMap[clusterIds[ci]]);
+    }
+
+    // Manual drafts section
+    if (manualDrafts.length > 0 && clusterIds.length > 0) {
+      cardsHTML += '<div class="section-divider"><span>Manual Drafts</span></div>';
+    }
+    for (var mi = 0; mi < manualDrafts.length; mi++) {
+      cardsHTML += renderDraftCard(manualDrafts[mi]);
     }
 
     container.innerHTML = filterHTML + '<div class="drafts-list">' + cardsHTML + '</div>';
@@ -2097,30 +2167,240 @@
     for (var f = 0; f < filterBtns.length; f++) {
       filterBtns[f].addEventListener('click', function () {
         var filter = this.getAttribute('data-filter');
-        // Toggle active
         var siblings = container.querySelectorAll('.filter-btn');
         for (var s = 0; s < siblings.length; s++) siblings[s].classList.remove('active');
         this.classList.add('active');
-        // Show/hide cards
-        var cards = container.querySelectorAll('.draft-card');
-        for (var d = 0; d < cards.length; d++) {
-          var cardStatus = cards[d].getAttribute('data-status');
-          var cardCluster = cards[d].getAttribute('data-cluster');
 
-          if (filter === 'all') {
-            cards[d].style.display = '';
-          } else if (filter === 'cluster') {
-            cards[d].style.display = cardCluster ? '' : 'none';
-          } else if (cardStatus === filter) {
-            cards[d].style.display = '';
+        var groups = container.querySelectorAll('.cluster-group');
+        var singles = container.querySelectorAll('.draft-card');
+        var dividers = container.querySelectorAll('.section-divider');
+
+        for (var g = 0; g < groups.length; g++) {
+          if (filter === 'all' || filter === 'cluster') {
+            groups[g].style.display = '';
+          } else if (filter === 'manual') {
+            groups[g].style.display = 'none';
           } else {
-            cards[d].style.display = 'none';
+            var hasMatch = groups[g].querySelector('[data-status="' + filter + '"]');
+            groups[g].style.display = hasMatch ? '' : 'none';
           }
+        }
+        for (var dd = 0; dd < singles.length; dd++) {
+          var cardStatus = singles[dd].getAttribute('data-status');
+          if (filter === 'all' || filter === 'manual') {
+            singles[dd].style.display = '';
+          } else if (filter === 'cluster') {
+            singles[dd].style.display = 'none';
+          } else {
+            singles[dd].style.display = (cardStatus === filter) ? '' : 'none';
+          }
+        }
+        for (var dv = 0; dv < dividers.length; dv++) {
+          dividers[dv].style.display = (filter === 'all') ? '' : 'none';
+        }
+      });
+    }
+
+    // Attach cluster expand/collapse
+    var toggleBtns = container.querySelectorAll('.cluster-sources-toggle');
+    for (var t = 0; t < toggleBtns.length; t++) {
+      toggleBtns[t].addEventListener('click', function () {
+        var targetId = this.getAttribute('data-target');
+        var sourcesList = document.getElementById(targetId);
+        if (sourcesList) {
+          var isHidden = sourcesList.style.display === 'none';
+          sourcesList.style.display = isHidden ? '' : 'none';
+          this.textContent = isHidden
+            ? '\u25BE Hide sources'
+            : '\u25B8 Show ' + sourcesList.children.length + ' source article' + (sourcesList.children.length !== 1 ? 's' : '');
         }
       });
     }
   }
 
+  /**
+   * Render a cluster group: header + progress bar + primary card + collapsible sources
+   */
+  function renderClusterGroup(clusterId, group) {
+    var drafts = group.drafts;
+    var primary = group.primary || drafts[0];
+    var sources = drafts.filter(function (d) { return d.id !== primary.id; });
+
+    var total = drafts.length;
+    var extracted = 0, rewriting = 0, ready = 0, published = 0, failed = 0, fetching = 0;
+    for (var i = 0; i < drafts.length; i++) {
+      switch (drafts[i].status) {
+        case 'fetching': fetching++; break;
+        case 'draft': extracted++; break;
+        case 'rewriting': rewriting++; break;
+        case 'ready': ready++; break;
+        case 'published': published++; break;
+        case 'failed': failed++; break;
+        default: fetching++;
+      }
+    }
+
+    var clusterStatusColor, clusterStatusLabel, clusterStatus;
+    if (published === total) {
+      clusterStatus = 'published'; clusterStatusColor = '#22c55e'; clusterStatusLabel = 'Published';
+    } else if (ready > 0) {
+      clusterStatus = 'ready'; clusterStatusColor = '#22c55e'; clusterStatusLabel = 'Ready to Publish';
+    } else if (rewriting > 0) {
+      clusterStatus = 'rewriting'; clusterStatusColor = '#a855f7'; clusterStatusLabel = 'AI Rewriting...';
+    } else if (extracted > 0 && fetching === 0) {
+      clusterStatus = 'extracted'; clusterStatusColor = '#4a7aff'; clusterStatusLabel = 'Extracted';
+    } else if (fetching > 0) {
+      clusterStatus = 'fetching'; clusterStatusColor = '#f59e0b'; clusterStatusLabel = 'Extracting ' + (total - fetching) + '/' + total;
+    } else if (failed === total) {
+      clusterStatus = 'failed'; clusterStatusColor = '#ef4444'; clusterStatusLabel = 'Failed';
+    } else {
+      clusterStatus = 'processing'; clusterStatusColor = '#f59e0b'; clusterStatusLabel = 'Processing...';
+    }
+
+    var progressHTML =
+      '<div class="cluster-progress-bar">' +
+        (published > 0 ? '<div class="progress-segment progress-published" style="width:' + (published / total * 100) + '%"></div>' : '') +
+        (ready > 0 ? '<div class="progress-segment progress-ready" style="width:' + (ready / total * 100) + '%"></div>' : '') +
+        (rewriting > 0 ? '<div class="progress-segment progress-rewriting" style="width:' + (rewriting / total * 100) + '%"></div>' : '') +
+        (extracted > 0 ? '<div class="progress-segment progress-extracted" style="width:' + (extracted / total * 100) + '%"></div>' : '') +
+        (fetching > 0 ? '<div class="progress-segment progress-fetching" style="width:' + (fetching / total * 100) + '%"></div>' : '') +
+        (failed > 0 ? '<div class="progress-segment progress-failed" style="width:' + (failed / total * 100) + '%"></div>' : '') +
+      '</div>';
+
+    var primaryTitle = primary.extracted_title || primary.source_title || primary.source_url || 'Untitled Cluster';
+    var wpLinkHTML = '';
+    if (primary.wp_post_url) {
+      wpLinkHTML = '<a href="' + escapeHtml(primary.wp_post_url) + '" target="_blank" class="cluster-wp-link">&#128279; View on WordPress</a>';
+    }
+
+    var headerHTML =
+      '<div class="cluster-group-header">' +
+        '<div class="cluster-header-top">' +
+          '<span class="cluster-id-badge">&#128218; Cluster #' + clusterId + '</span>' +
+          '<span class="cluster-status-pill" style="background:' + clusterStatusColor + '">' + clusterStatusLabel + '</span>' +
+          '<span class="cluster-article-count">' + total + ' source' + (total !== 1 ? 's' : '') + '</span>' +
+          wpLinkHTML +
+        '</div>' +
+        '<h3 class="cluster-header-title">' + escapeHtml(primaryTitle) + '</h3>' +
+        progressHTML +
+      '</div>';
+
+    var primaryCardHTML = renderDraftCardCompact(primary, true);
+
+    var sourcesHTML = '';
+    if (sources.length > 0) {
+      var sourcesListId = 'cluster-sources-' + clusterId;
+      sourcesHTML =
+        '<button class="cluster-sources-toggle" data-target="' + sourcesListId + '">' +
+          '\u25B8 Show ' + sources.length + ' source article' + (sources.length !== 1 ? 's' : '') +
+        '</button>' +
+        '<div id="' + sourcesListId + '" class="cluster-sources-list" style="display:none;">';
+      for (var s = 0; s < sources.length; s++) {
+        sourcesHTML += renderDraftCardCompact(sources[s], false);
+      }
+      sourcesHTML += '</div>';
+    }
+
+    return '<div class="cluster-group" data-cluster="' + clusterId + '" data-status="' + clusterStatus + '">' +
+      headerHTML + primaryCardHTML + sourcesHTML +
+    '</div>';
+  }
+
+  /**
+   * Compact draft card for cluster groups.
+   */
+  function renderDraftCardCompact(draft, isPrimary) {
+    var statusColors = {
+      fetching: '#f59e0b', draft: '#4a7aff', editing: '#8b5cf6',
+      rewriting: '#a855f7', ready: '#22c55e', published: '#22c55e', failed: '#ef4444'
+    };
+    var statusLabels = {
+      fetching: 'Extracting...', draft: 'Extracted', editing: 'Editing',
+      rewriting: 'AI Rewriting...', ready: 'Ready', published: 'Published', failed: 'Failed'
+    };
+    var statusColor = statusColors[draft.status] || '#6b7280';
+    var statusLabel = statusLabels[draft.status] || draft.status;
+    var isPulsing = draft.status === 'fetching' || draft.status === 'rewriting';
+
+    var rawContent = draft.extracted_content || draft.source_content_markdown || '';
+    var contentPreview = extractReadableText(rawContent).substring(0, isPrimary ? 300 : 150);
+
+    var extractedChars = (draft.extracted_content || '').length;
+    var extractInfo = '';
+    if (draft.extraction_status === 'success' || draft.extraction_status === 'cached') {
+      extractInfo = '<span class="compact-meta-tag tag-success">&#9989; ' + formatCharCount(extractedChars) + '</span>';
+    } else if (draft.extraction_status === 'failed') {
+      extractInfo = '<span class="compact-meta-tag tag-error">&#10060; Extract failed</span>';
+    } else if (draft.extraction_status === 'pending') {
+      extractInfo = '<span class="compact-meta-tag tag-pending">&#9203; Pending</span>';
+    }
+
+    var aiInfo = '';
+    if (isPrimary && draft.ai_model_used) {
+      var modelName = draft.ai_model_used
+        .replace('claude-haiku-4-5-20251001', 'Haiku 4.5')
+        .replace('claude-sonnet-4-20250514', 'Sonnet 4')
+        .replace('claude-sonnet-4-6', 'Sonnet 4.6')
+        .replace('claude-opus-4-20250514', 'Opus 4')
+        .replace('claude-opus-4-6', 'Opus 4.6')
+        .replace('gpt-4o', 'GPT-4o');
+      aiInfo = '<span class="compact-meta-tag tag-ai">&#129302; ' + escapeHtml(modelName) + '</span>';
+    }
+
+    var wordCountInfo = '';
+    if (isPrimary && draft.rewritten_word_count && draft.rewritten_word_count > 0) {
+      wordCountInfo = '<span class="compact-meta-tag">' + draft.rewritten_word_count + ' words</span>';
+    }
+
+    var actionsHTML = '';
+    if (draft.status === 'fetching') {
+      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry</button>';
+    }
+    if (isPrimary && (draft.status === 'draft' || draft.status === 'failed')) {
+      actionsHTML += '<button class="btn btn-xs btn-purple" onclick="window.__triggerRewrite(' + draft.id + ')">&#129302; Rewrite</button>';
+    }
+    if (isPrimary && draft.status !== 'fetching' && draft.status !== 'rewriting') {
+      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__openEditor(' + draft.id + ')">&#9998; Edit</button>';
+    }
+    if (isPrimary && (draft.status === 'ready' || draft.status === 'published')) {
+      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__previewDraftHTML(' + draft.id + ')">&#128065; Preview</button>';
+    }
+    if (isPrimary && draft.status === 'ready') {
+      actionsHTML += '<button class="btn btn-xs btn-green" onclick="window.__openEditor(' + draft.id + ')">&#128640; Publish</button>';
+    }
+    if (draft.status === 'failed') {
+      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__retryDraft(' + draft.id + ')">&#8635; Retry</button>';
+    }
+
+    var errorHTML = '';
+    if (draft.error_message) {
+      errorHTML = '<div class="compact-error">&#10060; ' + escapeHtml(draft.error_message) +
+        (draft.retry_count ? ' (attempt ' + draft.retry_count + '/' + (draft.max_retries || 3) + ')' : '') + '</div>';
+    }
+
+    var cardClass = isPrimary ? 'compact-card compact-primary' : 'compact-card compact-source cluster-source-card';
+    if (draft.status === 'published') cardClass += ' compact-published';
+    if (draft.status === 'failed') cardClass += ' compact-failed';
+
+    return '<div class="' + cardClass + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
+      '<div class="compact-card-left">' +
+        '<div class="compact-card-header">' +
+          '<span class="compact-status' + (isPulsing ? ' pulsing' : '') + '" style="background:' + statusColor + '">' + statusLabel + '</span>' +
+          (isPrimary ? '<span class="compact-role-primary">&#11088; Primary</span>' : '<span class="compact-role-source">&#128279; Source</span>') +
+          '<span class="compact-domain">' + escapeHtml(draft.source_domain || '') + '</span>' +
+          extractInfo + aiInfo + wordCountInfo +
+        '</div>' +
+        '<div class="compact-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</div>' +
+        (contentPreview ? '<p class="compact-preview">' + escapeHtml(truncate(contentPreview, isPrimary ? 300 : 150)) + '</p>' : '') +
+        errorHTML +
+      '</div>' +
+      (actionsHTML ? '<div class="compact-card-actions">' + actionsHTML + '</div>' : '') +
+    '</div>';
+  }
+
+  /**
+   * Render a manual (non-cluster) draft card.
+   */
   function renderDraftCard(draft) {
     var statusColors = {
       fetching: '#f59e0b', draft: '#4a7aff', editing: '#8b5cf6',
@@ -2128,7 +2408,8 @@
     };
     var statusColor = statusColors[draft.status] || '#6b7280';
     var isPulsing = draft.status === 'fetching' || draft.status === 'rewriting';
-    var contentPreview = (draft.extracted_content || draft.source_content_markdown || '').substring(0, 200);
+    var rawContent = draft.extracted_content || draft.source_content_markdown || '';
+    var contentPreview = extractReadableText(rawContent).substring(0, 250);
 
     var actionsHTML = '';
 
@@ -2138,7 +2419,6 @@
     if (draft.status !== 'fetching' && (draft.extraction_status === 'failed' || draft.is_partial)) {
       actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry Extract</button>';
     }
-    // Edit button for ALL actionable statuses including published
     if (draft.status !== 'fetching' && draft.status !== 'rewriting') {
       actionsHTML += '<button class="btn btn-sm btn-primary" onclick="window.__openEditor(' + draft.id + ')">&#9998; Edit Draft</button>';
     }
@@ -2168,29 +2448,14 @@
       imageHTML = '<div class="draft-card-image"><img src="' + escapeHtml(draft.featured_image) + '" alt="" onerror="this.parentElement.style.display=\'none\'"></div>';
     }
 
-    // Cluster badges
-    var clusterHTML = '';
-    if (draft.cluster_id) {
-      var roleIcon = draft.cluster_role === 'primary' ? '&#11088;' : '&#128279;';
-      var roleLabel = draft.cluster_role === 'primary' ? 'Primary' : 'Source';
-      clusterHTML =
-        '<span class="cluster-badge" style="background:#6366f1;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:4px;">' +
-          '&#128218; Cluster #' + draft.cluster_id +
-        '</span>' +
-        '<span class="cluster-role-badge" style="background:' + (draft.cluster_role === 'primary' ? '#f59e0b' : '#64748b') + ';color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:2px;">' +
-          roleIcon + ' ' + roleLabel +
-        '</span>';
-    }
-
-    return '<div class="draft-card' + (draft.featured_image ? ' has-image' : '') + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '"' + (draft.cluster_id ? ' data-cluster="' + draft.cluster_id + '"' : '') + '>' +
+    return '<div class="draft-card' + (draft.featured_image ? ' has-image' : '') + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
       imageHTML +
       '<div class="draft-card-body">' +
         '<div class="draft-header">' +
           '<span class="draft-status-badge' + (isPulsing ? ' pulsing' : '') + '" style="background:' + statusColor + '">' +
             escapeHtml(draft.status.toUpperCase()) +
           '</span>' +
-          '<span class="draft-mode">' + (draft.mode === 'auto' ? '&#129302; Auto' : '&#128100; Manual') + '</span>' +
-          clusterHTML +
+          '<span class="draft-mode">&#128100; Manual</span>' +
           '<span class="draft-time">' + formatTime(draft.created_at) + '</span>' +
         '</div>' +
         '<h3 class="draft-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</h3>' +
@@ -2198,14 +2463,12 @@
           '<span class="domain-badge">' + escapeHtml(draft.source_domain || '--') + '</span>' +
           (draft.source_language ? '<span class="domain-badge">' + escapeHtml(draft.source_language.toUpperCase()) + '</span>' : '') +
           (draft.target_keyword ? '<span class="domain-badge" style="color:var(--green)">&#127919; ' + escapeHtml(draft.target_keyword) + '</span>' : '') +
-          (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + (draft.extracted_content || '').length + ' chars</span>' : '') +
+          (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + formatCharCount((draft.extracted_content || '').length) + '</span>' : '') +
           (draft.extraction_status === 'failed' ? '<span style="color:var(--red);font-size:11px">&#10060; Extract failed</span>' : '') +
-          (draft.extraction_method ? '<span class="extraction-badge extraction-' + escapeHtml(draft.extraction_method) + '">' + (draft.extraction_method === 'direct' ? '&#127760; Direct' : draft.extraction_method === 'cache' ? '&#128230; Cached' : '&#128225; Firehose') + '</span>' : '') +
-          (draft.ai_model_used ? '<span class="ai-badge">' + (draft.ai_provider === 'anthropic' ? '&#128995; ' : '&#129001; ') + escapeHtml(draft.ai_model_used.replace('claude-', '').replace('gpt-', 'GPT-').split('-20')[0]) + (draft.ai_tokens_used ? ' &bull; ' + draft.ai_tokens_used + ' tok' : '') + '</span>' : '') +
+          (draft.ai_model_used ? '<span class="ai-badge">' + escapeHtml(draft.ai_model_used.replace('claude-', '').replace('gpt-', 'GPT-').split('-20')[0]) + '</span>' : '') +
         '</div>' +
-        (draft.error_message ? '<div class="draft-error-msg" style="font-size:11px;color:#ef4444;margin-top:4px;padding:4px 8px;background:rgba(239,68,68,0.1);border-radius:4px;">&#10060; ' + escapeHtml(draft.error_message) + (draft.retry_count ? ' (' + draft.retry_count + '/' + (draft.max_retries || 3) + ' attempts)' : '') + '</div>' : '') +
-        (draft.is_partial ? '<div class="partial-warning">&#9888; Partial content — may need manual review</div>' : '') +
-        (contentPreview ? '<p class="draft-preview">' + escapeHtml(truncate(contentPreview, 200)) + '</p>' : '') +
+        (draft.error_message ? '<div class="draft-error-msg" style="font-size:11px;color:#ef4444;margin-top:4px;padding:4px 8px;background:rgba(239,68,68,0.1);border-radius:4px;">&#10060; ' + escapeHtml(draft.error_message) + '</div>' : '') +
+        (contentPreview ? '<p class="draft-preview">' + escapeHtml(truncate(contentPreview, 250)) + '</p>' : '') +
         '<div class="draft-actions">' + actionsHTML + '</div>' +
       '</div>' +
     '</div>';
