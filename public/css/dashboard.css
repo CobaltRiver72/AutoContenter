@@ -1667,7 +1667,7 @@ select:focus {
   margin-bottom: 6px;
 }
 
-/* ─── Status Filter Tabs ───────────────────────────────────────��──────── */
+/* ─── Status Filter Tabs ──────────────────────────────────────────────── */
 .status-filters {
   display: flex;
   gap: 6px;
