@@ -1269,18 +1269,37 @@ function createApiRouter(deps) {
             }],
           };
 
-          // Use full publish pipeline: image upload + schema + post creation
-          publisherMod.publish(rewrittenArticle, draftCluster, db).then(function (result) {
+          // Idempotent: UPDATE existing post if wp_post_id exists, else CREATE new
+          var existingWpPostId = draft.wp_post_id || null;
+          var publishPromise;
+
+          if (existingWpPostId) {
+            logger.info('api', 'Draft ' + id + ': UPDATING existing WP post ' + existingWpPostId);
+            var updateData = {
+              title: rewrittenArticle.title,
+              content: rewrittenArticle.content,
+              excerpt: rewrittenArticle.excerpt,
+              featured_media: draft.wp_media_id || 0,
+            };
+            publishPromise = publisherMod.updatePost(existingWpPostId, updateData)
+              .then(function (result) { return { wpPostId: result.wpPostId, wpPostUrl: result.wpPostUrl, wpImageId: draft.wp_media_id || null, isUpdate: true }; });
+          } else {
+            logger.info('api', 'Draft ' + id + ': Creating NEW WP post');
+            publishPromise = publisherMod.publish(rewrittenArticle, draftCluster, db)
+              .then(function (result) { return { wpPostId: result.wpPostId, wpPostUrl: result.wpPostUrl, wpImageId: result.wpImageId || null, isUpdate: false }; });
+          }
+
+          publishPromise.then(function (result) {
             publishUrl = result.wpPostUrl || '';
             db.prepare(
-              "UPDATE drafts SET status = 'published', published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-            ).run(id);
-            // Store wp_media_id if image was uploaded
+              "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+            ).run(result.wpPostId, publishUrl, id);
             if (result.wpImageId) {
               try { db.prepare("UPDATE drafts SET wp_media_id = ? WHERE id = ?").run(result.wpImageId, id); } catch (e) { /* ignore */ }
             }
-            logger.info('api', 'Draft ' + id + ' published to WordPress: ' + publishUrl + (result.wpImageId ? ' (image: ' + result.wpImageId + ')' : ''));
-            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null });
+            var action = result.isUpdate ? 'updated' : 'published';
+            logger.info('api', 'Draft ' + id + ' ' + action + ' to WordPress: ' + publishUrl + (result.wpImageId ? ' (image: ' + result.wpImageId + ')' : ''));
+            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null, isUpdate: result.isUpdate });
           }).catch(function (err) {
             var detail = err.message || 'Unknown error';
             var statusCode = err.response ? err.response.status : null;
@@ -1331,6 +1350,76 @@ function createApiRouter(deps) {
       var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
       res.status(err.response ? err.response.status : 500).json({ error: msg });
     });
+  });
+
+  // ─── POST /api/drafts/:id/retry — Reset a failed draft for retry ──────
+
+  router.post('/drafts/:id/retry', function (req, res) {
+    try {
+      var id = parseInt(req.params.id, 10);
+      var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
+      if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+
+      db.prepare(
+        "UPDATE drafts SET status = 'draft', retry_count = 0, failed_permanent = 0, " +
+        "error_message = NULL, last_error_at = NULL, updated_at = datetime('now') WHERE id = ?"
+      ).run(id);
+
+      logger.info('api', 'Draft ' + id + ' reset for retry');
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/domains — List tracked domains with extraction stats ────
+
+  router.get('/domains', function (req, res) {
+    try {
+      var rows = db.prepare('SELECT * FROM domains_config ORDER BY total_attempts DESC').all();
+      res.json({ data: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── POST /api/domains/:domain — Update domain config ────────────────
+
+  router.post('/domains/:domain', function (req, res) {
+    try {
+      var domain = req.params.domain;
+      var body = req.body || {};
+      var existing = db.prepare('SELECT * FROM domains_config WHERE domain = ?').get(domain);
+      if (!existing) return res.status(404).json({ error: 'Domain not found' });
+
+      if (body.is_blocked !== undefined) {
+        db.prepare("UPDATE domains_config SET is_blocked = ?, updated_at = datetime('now') WHERE domain = ?").run(body.is_blocked ? 1 : 0, domain);
+      }
+      if (body.notes !== undefined) {
+        db.prepare("UPDATE domains_config SET notes = ?, updated_at = datetime('now') WHERE domain = ?").run(body.notes, domain);
+      }
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── POST /api/auth/change-password — Change dashboard password ──────
+
+  router.post('/auth/change-password', function (req, res) {
+    try {
+      var { changePassword } = require('./auth');
+      var body = req.body || {};
+      var result = changePassword(body.currentPassword, body.newPassword);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      logger.info('api', 'Dashboard password changed successfully');
+      return res.json({ success: true, message: 'Password changed successfully' });
+    } catch (err) {
+      logger.error('api', 'Password change failed: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to change password' });
+    }
   });
 
   return router;

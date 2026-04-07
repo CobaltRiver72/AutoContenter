@@ -99,8 +99,38 @@ function verifyPassword(password) {
   return matches;
 }
 
+/**
+ * Change the dashboard password.
+ *
+ * @param {string} currentPassword
+ * @param {string} newPassword
+ * @returns {{ success: boolean, error?: string }}
+ */
+function changePassword(currentPassword, newPassword) {
+  if (!currentPassword || !newPassword) {
+    return { success: false, error: 'Both current and new passwords are required' };
+  }
+  if (newPassword.length < 6) {
+    return { success: false, error: 'New password must be at least 6 characters' };
+  }
+  if (!verifyPassword(currentPassword)) {
+    return { success: false, error: 'Current password is incorrect' };
+  }
+
+  var hash = bcrypt.hashSync(newPassword, 10);
+  if (_db) {
+    _db.prepare(
+      "INSERT INTO settings (key, value, updated_at) VALUES ('DASHBOARD_PASSWORD_HASH', ?, datetime('now')) " +
+      "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+    ).run(hash);
+  }
+
+  return { success: true };
+}
+
 module.exports = {
   setupSession: setupSession,
   checkAuth: checkAuth,
   verifyPassword: verifyPassword,
+  changePassword: changePassword,
 };

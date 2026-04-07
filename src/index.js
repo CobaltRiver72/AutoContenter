@@ -11,7 +11,7 @@ var { getConfig, loadRuntimeOverrides } = require('./utils/config');
 var config = getConfig();
 
 // ─── 2. Initialize SQLite database (runs migrations on require) ─────────────
-var { db, closeDb } = require('./utils/db');
+var { db, closeDb, recoverStuckDrafts } = require('./utils/db');
 
 // ─── 3. Initialize logger, set db reference ────────────────────────────────
 var logger = require('./utils/logger');
@@ -93,6 +93,9 @@ async function boot() {
   // ─── Init modules — order matters ────────────────────────────────────────
   // Buffer & similarity MUST be ready before firehose connects (replay articles
   // arrive immediately). Firehose & trends start last.
+  // Recover drafts stuck in transient states from previous run
+  recoverStuckDrafts(logger);
+
   logger.info('index', 'Event listeners attached, initializing modules...');
   await buffer.init();
   await similarity.init();

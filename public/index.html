@@ -358,6 +358,27 @@
             <button class="btn btn-sm btn-secondary" id="wpDiagBtn">WP Diagnostics</button>
           </div>
         </div>
+        <!-- Security Settings -->
+        <div class="settings-form" id="security-settings-section">
+          <div class="settings-group">
+            <div class="settings-group-title">Security</div>
+            <div class="settings-row">
+              <label class="settings-label">Current Password</label>
+              <input type="password" id="security-current-password" placeholder="Enter current password" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">New Password</label>
+              <input type="password" id="security-new-password" placeholder="New password (min 6 chars)" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Confirm Password</label>
+              <input type="password" id="security-confirm-password" placeholder="Confirm new password" />
+            </div>
+            <div id="security-status" style="display:none; padding:8px 12px; border-radius:6px; margin-top:10px; font-size:13px;"></div>
+            <button class="btn btn-purple btn-full" id="changePasswordBtn" style="margin-top:15px;">Change Password</button>
+          </div>
+        </div>
+
         <!-- WordPress Diagnostics Panel -->
         <div id="wpDiagPanel" class="wp-diag-panel" style="display:none;">
           <div class="wp-diag-header">

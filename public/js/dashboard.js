@@ -1475,7 +1475,7 @@
   function renderDraftCard(draft) {
     var statusColors = {
       fetching: '#f59e0b', draft: '#4a7aff', editing: '#8b5cf6',
-      rewriting: '#a855f7', ready: '#22c55e', published: '#6b7280'
+      rewriting: '#a855f7', ready: '#22c55e', published: '#6b7280', failed: '#ef4444'
     };
     var statusColor = statusColors[draft.status] || '#6b7280';
     var isPulsing = draft.status === 'fetching' || draft.status === 'rewriting';
@@ -1493,6 +1493,9 @@
     if (draft.status !== 'fetching' && draft.status !== 'rewriting') {
       actionsHTML += '<button class="btn btn-sm btn-primary" onclick="window.__openEditor(' + draft.id + ')">&#9998; Edit Draft</button>';
     }
+    if (draft.status === 'failed' && !draft.failed_permanent) {
+      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryDraft(' + draft.id + ')">&#8635; Reset &amp; Retry</button>';
+    }
     if (draft.status === 'draft' || draft.status === 'failed') {
       actionsHTML += '<button class="btn btn-sm btn-purple" onclick="window.__triggerRewrite(' + draft.id + ')">&#129302; Rewrite</button>';
     }
@@ -1507,7 +1510,7 @@
       actionsHTML += '<button class="btn btn-sm btn-green" onclick="window.__openEditor(' + draft.id + ')">&#128640; Publish</button>';
     }
     if (draft.status === 'published') {
-      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__openEditor(' + draft.id + ')">&#8635; Re-Publish</button>';
+      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__openEditor(' + draft.id + ')">' + (draft.wp_post_id ? '&#8635; Update on WP' : '&#8635; Re-Publish') + '</button>';
     }
     actionsHTML += '<button class="btn btn-sm btn-danger" onclick="window.__deleteDraft(' + draft.id + ')">&#128465;</button>';
 
@@ -1536,6 +1539,7 @@
           (draft.extraction_method ? '<span class="extraction-badge extraction-' + escapeHtml(draft.extraction_method) + '">' + (draft.extraction_method === 'direct' ? '&#127760; Direct' : draft.extraction_method === 'cache' ? '&#128230; Cached' : '&#128225; Firehose') + '</span>' : '') +
           (draft.ai_model_used ? '<span class="ai-badge">' + (draft.ai_provider === 'anthropic' ? '&#128995; ' : '&#129001; ') + escapeHtml(draft.ai_model_used.replace('claude-', '').replace('gpt-', 'GPT-').split('-20')[0]) + (draft.ai_tokens_used ? ' &bull; ' + draft.ai_tokens_used + ' tok' : '') + '</span>' : '') +
         '</div>' +
+        (draft.error_message ? '<div class="draft-error-msg" style="font-size:11px;color:#ef4444;margin-top:4px;padding:4px 8px;background:rgba(239,68,68,0.1);border-radius:4px;">&#10060; ' + escapeHtml(draft.error_message) + (draft.retry_count ? ' (' + draft.retry_count + '/' + (draft.max_retries || 3) + ' attempts)' : '') + '</div>' : '') +
         (draft.is_partial ? '<div class="partial-warning">&#9888; Partial content — may need manual review</div>' : '') +
         (contentPreview ? '<p class="draft-preview">' + escapeHtml(truncate(contentPreview, 200)) + '</p>' : '') +
         '<div class="draft-actions">' + actionsHTML + '</div>' +
@@ -1557,6 +1561,15 @@
         else showToast('Rewrite failed: ' + data.error, 'error');
       })
       .catch(function (err) { showToast('Rewrite failed: ' + err.message, 'error'); });
+  };
+
+  window.__retryDraft = function (id) {
+    fetchApi('/api/drafts/' + id + '/retry', { method: 'POST' })
+      .then(function (data) {
+        if (data.success) { showToast('Draft reset for retry', 'info'); setTimeout(loadPublished, 1000); }
+        else showToast('Retry failed: ' + (data.error || 'Unknown'), 'error');
+      })
+      .catch(function (err) { showToast('Retry failed: ' + err.message, 'error'); });
   };
 
   window.__previewDraftHTML = function (id) {
@@ -2095,6 +2108,60 @@
 
     // Test buttons
     initTestButtons();
+
+    // Security — password change
+    var changeBtn = $('changePasswordBtn');
+    if (changeBtn) {
+      changeBtn.onclick = function () {
+        var curPwd = $('security-current-password').value;
+        var newPwd = $('security-new-password').value;
+        var confirmPwd = $('security-confirm-password').value;
+        var statusEl = $('security-status');
+
+        statusEl.style.display = 'none';
+        if (!curPwd || !newPwd) {
+          statusEl.style.display = '';
+          statusEl.style.background = '#451a1a'; statusEl.style.color = '#fca5a5';
+          statusEl.textContent = 'Please fill in all fields';
+          return;
+        }
+        if (newPwd !== confirmPwd) {
+          statusEl.style.display = '';
+          statusEl.style.background = '#451a1a'; statusEl.style.color = '#fca5a5';
+          statusEl.textContent = 'New passwords do not match';
+          return;
+        }
+        if (newPwd.length < 6) {
+          statusEl.style.display = '';
+          statusEl.style.background = '#451a1a'; statusEl.style.color = '#fca5a5';
+          statusEl.textContent = 'Password must be at least 6 characters';
+          return;
+        }
+
+        changeBtn.disabled = true;
+        changeBtn.textContent = 'Changing...';
+
+        fetchApi('/api/auth/change-password', {
+          method: 'POST',
+          body: { currentPassword: curPwd, newPassword: newPwd }
+        }).then(function () {
+          statusEl.style.display = '';
+          statusEl.style.background = '#052e16'; statusEl.style.color = '#86efac';
+          statusEl.textContent = 'Password changed successfully';
+          $('security-current-password').value = '';
+          $('security-new-password').value = '';
+          $('security-confirm-password').value = '';
+          changeBtn.disabled = false;
+          changeBtn.textContent = 'Change Password';
+        }).catch(function (err) {
+          statusEl.style.display = '';
+          statusEl.style.background = '#451a1a'; statusEl.style.color = '#fca5a5';
+          statusEl.textContent = err.message || 'Failed to change password';
+          changeBtn.disabled = false;
+          changeBtn.textContent = 'Change Password';
+        });
+      };
+    }
   }
 
   function renderSettingsForm(container, settings, config) {
@@ -2108,7 +2175,7 @@
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
       'InfraNodus': ['INFRANODUS_ENABLED', 'INFRANODUS_API_KEY'],
       'Source Tiers': ['TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES'],
-      'Dashboard': ['DASHBOARD_PASSWORD', 'PORT'],
+      'Dashboard': ['PORT'],
     };
 
     var sensitiveKeys = {

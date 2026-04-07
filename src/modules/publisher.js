@@ -357,6 +357,22 @@ class WordPressPublisher {
     };
   }
 
+  /**
+   * Update an existing WordPress post via the REST API.
+   */
+  async updatePost(postId, data) {
+    var response = await this._wpRequest('post', '/wp/v2/posts/' + postId, data);
+
+    if (!response.data || !response.data.id) {
+      throw new Error('WordPress update returned no post ID. Response status: ' + response.status);
+    }
+
+    return {
+      wpPostId: response.data.id,
+      wpPostUrl: response.data.link || (response.data.guid && response.data.guid.rendered) || '',
+    };
+  }
+
   _updateStats() {
     var today = new Date().toISOString().slice(0, 10);
     if (this.stats._todayDate !== today) {

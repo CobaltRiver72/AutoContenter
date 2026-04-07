@@ -171,6 +171,89 @@ function buildFromFirehoseData(draft) {
   };
 }
 
+// ─── Domain Stats Tracking ─────────────────────────────────────────────
+
+function updateDomainStats(db, domain, success, method) {
+  if (!db || !domain) return;
+  try {
+    var existing = db.prepare('SELECT * FROM domains_config WHERE domain = ?').get(domain);
+    if (!existing) {
+      db.prepare(
+        "INSERT INTO domains_config (domain, total_attempts, total_successes, total_failures, success_rate, last_attempt_at, last_success_at, preferred_method) " +
+        "VALUES (?, 1, ?, ?, ?, datetime('now'), ?, ?)"
+      ).run(domain, success ? 1 : 0, success ? 0 : 1, success ? 1.0 : 0.0, success ? new Date().toISOString() : null, method || null);
+    } else {
+      var newAttempts = existing.total_attempts + 1;
+      var newSuccesses = existing.total_successes + (success ? 1 : 0);
+      var newRate = newSuccesses / newAttempts;
+      db.prepare(
+        "UPDATE domains_config SET total_attempts = ?, total_successes = ?, total_failures = total_failures + ?, " +
+        "success_rate = ?, last_attempt_at = datetime('now'), " +
+        "last_success_at = CASE WHEN ? THEN datetime('now') ELSE last_success_at END, " +
+        "preferred_method = COALESCE(?, preferred_method), updated_at = datetime('now') WHERE domain = ?"
+      ).run(newAttempts, newSuccesses, success ? 0 : 1, newRate, success ? 1 : 0, method || null, domain);
+    }
+  } catch (e) { /* non-critical */ }
+}
+
+// ─── AI Output Validation ──────────────────────────────────────────────
+
+var REFUSAL_PATTERNS = [
+  /I (?:cannot|can't|am unable to|won't|will not) (?:write|create|generate|produce|rewrite)/i,
+  /as an AI/i,
+  /I'm sorry,? (?:but )?I/i,
+  /I apologize,? (?:but )?I/i,
+  /against my (?:guidelines|policy|programming)/i,
+];
+
+function validateRewriteOutput(html, originalContent) {
+  var errors = [];
+  var warnings = [];
+
+  var text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  var wordCount = text ? text.split(' ').length : 0;
+
+  // Min word count
+  if (wordCount < 50) {
+    errors.push('Output too short: ' + wordCount + ' words (minimum 50)');
+  } else if (wordCount < 150) {
+    warnings.push('Output is short: ' + wordCount + ' words');
+  }
+
+  // Not identical to original
+  if (originalContent) {
+    var origText = (originalContent || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text && origText && text === origText) {
+      errors.push('Output is identical to original content');
+    }
+  }
+
+  // AI refusal patterns
+  for (var p = 0; p < REFUSAL_PATTERNS.length; p++) {
+    if (REFUSAL_PATTERNS[p].test(text)) {
+      errors.push('AI refusal detected in output');
+      break;
+    }
+  }
+
+  // No script tags
+  if (/<script[^>]*>/i.test(html)) {
+    errors.push('Output contains <script> tags');
+  }
+
+  // HTML structure
+  if (html.indexOf('<p') === -1 && html.indexOf('<h') === -1 && wordCount > 100) {
+    warnings.push('No HTML paragraph or heading tags found');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors: errors,
+    warnings: warnings,
+    wordCount: wordCount,
+  };
+}
+
 // ─── Content Extraction ─────────────────────────────────────────────────
 
 /**
@@ -270,6 +353,7 @@ async function extractDraftContent(draftId, deps) {
         extraction_status = ?,
         extraction_method = ?,
         is_partial = ?,
+        error_message = NULL,
         status = 'draft',
         updated_at = datetime('now')
       WHERE id = ?
@@ -284,18 +368,25 @@ async function extractDraftContent(draftId, deps) {
       isPartial,
       draftId
     );
+    updateDomainStats(db, draft.source_domain, true, extractionMethod);
   } else {
+    var extractErr = 'All extraction methods failed. Site may require JavaScript rendering.';
     db.prepare(`
       UPDATE drafts SET
         extracted_content = COALESCE(source_content_markdown, source_title),
         extraction_status = 'failed',
         extraction_method = NULL,
         is_partial = 0,
-        extraction_error = 'All extraction methods failed. Site may require JavaScript rendering.',
-        status = 'draft',
+        extraction_error = ?,
+        error_message = ?,
+        retry_count = retry_count + 1,
+        last_error_at = datetime('now'),
+        failed_permanent = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 1 ELSE 0 END,
+        status = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 'failed' ELSE 'draft' END,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(draftId);
+    `).run(extractErr, extractErr, draftId);
+    updateDomainStats(db, draft.source_domain, false, null);
 
     logger.warn('draft-helpers', 'Draft ' + draftId + ': All extraction layers failed for ' + draft.source_domain);
   }
@@ -367,8 +458,19 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
     var provider = result.provider || result.aiProvider || opts.provider || '';
     var tokensUsed = result.tokensUsed || 0;
 
-    if (!html || html.length < 50) {
-      throw new Error('Rewriter returned empty or too-short output');
+    // Validate AI output
+    var validation = validateRewriteOutput(html, content);
+    if (!validation.valid) {
+      throw new Error('AI output validation failed: ' + validation.errors.join('; '));
+    }
+
+    // Use validated word count if rewriter didn't provide one
+    if (!wordCount && validation.wordCount) {
+      wordCount = validation.wordCount;
+    }
+
+    if (validation.warnings.length > 0) {
+      logger.warn('draft-helpers', 'Draft ' + draftId + ' rewrite warnings: ' + validation.warnings.join('; '));
     }
 
     db.prepare(
@@ -379,6 +481,7 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
       "  ai_model_used = ?," +
       "  ai_provider = ?," +
       "  ai_tokens_used = ?," +
+      "  error_message = NULL," +
       "  status = 'ready'," +
       "  updated_at = datetime('now')" +
       " WHERE id = ?"
@@ -386,7 +489,17 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
 
     logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ')');
   } catch (err) {
-    db.prepare("UPDATE drafts SET status = 'draft', updated_at = datetime('now') WHERE id = ?").run(draftId);
+    // Track retry count and error on failure
+    db.prepare(
+      "UPDATE drafts SET" +
+      "  retry_count = retry_count + 1," +
+      "  error_message = ?," +
+      "  last_error_at = datetime('now')," +
+      "  failed_permanent = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 1 ELSE 0 END," +
+      "  status = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 'failed' ELSE 'draft' END," +
+      "  updated_at = datetime('now')" +
+      " WHERE id = ?"
+    ).run(err.message, draftId);
     logger.error('draft-helpers', 'Draft ' + draftId + ' rewrite failed: ' + err.message);
     throw err;
   }
@@ -395,4 +508,6 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
 module.exports = {
   extractDraftContent: extractDraftContent,
   rewriteDraftContent: rewriteDraftContent,
+  validateRewriteOutput: validateRewriteOutput,
+  updateDomainStats: updateDomainStats,
 };

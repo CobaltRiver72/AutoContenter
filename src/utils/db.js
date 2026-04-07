@@ -231,6 +231,49 @@ function runMigrations() {
       db.exec('ALTER TABLE drafts ADD COLUMN wp_media_id INTEGER DEFAULT NULL');
     } catch (e) { /* already exists */ }
 
+    // Add WP post ID tracking on drafts (for idempotent re-publish)
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN wp_post_id INTEGER DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN wp_post_url TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    // Add retry / failure tracking columns to drafts
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN retry_count INTEGER DEFAULT 0');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN max_retries INTEGER DEFAULT 3');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN error_message TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN last_error_at TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN failed_permanent INTEGER DEFAULT 0');
+    } catch (e) { /* already exists */ }
+
+    // Domain extraction config / stats table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS domains_config (
+        domain TEXT PRIMARY KEY,
+        total_attempts INTEGER DEFAULT 0,
+        total_successes INTEGER DEFAULT 0,
+        total_failures INTEGER DEFAULT 0,
+        success_rate REAL DEFAULT 0,
+        last_attempt_at TEXT,
+        last_success_at TEXT,
+        preferred_method TEXT DEFAULT NULL,
+        is_blocked INTEGER DEFAULT 0,
+        notes TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);
@@ -255,8 +298,48 @@ function closeDb() {
   }
 }
 
+/**
+ * Recover drafts stuck in transient states (rewriting, fetching, publishing).
+ * Called once on server startup.
+ */
+function recoverStuckDrafts(logger) {
+  try {
+    var stuck = db.prepare(
+      "SELECT id, status, retry_count, max_retries FROM drafts WHERE status IN ('fetching', 'rewriting', 'publishing')"
+    ).all();
+
+    for (var i = 0; i < stuck.length; i++) {
+      var draft = stuck[i];
+      var newRetry = (draft.retry_count || 0) + 1;
+      var maxR = draft.max_retries || 3;
+
+      if (newRetry >= maxR) {
+        db.prepare(
+          "UPDATE drafts SET status = 'failed', failed_permanent = 1, retry_count = ?, " +
+          "error_message = ?, last_error_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+        ).run(newRetry, 'Stuck in ' + draft.status + ' after ' + newRetry + ' attempts (server restarted)', draft.id);
+        if (logger) logger.warn('recovery', 'Draft ' + draft.id + ': permanently failed after ' + newRetry + ' stuck recoveries');
+      } else {
+        var resetStatus = draft.status === 'publishing' ? 'ready' : 'draft';
+        db.prepare(
+          "UPDATE drafts SET status = ?, retry_count = ?, " +
+          "error_message = ?, last_error_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+        ).run(resetStatus, newRetry, 'Recovered from stuck ' + draft.status + ' state (server restarted)', draft.id);
+        if (logger) logger.info('recovery', 'Draft ' + draft.id + ': ' + draft.status + ' -> ' + resetStatus + ' (attempt ' + newRetry + '/' + maxR + ')');
+      }
+    }
+
+    if (stuck.length > 0 && logger) {
+      logger.info('recovery', 'Recovered ' + stuck.length + ' stuck draft(s) on startup');
+    }
+  } catch (err) {
+    console.error('[db] Stuck draft recovery failed:', err.message);
+  }
+}
+
 module.exports = {
   db,
   closeDb,
   runMigrations,
+  recoverStuckDrafts,
 };
