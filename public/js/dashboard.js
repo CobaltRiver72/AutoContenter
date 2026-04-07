@@ -2149,7 +2149,15 @@
     // Render cluster groups
     var cardsHTML = '';
     for (var ci = 0; ci < clusterIds.length; ci++) {
-      cardsHTML += renderClusterGroup(clusterIds[ci], clusterMap[clusterIds[ci]]);
+      try {
+        cardsHTML += renderClusterGroup(clusterIds[ci], clusterMap[clusterIds[ci]]);
+      } catch (renderErr) {
+        console.error('Failed to render cluster #' + clusterIds[ci], renderErr);
+        var fallbackDrafts = clusterMap[clusterIds[ci]].drafts;
+        for (var fb = 0; fb < fallbackDrafts.length; fb++) {
+          cardsHTML += renderDraftCard(fallbackDrafts[fb]);
+        }
+      }
     }
 
     // Manual drafts section

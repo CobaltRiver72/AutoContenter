@@ -761,6 +761,15 @@ function createApiRouter(deps) {
 
       logger.info('api', 'Cluster ' + clusterId + ' -> ' + draftsCreated + ' drafts created (primary=#' + primaryDraftId + ')');
 
+      // Trigger immediate scheduler processing — don't wait 30s
+      if (scheduler && scheduler.processQueue && !scheduler._processing) {
+        setTimeout(function () {
+          scheduler.processQueue().catch(function (err) {
+            logger.error('api', 'Immediate scheduler trigger failed: ' + err.message);
+          });
+        }, 1000);
+      }
+
       res.json({
         success: true,
         clusterId: clusterId,

@@ -164,6 +164,16 @@ class PublishScheduler {
 
       createDrafts();
       this.logger.info('scheduler', 'Auto-enqueued cluster ' + cluster.id + ' -> ' + articles.length + ' drafts created');
+
+      // Trigger immediate processing — don't wait for next 30s tick
+      var self = this;
+      if (this._intervalHandle && !this._processing) {
+        setTimeout(function () {
+          self.processQueue().catch(function (err) {
+            self.logger.error('scheduler', 'Immediate processing failed: ' + err.message);
+          });
+        }, 500);
+      }
     } catch (err) {
       this.logger.error('scheduler', 'Failed to auto-enqueue cluster ' + (cluster ? cluster.id : '?') + ': ' + err.message);
     }
@@ -332,31 +342,36 @@ class PublishScheduler {
       });
 
       if (draftsToExtract.length > 0) {
-        this.logger.info('scheduler', 'Extracting content for ' + draftsToExtract.length + '/' + clusterDrafts.length + ' drafts (using draft-helpers)');
+        this.logger.info('scheduler', 'Extracting content for ' + draftsToExtract.length + '/' + clusterDrafts.length + ' drafts in parallel batches of 3');
 
         var draftDeps = { db: this.db, logger: this.logger, extractor: this.extractor, rewriter: this.rewriter };
+        var self = this;
+        var BATCH_SIZE = 3;
 
-        for (var e = 0; e < draftsToExtract.length; e++) {
-          var draft = draftsToExtract[e];
-          try {
-            this.logger.info('scheduler', 'Extracting draft #' + draft.id + ' from ' + draft.source_domain);
+        // Process in parallel batches
+        for (var batchStart = 0; batchStart < draftsToExtract.length; batchStart += BATCH_SIZE) {
+          var batch = draftsToExtract.slice(batchStart, batchStart + BATCH_SIZE);
 
-            // Call the SAME function the manual Retry button uses
-            await extractDraftContent(draft.id, draftDeps);
+          self.logger.info('scheduler', 'Extraction batch ' + (Math.floor(batchStart / BATCH_SIZE) + 1) + ': drafts [' + batch.map(function(d) { return '#' + d.id; }).join(', ') + ']');
 
-            // Reload the draft to check what happened
-            var updatedDraft = this.db.prepare('SELECT extraction_status, extracted_content FROM drafts WHERE id = ?').get(draft.id);
-            if (updatedDraft) {
-              var charCount = (updatedDraft.extracted_content || '').length;
-              this.logger.info('scheduler', 'Draft #' + draft.id + ' extraction result: ' + updatedDraft.extraction_status + ' (' + charCount + ' chars)');
-            }
-          } catch (extractErr) {
-            this.logger.warn('scheduler', 'Extraction failed for draft #' + draft.id + ': ' + extractErr.message);
-            // extractDraftContent already handles DB updates on failure, but ensure status is set
-            this.db.prepare(
-              "UPDATE drafts SET status = CASE WHEN status = 'fetching' THEN 'draft' ELSE status END, updated_at = datetime('now') WHERE id = ?"
-            ).run(draft.id);
-          }
+          var batchPromises = batch.map(function (draft) {
+            return extractDraftContent(draft.id, draftDeps)
+              .then(function () {
+                var updated = self.db.prepare('SELECT extraction_status, extracted_content FROM drafts WHERE id = ?').get(draft.id);
+                if (updated) {
+                  var chars = (updated.extracted_content || '').length;
+                  self.logger.info('scheduler', 'Draft #' + draft.id + ' (' + draft.source_domain + ') -> ' + updated.extraction_status + ' (' + chars + ' chars)');
+                }
+              })
+              .catch(function (err) {
+                self.logger.warn('scheduler', 'Draft #' + draft.id + ' extraction failed: ' + err.message);
+                self.db.prepare(
+                  "UPDATE drafts SET status = CASE WHEN status = 'fetching' THEN 'draft' ELSE status END, updated_at = datetime('now') WHERE id = ?"
+                ).run(draft.id);
+              });
+          });
+
+          await Promise.all(batchPromises);
         }
       }
 
