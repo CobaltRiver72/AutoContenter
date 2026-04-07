@@ -45,7 +45,13 @@ var extractor = new ContentExtractor(config, db, logger);
 var scheduler = new PublishScheduler(config, db, rewriter, publisher, logger, extractor);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
 
-// ─── 6. Async boot ─────────────────────────────────────────────────────────
+// ─── 6. Clustering queue (debounce rapid SSE events) ──────────────────────
+var _clusteringQueue = [];
+var _clusteringTimer = null;
+var _clusteringProcessing = false;
+var CLUSTERING_DEBOUNCE_MS = 3000;
+var CLUSTERING_MAX_WAIT_MS = 10000;
+var _clusteringFirstEventAt = null;
 
 async function boot() {
   // ─── Wire up event listeners BEFORE any module init ──────────────────────
@@ -64,31 +70,93 @@ async function boot() {
         trendsMatch = trends.matchArticle(article);
       }
 
-      var bufferArticles = buffer.getRecentArticles(config.BUFFER_HOURS);
+      // Queue article for batch similarity processing instead of immediate
+      _clusteringQueue.push({ article: article, trendsMatch: trendsMatch });
 
-      // Debug: Log fingerprint + buffer stats for clustering monitoring
-      logger.debug('index', 'Clustering: article #' + article.id + ' fp=' + (article.fingerprint ? article.fingerprint.length + ' chars' : 'NONE') + ', buffer=' + bufferArticles.length + ' articles');
-
-      var matches = similarity.findMatches(article, bufferArticles);
-
-      // Log similarity results for monitoring
-      if (matches.length > 0) {
-        logger.info('index', 'Similarity matches for "' + (article.title || article.url).substring(0, 60) + '": ' + matches.length + ' match(es), best score: ' + matches[0].score.toFixed(3));
+      if (!_clusteringFirstEventAt) {
+        _clusteringFirstEventAt = Date.now();
       }
 
-      if (matches.length >= config.MIN_SOURCES_THRESHOLD - 1) {
-        var cluster = similarity.createOrUpdateCluster(article, matches, trendsMatch);
-        if (cluster) {
-          logger.info('index', 'Cluster ' + cluster.id + ' ready: "' + (cluster.topic || '').substring(0, 60) + '" (' + cluster.article_count + ' articles)');
-          if (similarity.shouldPublish(cluster)) {
-            scheduler.enqueue(cluster);
+      if (_clusteringTimer) clearTimeout(_clusteringTimer);
+
+      // Force process if we've been waiting too long
+      var waitedMs = Date.now() - _clusteringFirstEventAt;
+      if (waitedMs >= CLUSTERING_MAX_WAIT_MS) {
+        processSimilarityBatch();
+      } else {
+        _clusteringTimer = setTimeout(processSimilarityBatch, CLUSTERING_DEBOUNCE_MS);
+      }
+    } catch (err) {
+      logger.error('index', 'Error buffering firehose article: ' + err.message);
+    }
+  });
+
+  /**
+   * Process all queued articles for similarity in one batch.
+   * Loads buffer articles ONCE and runs async similarity for each.
+   */
+  async function processSimilarityBatch() {
+    if (_clusteringProcessing) return;
+    _clusteringProcessing = true;
+    _clusteringTimer = null;
+    _clusteringFirstEventAt = null;
+
+    var batch = _clusteringQueue.splice(0);
+    if (batch.length === 0) {
+      _clusteringProcessing = false;
+      return;
+    }
+
+    logger.info('index', 'Processing similarity batch: ' + batch.length + ' article(s)');
+
+    try {
+      // Load buffer articles ONCE for the entire batch
+      var bufferArticles = buffer.getRecentArticlesForSimilarity(
+        config.BUFFER_HOURS,
+        config.MAX_BUFFER_FOR_SIMILARITY || 100
+      );
+
+      for (var i = 0; i < batch.length; i++) {
+        var item = batch[i];
+        var article = item.article;
+
+        try {
+          logger.debug('index', 'Clustering: article #' + article.id +
+            ' fp=' + (article.fingerprint ? article.fingerprint.length + ' chars' : 'NONE') +
+            ', buffer=' + bufferArticles.length + ' articles');
+
+          var matches = await similarity.findMatchesAsync(article, bufferArticles);
+
+          if (matches.length > 0) {
+            logger.info('index', 'Similarity matches for "' +
+              (article.title || article.url).substring(0, 60) + '": ' +
+              matches.length + ' match(es), best score: ' + matches[0].score.toFixed(3));
           }
+
+          if (matches.length >= config.MIN_SOURCES_THRESHOLD - 1) {
+            var cluster = similarity.createOrUpdateCluster(article, matches, item.trendsMatch);
+            if (cluster) {
+              logger.info('index', 'Cluster ' + cluster.id + ' ready: "' +
+                (cluster.topic || '').substring(0, 60) + '" (' + cluster.article_count + ' articles)');
+              if (similarity.shouldPublish(cluster)) {
+                scheduler.enqueue(cluster);
+              }
+            }
+          }
+        } catch (err) {
+          logger.error('index', 'Error processing article #' + article.id + ' in batch: ' + err.message);
         }
       }
     } catch (err) {
-      logger.error('index', 'Error processing firehose article', err.message);
+      logger.error('index', 'Error in similarity batch: ' + err.message);
+    } finally {
+      _clusteringProcessing = false;
+      if (_clusteringQueue.length > 0) {
+        _clusteringTimer = setTimeout(processSimilarityBatch, CLUSTERING_DEBOUNCE_MS);
+        _clusteringFirstEventAt = Date.now();
+      }
     }
-  });
+  }
 
   trends.on('trend-matched', function(trend, cluster) {
     try {
@@ -126,6 +194,13 @@ async function boot() {
   // ─── Set up Express with security ────────────────────────────────────────
 
   var app = express();
+
+  // Expose modules for performance monitoring endpoint
+  app.locals.modules = {
+    firehose: firehose, trends: trends, buffer: buffer, similarity: similarity,
+    extractor: extractor, rewriter: rewriter, publisher: publisher,
+    scheduler: scheduler, infranodus: infranodus,
+  };
 
   // Trust Hostinger reverse proxy
   app.set('trust proxy', 1);
@@ -238,6 +313,37 @@ async function boot() {
 
   logger.info('index', 'HDF News AutoPub started successfully');
 
+  // ─── Memory watchdog — pause firehose if RAM gets critical ──────────────
+  var MEMORY_CHECK_INTERVAL_MS = 30000;
+  var MEMORY_HIGH_WATER_MB = 400;
+  var MEMORY_LOW_WATER_MB = 300;
+  var _firehosePaused = false;
+
+  var memoryWatchdog = setInterval(function() {
+    try {
+      var usage = process.memoryUsage();
+      var heapMB = Math.round(usage.heapUsed / 1024 / 1024);
+      var rssMB = Math.round(usage.rss / 1024 / 1024);
+
+      if (heapMB > MEMORY_HIGH_WATER_MB && !_firehosePaused) {
+        _firehosePaused = true;
+        logger.warn('index', 'MEMORY HIGH: ' + heapMB + 'MB heap, ' + rssMB + 'MB RSS — pausing firehose');
+        if (firehose.disconnect) firehose.disconnect();
+        if (global.gc) global.gc();
+      } else if (heapMB < MEMORY_LOW_WATER_MB && _firehosePaused) {
+        _firehosePaused = false;
+        logger.info('index', 'MEMORY OK: ' + heapMB + 'MB heap — resuming firehose');
+        if (firehose.connect) firehose.connect();
+      }
+
+      if (heapMB > 200) {
+        logger.debug('index', 'Memory: heap=' + heapMB + 'MB rss=' + rssMB + 'MB');
+      }
+    } catch (err) {
+      logger.error('index', 'Memory watchdog error: ' + err.message);
+    }
+  }, MEMORY_CHECK_INTERVAL_MS);
+
   // ─── Graceful shutdown ───────────────────────────────────────────────────
 
   function shutdown(signal) {
@@ -248,9 +354,10 @@ async function boot() {
     });
 
     clearInterval(cleanupTimer);
+    clearInterval(memoryWatchdog);
 
     // Shutdown modules
-    var shutdownList = [firehose, trends, scheduler, extractor, infranodus];
+    var shutdownList = [firehose, trends, scheduler, extractor, infranodus, similarity];
     for (var i = 0; i < shutdownList.length; i++) {
       try {
         if (shutdownList[i].shutdown) shutdownList[i].shutdown();
@@ -267,13 +374,30 @@ async function boot() {
 
   process.on('SIGTERM', function() { shutdown('SIGTERM'); });
   process.on('SIGINT', function() { shutdown('SIGINT'); });
+
+  // ─── Resilient error handlers ────────────────────────────────────────────
+  var _uncaughtCount = 0;
+  var _MAX_UNCAUGHT = 5;
+  var _uncaughtResetTimer = null;
+
   process.on('uncaughtException', function(err) {
-    logger.error('index', 'Uncaught exception', err.stack || err.message);
-    shutdown('uncaughtException');
+    _uncaughtCount++;
+    logger.error('index', 'Uncaught exception #' + _uncaughtCount + ': ' + (err.stack || err.message));
+    if (!_uncaughtResetTimer) {
+      _uncaughtResetTimer = setTimeout(function() {
+        _uncaughtCount = 0;
+        _uncaughtResetTimer = null;
+      }, 60000);
+    }
+    if (_uncaughtCount >= _MAX_UNCAUGHT) {
+      logger.error('index', 'Too many uncaught exceptions (' + _uncaughtCount + ' in 60s) — shutting down');
+      shutdown('uncaughtException');
+    }
   });
+
   process.on('unhandledRejection', function(reason) {
     var msg = reason instanceof Error ? reason.stack || reason.message : String(reason);
-    logger.error('index', 'Unhandled promise rejection', msg);
+    logger.error('index', 'Unhandled promise rejection: ' + msg);
   });
 
   return { app: app, server: server };

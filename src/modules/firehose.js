@@ -142,6 +142,20 @@ class FirehoseListener extends EventEmitter {
   }
 
   /**
+   * Disconnect the SSE stream (called by memory watchdog).
+   * Does NOT set _stopped=true so connect() can resume.
+   */
+  disconnect() {
+    if (this._es) {
+      this._es.close();
+      this._es = null;
+    }
+    this._connected = false;
+    this.status = 'paused';
+    this.logger.info(MODULE, 'SSE disconnected (paused)');
+  }
+
+  /**
    * Reconnect after a delay (min 2 seconds).
    */
   reconnect() {

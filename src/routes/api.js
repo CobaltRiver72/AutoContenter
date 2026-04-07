@@ -21,6 +21,22 @@ function createApiRouter(deps) {
   var axios = require('axios');
   var { firehose, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
 
+  // ─── Simple in-memory cache for expensive API responses ────────────────────
+  var _apiCache = {};
+  var _API_CACHE_TTL_MS = 10000;
+
+  function getCached(key) {
+    var cached = _apiCache[key];
+    if (cached && Date.now() - cached.timestamp < _API_CACHE_TTL_MS) {
+      return cached.data;
+    }
+    return null;
+  }
+
+  function setCache(key, data) {
+    _apiCache[key] = { data: data, timestamp: Date.now() };
+  }
+
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
   function paginate(query, countQuery, params, page, perPage) {
@@ -220,6 +236,9 @@ function createApiRouter(deps) {
 
   router.get('/clusters/stats', function (req, res) {
     try {
+      var cached = getCached('cluster_stats');
+      if (cached) return res.json(cached);
+
       var totalClusters = db.prepare('SELECT COUNT(*) as count FROM clusters').get().count;
       var detected = db.prepare("SELECT COUNT(*) as count FROM clusters WHERE status = 'detected'").get().count;
       var published = db.prepare("SELECT COUNT(*) as count FROM clusters WHERE status = 'published'").get().count;
@@ -238,7 +257,7 @@ function createApiRouter(deps) {
         "SELECT COUNT(DISTINCT domain) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours')"
       ).get(bufferHours).count;
 
-      res.json({
+      var responseData = {
         totalClusters: totalClusters,
         detected: detected,
         published: published,
@@ -248,7 +267,9 @@ function createApiRouter(deps) {
         bufferSize: bufferSize,
         uniqueDomains: uniqueDomains,
         bufferHours: bufferHours
-      });
+      };
+      setCache('cluster_stats', responseData);
+      res.json(responseData);
     } catch (err) {
       logger.error('api', 'Failed to fetch cluster stats', err.message);
       res.status(500).json({ error: 'Failed to fetch cluster stats' });
@@ -1782,6 +1803,50 @@ function createApiRouter(deps) {
     } catch (err) {
       logger.error('api', 'Password change failed: ' + err.message);
       return res.status(500).json({ success: false, error: 'Failed to change password' });
+    }
+  });
+
+  // ─── GET /api/system/performance — Live performance monitoring ──────────────
+
+  router.get('/system/performance', function(req, res) {
+    try {
+      var memUsage = process.memoryUsage();
+      var uptime = process.uptime();
+
+      var data = {
+        uptime: {
+          seconds: Math.round(uptime),
+          formatted: Math.floor(uptime / 3600) + 'h ' + Math.floor((uptime % 3600) / 60) + 'm',
+        },
+        memory: {
+          heapUsedMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+          heapTotalMB: Math.round(memUsage.heapTotal / 1024 / 1024),
+          rssMB: Math.round(memUsage.rss / 1024 / 1024),
+          externalMB: Math.round(memUsage.external / 1024 / 1024),
+        },
+        process: {
+          pid: process.pid,
+          nodeVersion: process.version,
+          platform: process.platform,
+        },
+        modules: {},
+      };
+
+      var moduleNames = ['firehose', 'trends', 'buffer', 'similarity', 'extractor', 'rewriter', 'publisher', 'scheduler', 'infranodus'];
+      for (var i = 0; i < moduleNames.length; i++) {
+        var mod = deps[moduleNames[i]];
+        if (mod && mod.getHealth) {
+          data.modules[moduleNames[i]] = mod.getHealth();
+        }
+      }
+
+      if (buffer && buffer.getStats) {
+        data.buffer = buffer.getStats();
+      }
+
+      res.json(data);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get performance data' });
     }
   });
 

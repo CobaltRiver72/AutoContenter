@@ -23,11 +23,80 @@ class SimilarityEngine {
 
     // Prepared statements (lazy init)
     this._stmts = {};
+
+    // Worker thread for CPU-intensive TF-IDF work
+    this._worker = null;
+    this._workerReady = false;
+    this._pendingJobs = new Map();
+    this._jobCounter = 0;
+    this._WORKER_TIMEOUT_MS = 15000;
   }
 
   async init() {
     this.enabled = true;
     this.status = 'connected';
+    this._initWorker();
+  }
+
+  _initWorker() {
+    try {
+      var WorkerClass = require('worker_threads').Worker;
+      var path = require('path');
+
+      this._worker = new WorkerClass(path.resolve(__dirname, '..', 'workers', 'similarity-worker.js'));
+      this._workerReady = true;
+
+      var self = this;
+
+      this._worker.on('message', function(msg) {
+        var job = self._pendingJobs.get(msg.id);
+        if (!job) return;
+        clearTimeout(job.timer);
+        self._pendingJobs.delete(msg.id);
+        if (msg.type === 'error') {
+          job.reject(new Error(msg.payload.message));
+        } else {
+          job.resolve(msg.payload);
+        }
+      });
+
+      this._worker.on('error', function(err) {
+        self.logger.error(MODULE, 'Similarity worker error: ' + err.message);
+        self._workerReady = false;
+        for (var entry of self._pendingJobs) {
+          clearTimeout(entry[1].timer);
+          entry[1].reject(err);
+        }
+        self._pendingJobs.clear();
+        setTimeout(function() { self._initWorker(); }, 5000);
+      });
+
+      this._worker.on('exit', function(code) {
+        self._workerReady = false;
+        if (code !== 0) {
+          self.logger.warn(MODULE, 'Similarity worker exited with code ' + code + ', restarting...');
+          setTimeout(function() { self._initWorker(); }, 5000);
+        }
+      });
+
+      this.logger.info(MODULE, 'Similarity worker thread started');
+    } catch (err) {
+      this.logger.warn(MODULE, 'Worker threads not available, using main thread: ' + err.message);
+      this._workerReady = false;
+    }
+  }
+
+  _sendToWorker(payload) {
+    var self = this;
+    var id = ++this._jobCounter;
+    return new Promise(function(resolve, reject) {
+      var timer = setTimeout(function() {
+        self._pendingJobs.delete(id);
+        reject(new Error('Worker timeout after ' + self._WORKER_TIMEOUT_MS + 'ms'));
+      }, self._WORKER_TIMEOUT_MS);
+      self._pendingJobs.set(id, { resolve: resolve, reject: reject, timer: timer });
+      self._worker.postMessage({ type: 'findMatches', id: id, payload: payload });
+    });
   }
 
   getHealth() {
@@ -38,11 +107,17 @@ class SimilarityEngine {
       status: 'connected',
       error: null,
       lastActivity: null,
-      stats: {}
+      stats: { workerReady: this._workerReady, pendingJobs: this._pendingJobs.size }
     };
   }
 
-  async shutdown() { /* no-op */ }
+  async shutdown() {
+    if (this._worker) {
+      this._worker.terminate();
+      this._worker = null;
+      this._workerReady = false;
+    }
+  }
 
   /**
    * Find similar articles in the buffer for a new article.
@@ -116,6 +191,53 @@ class SimilarityEngine {
       this.logger.error(MODULE, 'Error finding matches', err.message);
       return [];
     }
+  }
+
+  /**
+   * Async findMatches — delegates to worker thread, falls back to sync on main thread.
+   */
+  async findMatchesAsync(newArticle, bufferArticles) {
+    if (this._workerReady && this._worker) {
+      try {
+        var result = await this._sendToWorker({
+          newArticle: {
+            id: newArticle.id,
+            url: newArticle.url,
+            domain: newArticle.domain,
+            title: newArticle.title,
+            fingerprint: newArticle.fingerprint,
+          },
+          bufferArticles: bufferArticles.map(function(a) {
+            return {
+              id: a.id, url: a.url, domain: a.domain, title: a.title,
+              fingerprint: a.fingerprint, cluster_id: a.cluster_id,
+              authority_tier: a.authority_tier,
+            };
+          }),
+          threshold: this.config.SIMILARITY_THRESHOLD || 0.20,
+          allowSameDomain: this.config.ALLOW_SAME_DOMAIN_CLUSTERS === 'true' || this.config.ALLOW_SAME_DOMAIN_CLUSTERS === true,
+        });
+
+        // Re-attach full article objects to matches
+        var articleMap = {};
+        for (var i = 0; i < bufferArticles.length; i++) {
+          articleMap[bufferArticles[i].id] = bufferArticles[i];
+        }
+        var matches = [];
+        for (var j = 0; j < result.matches.length; j++) {
+          var m = result.matches[j];
+          var fullArticle = articleMap[m.articleId];
+          if (fullArticle) {
+            matches.push({ article: fullArticle, score: m.score });
+          }
+        }
+        return matches;
+      } catch (err) {
+        this.logger.warn(MODULE, 'Worker findMatches failed, falling back to sync: ' + err.message);
+      }
+    }
+    // Fallback: run on main thread
+    return this.findMatches(newArticle, bufferArticles);
   }
 
   /**

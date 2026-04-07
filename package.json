@@ -5,7 +5,11 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "prod": "pm2 start ecosystem.config.js",
+    "stop": "pm2 stop hdf-autopub",
+    "restart": "pm2 restart hdf-autopub",
+    "logs": "pm2 logs hdf-autopub --lines 100"
   },
   "engines": {
     "node": ">=20.0.0"

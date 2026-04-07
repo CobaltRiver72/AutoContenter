@@ -128,6 +128,54 @@ class ArticleBuffer {
   }
 
   /**
+   * Get recent articles optimized for similarity matching.
+   * Limits results and excludes articles in published/failed clusters.
+   */
+  getRecentArticlesForSimilarity(hours, limit, newArticle) {
+    var h = hours || this.config.BUFFER_HOURS || 6;
+    var maxArticles = limit || this.config.MAX_BUFFER_FOR_SIMILARITY || 100;
+
+    try {
+      if (!this._stmts.recentForSimilarity) {
+        this._stmts.recentForSimilarity = this.db.prepare(
+          "SELECT a.* FROM articles a" +
+          " LEFT JOIN clusters c ON a.cluster_id = c.id" +
+          " WHERE a.received_at >= datetime('now', ? || ' hours')" +
+          "   AND (a.cluster_id IS NULL OR c.status = 'detected')" +
+          " ORDER BY a.received_at DESC" +
+          " LIMIT ?"
+        );
+      }
+
+      var articles = this._stmts.recentForSimilarity.all('-' + h, maxArticles);
+      this.logger.debug(MODULE, 'Buffer for similarity: ' + articles.length + ' articles (max ' + maxArticles + ', window ' + h + 'h)');
+      return articles;
+    } catch (err) {
+      this.logger.error(MODULE, 'Failed to get articles for similarity', err.message);
+      var all = this.getRecentArticles(h);
+      return all.slice(0, maxArticles);
+    }
+  }
+
+  /**
+   * Get buffer stats for monitoring.
+   */
+  getStats() {
+    try {
+      var bufferHours = this.config.BUFFER_HOURS || 6;
+      var total = this.db.prepare(
+        "SELECT COUNT(*) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours')"
+      ).get(bufferHours).count;
+      var unclustered = this.db.prepare(
+        "SELECT COUNT(*) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours') AND cluster_id IS NULL"
+      ).get(bufferHours).count;
+      return { totalInBuffer: total, unclustered: unclustered, bufferHours: bufferHours };
+    } catch (err) {
+      return { totalInBuffer: 0, unclustered: 0, bufferHours: 0 };
+    }
+  }
+
+  /**
    * Get all articles belonging to a cluster.
    *
    * @param {number} clusterId
@@ -175,17 +223,30 @@ class ArticleBuffer {
    */
   cleanOldArticles() {
     try {
-      // Use at least 24h retention so clustering has time to work
-      const hours = Math.max(this.config.BUFFER_HOURS || 6, 24);
+      // Minimum 48h retention, or 2x buffer window, whichever is larger
+      var bufferHours = this.config.BUFFER_HOURS || 6;
+      var minRetention = Math.max(bufferHours * 2, 48);
+
       if (!this._stmts.clean) {
         this._stmts.clean = this.db.prepare(
-          `DELETE FROM articles WHERE received_at < datetime('now', ? || ' hours') AND cluster_id IS NULL`
+          "DELETE FROM articles WHERE received_at < datetime('now', ? || ' hours') AND cluster_id IS NULL"
         );
       }
-      const result = this._stmts.clean.run(`-${hours}`);
+      var result = this._stmts.clean.run('-' + minRetention);
       if (result.changes > 0) {
-        this.logger.info(MODULE, `Cleaned ${result.changes} old unbuffered articles`);
+        this.logger.info(MODULE, 'Cleaned ' + result.changes + ' old unbuffered articles (retention: ' + minRetention + 'h)');
       }
+
+      // Also clean articles from very old published clusters (30 days)
+      try {
+        if (!this._stmts.cleanOldClusters) {
+          this._stmts.cleanOldClusters = this.db.prepare(
+            "DELETE FROM articles WHERE cluster_id IN (SELECT id FROM clusters WHERE status = 'published' AND detected_at < datetime('now', '-30 days'))"
+          );
+        }
+        this._stmts.cleanOldClusters.run();
+      } catch (e) { /* ignore */ }
+
       return result.changes;
     } catch (err) {
       this.logger.error(MODULE, 'Failed to clean old articles', err.message);
@@ -263,59 +324,81 @@ class ArticleBuffer {
    * @returns {string}
    */
   _buildFingerprint(article) {
-    const title = String(article.title || '').trim();
+    try {
+      var title = String(article.title || '').trim();
 
-    // Extract text from content_markdown (may be JSON from Firehose)
-    let rawContent = String(article.content_markdown || '');
-    let extractedText = '';
-
-    if (rawContent.trim().startsWith('{') || rawContent.trim().startsWith('[')) {
+      // Extract text from content_markdown (may be JSON from Firehose)
+      var rawContent = '';
       try {
-        const parsed = JSON.parse(rawContent);
-        extractedText = this._extractTextFromJson(parsed);
+        rawContent = String(article.content_markdown || '');
       } catch (e) {
+        rawContent = '';
+      }
+
+      var extractedText = '';
+
+      if (rawContent.length > 0 && (rawContent.charAt(0) === '{' || rawContent.charAt(0) === '[')) {
+        try {
+          var parsed = JSON.parse(rawContent);
+          extractedText = this._extractTextFromJson(parsed);
+        } catch (e) {
+          extractedText = rawContent;
+        }
+      } else {
         extractedText = rawContent;
       }
-    } else {
-      extractedText = rawContent;
-    }
 
-    // Strip markdown formatting
-    extractedText = extractedText
-      .replace(/[#*_\[\]()>`~|\\]/g, ' ')
-      .replace(/!\[.*?\]\(.*?\)/g, '')
-      .replace(/\[([^\]]*)\]\(.*?\)/g, '$1')
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/`[^`]*`/g, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/https?:\/\/\S+/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+      // Length safety — truncate before regex processing
+      if (extractedText.length > 100000) {
+        extractedText = extractedText.substring(0, 100000);
+      }
 
-    // Take first 500 words of extracted content
-    const contentWords = extractedText
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 500)
-      .join(' ');
-
-    // Include page_category for topic clustering
-    let categoryText = '';
-    if (article.page_category) {
-      const cats = Array.isArray(article.page_category)
-        ? article.page_category
-        : [article.page_category];
-      categoryText = cats
-        .join(' ')
-        .replace(/[\/]/g, ' ')
-        .replace(/[_]/g, ' ')
-        .toLowerCase()
+      // Strip markdown formatting
+      extractedText = extractedText
+        .replace(/[#*_\[\]()>`~|\\]/g, ' ')
+        .replace(/!\[.*?\]\(.*?\)/g, '')
+        .replace(/\[([^\]]*)\]\(.*?\)/g, '$1')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`[^`]*`/g, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/\s+/g, ' ')
         .trim();
-    }
 
-    // Repeat title 3x to weight it heavily since content may be thin
-    const titleWeighted = (title + ' ' + title + ' ' + title).trim();
-    return `${titleWeighted} ${categoryText} ${contentWords}`.toLowerCase().trim();
+      // Take first 500 words of extracted content
+      var contentWords = extractedText
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 500)
+        .join(' ');
+
+      // Include page_category for topic clustering
+      var categoryText = '';
+      if (article.page_category) {
+        try {
+          var cats = Array.isArray(article.page_category)
+            ? article.page_category
+            : [article.page_category];
+          categoryText = cats
+            .join(' ')
+            .replace(/[\/]/g, ' ')
+            .replace(/[_]/g, ' ')
+            .toLowerCase()
+            .trim();
+        } catch (e) {
+          categoryText = '';
+        }
+      }
+
+      // Repeat title 3x to weight it heavily since content may be thin
+      var titleWeighted = (title + ' ' + title + ' ' + title).trim();
+      return (titleWeighted + ' ' + categoryText + ' ' + contentWords).toLowerCase().trim();
+    } catch (err) {
+      // LAST RESORT: return just the title so the article can still be compared
+      this.logger.warn(MODULE, 'Fingerprint build failed, using title-only fallback: ' + err.message);
+      var fallbackTitle = String(article.title || article.url || 'unknown').trim();
+      return (fallbackTitle + ' ' + fallbackTitle + ' ' + fallbackTitle).toLowerCase();
+    }
   }
 
   /**
