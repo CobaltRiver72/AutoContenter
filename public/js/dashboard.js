@@ -1946,6 +1946,7 @@
               '<span class="badge ' + statusClass + '">' + escapeHtml(c.status || 'detected') + '</span>' +
               (canPublish ? '<button class="btn btn-sm btn-success" onclick="event.stopPropagation(); window.__publishCluster(' + c.id + ')">Publish</button>' : '') +
               (canSkip ? '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); window.__skipCluster(' + c.id + ')">Skip</button>' : '') +
+              ((c.status === 'queued' || c.status === 'published') ? '<button class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" onclick="event.stopPropagation(); navigateTo(\'published\')">&#128221; View Drafts</button>' : '') +
             '</div>' +
           '</div>' +
           '<div class="cluster-body" id="cluster-body-' + c.id + '">' +
@@ -2000,9 +2001,12 @@
     if (!confirm('Publish cluster #' + id + '?')) return;
 
     fetchApi('/api/clusters/' + id + '/publish', { method: 'POST' })
-      .then(function () {
-        showToast('Cluster #' + id + ' queued for publishing', 'success');
-        loadClusters();
+      .then(function (data) {
+        if (data.success) {
+          showToast('Cluster queued — ' + (data.draftsCreated || data.totalDrafts || 0) + ' drafts created. View in Published page.', 'success');
+          loadClusters();
+          setTimeout(function () { navigateTo('published'); }, 2000);
+        }
       })
       .catch(function (err) {
         showToast('Failed to publish: ' + err.message, 'error');
@@ -2063,9 +2067,11 @@
 
     // Status filter tabs
     var counts = { all: drafts.length, fetching: 0, draft: 0, rewriting: 0, ready: 0, published: 0 };
+    var clusterCount = 0;
     for (var c = 0; c < drafts.length; c++) {
       var st = drafts[c].status;
       if (counts[st] !== undefined) counts[st]++;
+      if (drafts[c].cluster_id) clusterCount++;
     }
 
     var filterHTML =
@@ -2076,6 +2082,7 @@
         '<button class="filter-btn" data-filter="rewriting">Rewriting (' + counts.rewriting + ')</button>' +
         '<button class="filter-btn" data-filter="ready">Ready (' + counts.ready + ')</button>' +
         '<button class="filter-btn" data-filter="published">Published (' + counts.published + ')</button>' +
+        '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterCount + ')</button>' +
       '</div>';
 
     var cardsHTML = '';
@@ -2097,7 +2104,14 @@
         // Show/hide cards
         var cards = container.querySelectorAll('.draft-card');
         for (var d = 0; d < cards.length; d++) {
-          if (filter === 'all' || cards[d].getAttribute('data-status') === filter) {
+          var cardStatus = cards[d].getAttribute('data-status');
+          var cardCluster = cards[d].getAttribute('data-cluster');
+
+          if (filter === 'all') {
+            cards[d].style.display = '';
+          } else if (filter === 'cluster') {
+            cards[d].style.display = cardCluster ? '' : 'none';
+          } else if (cardStatus === filter) {
             cards[d].style.display = '';
           } else {
             cards[d].style.display = 'none';
@@ -2154,7 +2168,21 @@
       imageHTML = '<div class="draft-card-image"><img src="' + escapeHtml(draft.featured_image) + '" alt="" onerror="this.parentElement.style.display=\'none\'"></div>';
     }
 
-    return '<div class="draft-card' + (draft.featured_image ? ' has-image' : '') + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
+    // Cluster badges
+    var clusterHTML = '';
+    if (draft.cluster_id) {
+      var roleIcon = draft.cluster_role === 'primary' ? '&#11088;' : '&#128279;';
+      var roleLabel = draft.cluster_role === 'primary' ? 'Primary' : 'Source';
+      clusterHTML =
+        '<span class="cluster-badge" style="background:#6366f1;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:4px;">' +
+          '&#128218; Cluster #' + draft.cluster_id +
+        '</span>' +
+        '<span class="cluster-role-badge" style="background:' + (draft.cluster_role === 'primary' ? '#f59e0b' : '#64748b') + ';color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:2px;">' +
+          roleIcon + ' ' + roleLabel +
+        '</span>';
+    }
+
+    return '<div class="draft-card' + (draft.featured_image ? ' has-image' : '') + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '"' + (draft.cluster_id ? ' data-cluster="' + draft.cluster_id + '"' : '') + '>' +
       imageHTML +
       '<div class="draft-card-body">' +
         '<div class="draft-header">' +
@@ -2162,6 +2190,7 @@
             escapeHtml(draft.status.toUpperCase()) +
           '</span>' +
           '<span class="draft-mode">' + (draft.mode === 'auto' ? '&#129302; Auto' : '&#128100; Manual') + '</span>' +
+          clusterHTML +
           '<span class="draft-time">' + formatTime(draft.created_at) + '</span>' +
         '</div>' +
         '<h3 class="draft-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</h3>' +

@@ -661,7 +661,10 @@ function createApiRouter(deps) {
   });
 
   // ─── POST /api/clusters/:id/publish ───────────────────────────────────────
-
+  //
+  // NEW ARCHITECTURE: Creates drafts for each cluster article.
+  // The scheduler picks up drafts with mode='auto' and processes them.
+  //
   router.post('/clusters/:id/publish', function (req, res) {
     try {
       var clusterId = parseInt(req.params.id, 10);
@@ -674,22 +677,101 @@ function createApiRouter(deps) {
         return res.status(404).json({ error: 'Cluster not found' });
       }
 
-      if (cluster.status === 'published') {
-        return res.status(409).json({ error: 'Cluster already published' });
+      if (cluster.status === 'published' || cluster.status === 'queued') {
+        return res.status(409).json({ error: 'Cluster already ' + cluster.status });
       }
 
-      // Mark as queued and enqueue
-      db.prepare("UPDATE clusters SET status = 'queued' WHERE id = ?").run(clusterId);
+      // Load all articles in this cluster
+      var articles = db.prepare(
+        'SELECT * FROM articles WHERE cluster_id = ? ORDER BY authority_tier ASC, received_at ASC'
+      ).all(clusterId);
 
-      if (scheduler && typeof scheduler.enqueue === 'function') {
-        scheduler.enqueue(cluster);
+      if (articles.length === 0) {
+        return res.status(400).json({ error: 'Cluster has no articles' });
       }
 
-      logger.info('api', 'Cluster manually enqueued for publish', { clusterId: clusterId });
-      res.json({ success: true, clusterId: clusterId, status: 'queued' });
+      // Check if drafts already exist for this cluster
+      var existingDrafts = db.prepare(
+        'SELECT id, source_url, cluster_role FROM drafts WHERE cluster_id = ?'
+      ).all(clusterId);
+
+      if (existingDrafts.length > 0) {
+        db.prepare("UPDATE clusters SET status = 'queued' WHERE id = ?").run(clusterId);
+        return res.json({
+          success: true,
+          clusterId: clusterId,
+          status: 'queued',
+          draftsCreated: 0,
+          totalDrafts: existingDrafts.length,
+          message: 'Drafts already exist for this cluster'
+        });
+      }
+
+      // Choose primary article: highest authority tier (lowest number), or first
+      var primaryArticle = articles[0]; // Already sorted by authority_tier ASC
+
+      // Create drafts in a transaction for atomicity
+      var insertDraft = db.prepare(
+        "INSERT OR IGNORE INTO drafts (" +
+        "  source_article_id, source_url, source_domain, source_title," +
+        "  source_content_markdown, source_language, source_category," +
+        "  source_publish_time, target_platform, status, mode," +
+        "  cluster_id, cluster_role, extraction_status" +
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+
+      var draftsCreated = 0;
+      var primaryDraftId = null;
+
+      var createDrafts = db.transaction(function () {
+        for (var i = 0; i < articles.length; i++) {
+          var article = articles[i];
+          var isPrimary = article.id === primaryArticle.id;
+          var role = isPrimary ? 'primary' : 'source';
+
+          var result = insertDraft.run(
+            article.id,
+            article.url,
+            article.domain,
+            article.title,
+            article.content_markdown || '',
+            '', // source_language
+            '', // source_category
+            article.publish_time || '',
+            'wordpress',
+            'fetching',
+            'auto',
+            clusterId,
+            role,
+            'pending'
+          );
+
+          if (result.changes > 0) {
+            draftsCreated++;
+            if (isPrimary) {
+              primaryDraftId = result.lastInsertRowid;
+            }
+          }
+        }
+
+        db.prepare("UPDATE clusters SET status = 'queued' WHERE id = ?").run(clusterId);
+      });
+
+      createDrafts();
+
+      logger.info('api', 'Cluster ' + clusterId + ' -> ' + draftsCreated + ' drafts created (primary=#' + primaryDraftId + ')');
+
+      res.json({
+        success: true,
+        clusterId: clusterId,
+        status: 'queued',
+        draftsCreated: draftsCreated,
+        primaryDraftId: primaryDraftId,
+        articleCount: articles.length,
+      });
     } catch (err) {
-      logger.error('api', 'Failed to enqueue cluster', err.message);
-      res.status(500).json({ error: 'Failed to enqueue cluster' });
+      logger.error('api', 'Failed to create drafts for cluster ' + req.params.id + ': ' + err.message);
+      res.status(500).json({ error: 'Failed to enqueue cluster: ' + err.message });
     }
   });
 
@@ -1391,7 +1473,10 @@ function createApiRouter(deps) {
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
       }
-      query += ' ORDER BY created_at DESC';
+      // Order: cluster primary drafts first within their group, then by date
+      query += ' ORDER BY cluster_id DESC NULLS LAST, ' +
+               "CASE WHEN cluster_role = 'primary' THEN 0 ELSE 1 END, " +
+               'created_at DESC';
 
       var stmt = db.prepare(query);
       var drafts = stmt.all.apply(stmt, params);

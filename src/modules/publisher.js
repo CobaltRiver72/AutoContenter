@@ -458,7 +458,8 @@ class WordPressPublisher {
       }
     }
 
-    // Step 5: Record in the published table
+    // Step 5: Record in the published table (LEGACY — kept for backward compat)
+    // The new pipeline records everything in the drafts table.
     try {
       var insertStmt = db.prepare(
         'INSERT INTO published (' +

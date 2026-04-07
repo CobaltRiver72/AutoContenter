@@ -2086,6 +2086,25 @@ select:focus {
   white-space: nowrap;
 }
 
+/* ─── Cluster draft grouping ─────────────────────────────────────── */
+
+.cluster-badge {
+  display: inline-block;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.cluster-role-badge {
+  display: inline-block;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* Visual grouping: cluster drafts have a left border */
+.draft-card[data-cluster]:not([data-cluster=""]) {
+  border-left: 3px solid #6366f1;
+}
+
 @media (max-width: 768px) {
   .editor-panels { flex-direction: column; }
   .editor-left { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 40vh; }

@@ -1,15 +1,16 @@
 'use strict';
 
 // Queue processing interval (30 seconds)
-const PROCESS_INTERVAL_MS = 30000;
+var PROCESS_INTERVAL_MS = 30000;
 
 class PublishScheduler {
   /**
-   * @param {object} config    - App config from getConfig()
-   * @param {object} db        - better-sqlite3 Database instance
+   * @param {object} config
+   * @param {object} db - better-sqlite3 Database instance
    * @param {import('./rewriter').ArticleRewriter} rewriter
    * @param {import('./publisher').WordPressPublisher} publisher
-   * @param {object} logger    - Winston logger instance
+   * @param {object} logger
+   * @param {import('./extractor').ContentExtractor} extractor
    */
   constructor(config, db, rewriter, publisher, logger, extractor) {
     this.config = config;
@@ -19,10 +20,7 @@ class PublishScheduler {
     this.logger = logger;
     this.extractor = extractor || null;
 
-    // In-memory priority queue
-    this.queue = [];
-
-    // Publish history for rate limiting (timestamps of publishes within the last hour)
+    // Publish history for rate limiting
     this.publishHistory = [];
 
     // Timer handle for the processing loop
@@ -35,11 +33,58 @@ class PublishScheduler {
     this.enabled = true;
     this.status = 'connected';
     this.error = null;
+
+    // Prepared statements (lazy init)
+    this._stmts = {};
   }
 
   async init() {
     this.enabled = true;
     this.status = 'connected';
+
+    // ─── STARTUP RECOVERY: Recover orphaned drafts and clusters ─────────
+    this._recoverOrphanedWork();
+  }
+
+  /**
+   * On startup, find clusters stuck in 'queued' that have drafts stuck in
+   * transient states. Reset them so the scheduler picks them back up.
+   */
+  _recoverOrphanedWork() {
+    try {
+      // Find auto-mode drafts stuck in transient states from a previous crash
+      var stuckDrafts = this.db.prepare(
+        "SELECT id, status, cluster_id FROM drafts WHERE mode = 'auto' AND status IN ('fetching', 'rewriting') AND updated_at < datetime('now', '-5 minutes')"
+      ).all();
+
+      if (stuckDrafts.length > 0) {
+        this.logger.info('scheduler', 'Recovering ' + stuckDrafts.length + ' stuck auto-drafts from previous session');
+
+        var resetStmt = this.db.prepare(
+          "UPDATE drafts SET status = 'fetching', extraction_status = 'pending', updated_at = datetime('now') WHERE id = ?"
+        );
+
+        for (var i = 0; i < stuckDrafts.length; i++) {
+          resetStmt.run(stuckDrafts[i].id);
+          this.logger.debug('scheduler', 'Reset stuck draft #' + stuckDrafts[i].id + ' (was: ' + stuckDrafts[i].status + ')');
+        }
+      }
+
+      // Find clusters in 'queued' that have NO drafts at all
+      var orphanedClusters = this.db.prepare(
+        "SELECT c.id FROM clusters c WHERE c.status = 'queued' AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id)"
+      ).all();
+
+      if (orphanedClusters.length > 0) {
+        this.logger.warn('scheduler', orphanedClusters.length + ' clusters in queued with no drafts — resetting to detected');
+        var resetCluster = this.db.prepare("UPDATE clusters SET status = 'detected' WHERE id = ?");
+        for (var j = 0; j < orphanedClusters.length; j++) {
+          resetCluster.run(orphanedClusters[j].id);
+        }
+      }
+    } catch (err) {
+      this.logger.error('scheduler', 'Startup recovery failed: ' + err.message);
+    }
   }
 
   getHealth() {
@@ -52,9 +97,9 @@ class PublishScheduler {
       error: null,
       lastActivity: null,
       stats: {
-        queueSize: qs.queueLength,
+        pendingDrafts: qs.pendingDrafts,
         publishedThisHour: qs.publishedThisHour,
-      }
+      },
     };
   }
 
@@ -65,348 +110,416 @@ class PublishScheduler {
   }
 
   /**
-   * Add a cluster to the publish queue with priority sorting.
-   *
-   * Priority order:
-   * 1. Trends-boosted clusters first (priority = 'high')
-   * 2. Same priority: higher article_count first
-   * 3. Same count: earlier detected_at first (FIFO)
-   *
-   * @param {object} cluster - The cluster object to enqueue
+   * Enqueue a cluster by creating drafts in the database.
+   * Called from index.js when auto-detected clusters pass shouldPublish threshold.
    */
   enqueue(cluster) {
     try {
-      const item = {
-        cluster,
-        priority: cluster.trends_boosted ? 'high' : 'normal',
-        articleCount: cluster.article_count || (cluster.articles ? cluster.articles.length : 1),
-        detectedAt: cluster.detected_at || new Date().toISOString(),
-        enqueuedAt: new Date().toISOString(),
-        retries: 0,
-      };
+      if (!cluster || !cluster.id) return;
 
-      this.queue.push(item);
-      this._sortQueue();
+      // Check if drafts already exist for this cluster
+      var existing = this.db.prepare(
+        'SELECT COUNT(*) as count FROM drafts WHERE cluster_id = ?'
+      ).get(cluster.id);
 
-      this.logger.info('Cluster enqueued for publishing', {
-        clusterId: cluster.id,
-        priority: item.priority,
-        articleCount: item.articleCount,
-        queueLength: this.queue.length,
+      if (existing && existing.count > 0) {
+        this.logger.debug('scheduler', 'Cluster ' + cluster.id + ' already has drafts, skipping enqueue');
+        return;
+      }
+
+      // Load articles
+      var articles = this.db.prepare(
+        'SELECT * FROM articles WHERE cluster_id = ? ORDER BY authority_tier ASC, received_at ASC'
+      ).all(cluster.id);
+
+      if (articles.length === 0) {
+        this.logger.warn('scheduler', 'Cluster ' + cluster.id + ' has no articles to enqueue');
+        return;
+      }
+
+      var insertDraft = this.db.prepare(
+        "INSERT OR IGNORE INTO drafts (" +
+        "  source_article_id, source_url, source_domain, source_title," +
+        "  source_content_markdown, target_platform, status, mode," +
+        "  cluster_id, cluster_role, extraction_status" +
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+
+      var self = this;
+      var createDrafts = this.db.transaction(function () {
+        for (var i = 0; i < articles.length; i++) {
+          var a = articles[i];
+          var isPrimary = i === 0;
+          insertDraft.run(
+            a.id, a.url, a.domain, a.title,
+            a.content_markdown || '', 'wordpress',
+            'fetching', 'auto',
+            cluster.id, isPrimary ? 'primary' : 'source', 'pending'
+          );
+        }
+        self.db.prepare("UPDATE clusters SET status = 'queued' WHERE id = ?").run(cluster.id);
       });
+
+      createDrafts();
+      this.logger.info('scheduler', 'Auto-enqueued cluster ' + cluster.id + ' -> ' + articles.length + ' drafts created');
     } catch (err) {
-      this.logger.error('Failed to enqueue cluster', {
-        error: err.message,
-        clusterId: cluster.id,
-      });
+      this.logger.error('scheduler', 'Failed to auto-enqueue cluster ' + (cluster ? cluster.id : '?') + ': ' + err.message);
     }
   }
 
   /**
-   * Sort the queue by priority rules.
-   */
-  _sortQueue() {
-    this.queue.sort((a, b) => {
-      // High priority first
-      if (a.priority === 'high' && b.priority !== 'high') return -1;
-      if (a.priority !== 'high' && b.priority === 'high') return 1;
-
-      // Same priority: higher article count first
-      if (a.articleCount !== b.articleCount) return b.articleCount - a.articleCount;
-
-      // Same count: earlier detected_at first (FIFO)
-      return new Date(a.detectedAt).getTime() - new Date(b.detectedAt).getTime();
-    });
-  }
-
-  /**
-   * Process the next item in the queue if rate limits allow.
-   * Called every 30 seconds by the processing loop.
+   * Process the next cluster-group of drafts.
+   *
+   * Pipeline per cluster:
+   *   1. Find a cluster with auto-drafts in 'fetching' state
+   *   2. Extract content for ALL drafts in that cluster
+   *   3. Rewrite the PRIMARY draft using all source content
+   *   4. Publish the PRIMARY draft to WordPress
+   *   5. Update all draft statuses and the cluster status
    */
   async processQueue() {
-    // Guard against concurrent execution
     if (this._processing) return;
     this._processing = true;
 
     try {
-      // Nothing to process
-      if (this.queue.length === 0) return;
-
-      // Check rate limits
+      // Check rate limits first
       if (!this.canPublishNow()) {
-        this.logger.debug('Rate limit active — skipping queue processing', {
-          queueLength: this.queue.length,
-          publishedThisHour: this._getPublishedThisHour(),
-        });
+        this.logger.debug('scheduler', 'Rate limit active — skipping queue processing');
         return;
       }
 
-      // Dequeue the highest-priority item
-      const item = this.queue.shift();
-      const cluster = item.cluster;
+      // ─── Step 1: Find the next cluster to process ───────────────────────
+      var nextCluster = this.db.prepare(
+        "SELECT DISTINCT d.cluster_id, c.topic, c.trends_boosted, c.priority " +
+        "FROM drafts d " +
+        "JOIN clusters c ON d.cluster_id = c.id " +
+        "WHERE d.mode = 'auto' " +
+        "  AND d.cluster_id IS NOT NULL " +
+        "  AND d.status IN ('fetching', 'draft') " +
+        "  AND c.status = 'queued' " +
+        "ORDER BY " +
+        "  CASE WHEN c.trends_boosted = 1 THEN 0 ELSE 1 END, " +
+        "  c.article_count DESC, " +
+        "  c.detected_at ASC " +
+        "LIMIT 1"
+      ).get();
 
-      this.logger.info('Processing cluster from queue', {
-        clusterId: cluster.id,
-        priority: item.priority,
-        retries: item.retries,
+      if (!nextCluster || !nextCluster.cluster_id) {
+        return; // Nothing to process
+      }
+
+      var clusterId = nextCluster.cluster_id;
+      this.logger.info('scheduler', 'Processing cluster #' + clusterId + ': "' + (nextCluster.topic || '').substring(0, 60) + '"');
+
+      // Load ALL drafts for this cluster
+      var clusterDrafts = this.db.prepare(
+        "SELECT * FROM drafts WHERE cluster_id = ? ORDER BY cluster_role ASC"
+      ).all(clusterId);
+
+      if (clusterDrafts.length === 0) {
+        this.logger.warn('scheduler', 'Cluster #' + clusterId + ' has no drafts — marking as failed');
+        this.db.prepare("UPDATE clusters SET status = 'failed' WHERE id = ?").run(clusterId);
+        return;
+      }
+
+      // Identify primary and source drafts
+      var primaryDraft = null;
+      var sourceDrafts = [];
+
+      for (var i = 0; i < clusterDrafts.length; i++) {
+        if (clusterDrafts[i].cluster_role === 'primary') {
+          primaryDraft = clusterDrafts[i];
+        } else {
+          sourceDrafts.push(clusterDrafts[i]);
+        }
+      }
+
+      // If no primary was set, use the first draft
+      if (!primaryDraft) {
+        primaryDraft = clusterDrafts[0];
+        this.db.prepare("UPDATE drafts SET cluster_role = 'primary' WHERE id = ?").run(primaryDraft.id);
+        sourceDrafts = clusterDrafts.slice(1);
+      }
+
+      // ─── Step 2: Extract content for ALL drafts that need it ────────────
+      var draftsToExtract = clusterDrafts.filter(function (d) {
+        return d.extraction_status !== 'success' && d.extraction_status !== 'cached';
       });
 
-      // Step 1: Load full article data for the cluster
-      let clusterWithArticles;
-      try {
-        var articles = this.db.prepare(
-          'SELECT * FROM articles WHERE cluster_id = ? ORDER BY authority_tier ASC, received_at ASC'
-        ).all(cluster.id);
+      if (draftsToExtract.length > 0) {
+        this.logger.info('scheduler', 'Extracting content for ' + draftsToExtract.length + '/' + clusterDrafts.length + ' drafts');
 
-        clusterWithArticles = Object.assign({}, cluster, { articles: articles });
-      } catch (loadErr) {
-        this.logger.error('Failed to load cluster articles', {
-          error: loadErr.message,
-          clusterId: cluster.id,
-        });
-        this._updateClusterStatus(cluster.id, 'failed');
-        return;
-      }
+        for (var e = 0; e < draftsToExtract.length; e++) {
+          var draft = draftsToExtract[e];
+          try {
+            this.db.prepare("UPDATE drafts SET status = 'fetching', updated_at = datetime('now') WHERE id = ?").run(draft.id);
 
-      // Step 2: Extract full content from source URLs
-      try {
-        if (this.extractor && this.extractor.enabled) {
-          clusterWithArticles = await this.extractor.extractClusterContent(clusterWithArticles);
+            if (this.extractor && this.extractor.enabled) {
+              var articleObj = {
+                id: draft.source_article_id || draft.id,
+                url: draft.source_url,
+                domain: draft.source_domain,
+                title: draft.source_title,
+                content_markdown: draft.source_content_markdown,
+              };
+
+              await this.extractor._extractArticle(articleObj);
+
+              this.db.prepare(
+                "UPDATE drafts SET " +
+                "  extracted_content = ?, extracted_title = ?, extracted_excerpt = ?," +
+                "  extracted_byline = ?, extraction_status = ?, extraction_error = NULL," +
+                "  status = 'draft', updated_at = datetime('now') " +
+                "WHERE id = ?"
+              ).run(
+                articleObj.extracted_content || articleObj.content_markdown || '',
+                articleObj.extracted_title || draft.source_title || '',
+                articleObj.extracted_excerpt || '',
+                articleObj.extracted_byline || '',
+                articleObj.extraction_status || 'success',
+                draft.id
+              );
+
+              this.logger.info('scheduler', 'Extracted content for draft #' + draft.id + ' (' + (articleObj.extracted_content || '').length + ' chars)');
+            } else {
+              // No extractor — use Firehose content as-is
+              this.db.prepare(
+                "UPDATE drafts SET extracted_content = source_content_markdown, extraction_status = 'firehose', status = 'draft', updated_at = datetime('now') WHERE id = ?"
+              ).run(draft.id);
+            }
+          } catch (extractErr) {
+            this.logger.warn('scheduler', 'Extraction failed for draft #' + draft.id + ': ' + extractErr.message);
+            this.db.prepare(
+              "UPDATE drafts SET extraction_status = 'failed', extraction_error = ?, error_message = ?, status = 'draft', updated_at = datetime('now') WHERE id = ?"
+            ).run(extractErr.message, extractErr.message, draft.id);
+            // Continue — we can still rewrite with partial content
+          }
         }
-      } catch (extractErr) {
-        this.logger.warn('Content extraction failed — proceeding with available content', {
-          error: extractErr.message,
-          clusterId: cluster.id,
-        });
       }
 
-      // Step 3: Rewrite the article using extracted content
-      let rewrittenArticle;
+      // ─── Step 3: Rewrite the PRIMARY draft using ALL sources ────────────
+      this.logger.info('scheduler', 'Rewriting primary draft #' + primaryDraft.id + ' using ' + clusterDrafts.length + ' sources');
+
+      this.db.prepare("UPDATE drafts SET status = 'rewriting', updated_at = datetime('now') WHERE id = ?").run(primaryDraft.id);
+
+      // Reload all drafts to get fresh extracted content
+      var freshDrafts = this.db.prepare(
+        "SELECT * FROM drafts WHERE cluster_id = ? ORDER BY cluster_role ASC"
+      ).all(clusterId);
+
+      // Build cluster-like object that the rewriter expects
+      var clusterForRewrite = {
+        id: clusterId,
+        topic: nextCluster.topic,
+        trends_boosted: nextCluster.trends_boosted,
+        trends_topic: nextCluster.topic,
+        articles: freshDrafts.map(function (d) {
+          return {
+            id: d.source_article_id || d.id,
+            url: d.source_url,
+            domain: d.source_domain,
+            title: d.extracted_title || d.source_title,
+            content_markdown: d.extracted_content || d.source_content_markdown || '',
+            extracted_content: d.extracted_content || '',
+            extracted_title: d.extracted_title || d.source_title || '',
+            extracted_byline: d.extracted_byline || '',
+            extracted_excerpt: d.extracted_excerpt || '',
+            extraction_status: d.extraction_status || 'pending',
+            authority_tier: 3,
+            featured_image: d.featured_image || null,
+          };
+        }),
+      };
+
+      // Reload fresh primary
+      var freshPrimary = this.db.prepare('SELECT * FROM drafts WHERE id = ?').get(primaryDraft.id);
+      var primaryArticle = {
+        id: freshPrimary.source_article_id || freshPrimary.id,
+        url: freshPrimary.source_url,
+        domain: freshPrimary.source_domain,
+        title: freshPrimary.extracted_title || freshPrimary.source_title,
+        content_markdown: freshPrimary.extracted_content || freshPrimary.source_content_markdown || '',
+        extracted_content: freshPrimary.extracted_content || '',
+        extracted_title: freshPrimary.extracted_title || freshPrimary.source_title || '',
+        extracted_byline: freshPrimary.extracted_byline || '',
+      };
+
+      var rewrittenArticle;
       try {
-        const primaryArticle = (clusterWithArticles.articles && clusterWithArticles.articles[0]) || cluster;
-        rewrittenArticle = await this.rewriter.rewrite(primaryArticle, clusterWithArticles);
+        rewrittenArticle = await this.rewriter.rewrite(primaryArticle, clusterForRewrite);
       } catch (rewriteErr) {
-        this.logger.error('Rewrite failed for cluster — will retry next cycle', {
-          error: rewriteErr.message,
-          clusterId: cluster.id,
-          retries: item.retries,
-        });
+        this.logger.error('scheduler', 'Rewrite failed for cluster #' + clusterId + ': ' + rewriteErr.message);
 
-        if (item.retries < 3) {
-          item.retries++;
-          this.queue.push(item);
-          this._sortQueue();
+        var retryCount = (freshPrimary.retry_count || 0) + 1;
+        var maxRetries = freshPrimary.max_retries || 3;
+
+        if (retryCount >= maxRetries) {
+          this.db.prepare(
+            "UPDATE drafts SET status = 'failed', error_message = ?, retry_count = ?, updated_at = datetime('now') WHERE id = ?"
+          ).run('Rewrite failed: ' + rewriteErr.message, retryCount, primaryDraft.id);
+          this.db.prepare("UPDATE clusters SET status = 'failed' WHERE id = ?").run(clusterId);
         } else {
-          this.logger.error('Cluster exceeded max retries — dropping from queue', {
-            clusterId: cluster.id,
-          });
-          this._updateClusterStatus(cluster.id, 'failed');
+          this.db.prepare(
+            "UPDATE drafts SET status = 'draft', error_message = ?, retry_count = ?, updated_at = datetime('now') WHERE id = ?"
+          ).run('Rewrite failed (retry ' + retryCount + '/' + maxRetries + '): ' + rewriteErr.message, retryCount, primaryDraft.id);
         }
         return;
       }
 
-      // Step 2: Publish to WordPress
-      try {
-        const publishResult = await this.publisher.publish(rewrittenArticle, cluster, this.db);
+      // Save rewritten content to PRIMARY draft
+      this.db.prepare(
+        "UPDATE drafts SET " +
+        "  rewritten_html = ?, rewritten_title = ?, rewritten_word_count = ?," +
+        "  ai_model_used = ?, target_keyword = ?," +
+        "  status = 'ready', error_message = NULL, updated_at = datetime('now') " +
+        "WHERE id = ?"
+      ).run(
+        rewrittenArticle.content || '',
+        rewrittenArticle.title || '',
+        rewrittenArticle.wordCount || 0,
+        rewrittenArticle.aiModel || '',
+        rewrittenArticle.targetKeyword || '',
+        primaryDraft.id
+      );
 
-        // Record the publish timestamp for rate limiting
+      this.logger.info('scheduler', 'Rewrite complete for primary draft #' + primaryDraft.id + ': "' + (rewrittenArticle.title || '').substring(0, 60) + '"');
+
+      // ─── Step 4: Publish to WordPress ────────────────────────────────────
+      try {
+        var publishResult = await this.publisher.publish(rewrittenArticle, clusterForRewrite, this.db);
+
+        // Record publish timestamp for rate limiting
         this.publishHistory.push(Date.now());
 
-        // Update cluster status in DB
-        this._updateClusterStatus(cluster.id, 'published');
+        // Update PRIMARY draft with WP details
+        this.db.prepare(
+          "UPDATE drafts SET " +
+          "  status = 'published', wp_post_id = ?, wp_post_url = ?," +
+          "  published_at = datetime('now'), updated_at = datetime('now') " +
+          "WHERE id = ?"
+        ).run(publishResult.wpPostId, publishResult.wpPostUrl, primaryDraft.id);
 
-        this.logger.info('Cluster published successfully', {
-          clusterId: cluster.id,
-          wpPostId: publishResult.wpPostId,
-          wpPostUrl: publishResult.wpPostUrl,
-        });
+        // Update SOURCE drafts to 'published' too
+        this.db.prepare(
+          "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, published_at = datetime('now'), updated_at = datetime('now') WHERE cluster_id = ? AND id != ?"
+        ).run(publishResult.wpPostId, publishResult.wpPostUrl, clusterId, primaryDraft.id);
+
+        // Update cluster status
+        this.db.prepare(
+          "UPDATE clusters SET status = 'published', published_at = datetime('now') WHERE id = ?"
+        ).run(clusterId);
+
+        this.logger.info('scheduler', 'Cluster #' + clusterId + ' published -> WP post #' + publishResult.wpPostId + ' ' + publishResult.wpPostUrl);
       } catch (publishErr) {
-        this.logger.error('WordPress publish failed — re-queuing cluster', {
-          error: publishErr.message,
-          clusterId: cluster.id,
-          retries: item.retries,
-        });
+        this.logger.error('scheduler', 'WordPress publish failed for cluster #' + clusterId + ': ' + publishErr.message);
 
-        // Keep in queue for retry
-        if (item.retries < 3) {
-          item.retries++;
-          // Store the already-rewritten article so we don't re-call the AI
-          item.rewrittenArticle = rewrittenArticle;
-          this.queue.push(item);
-          this._sortQueue();
+        var pubRetry = (freshPrimary.retry_count || 0) + 1;
+        if (pubRetry >= 3) {
+          this.db.prepare(
+            "UPDATE drafts SET status = 'failed', error_message = ?, retry_count = ?, updated_at = datetime('now') WHERE id = ?"
+          ).run('WP publish failed: ' + publishErr.message, pubRetry, primaryDraft.id);
+          this.db.prepare("UPDATE clusters SET status = 'failed' WHERE id = ?").run(clusterId);
         } else {
-          this.logger.error('Cluster exceeded max retries for publishing — dropping', {
-            clusterId: cluster.id,
-          });
-          this._updateClusterStatus(cluster.id, 'failed');
+          this.db.prepare(
+            "UPDATE drafts SET error_message = ?, retry_count = ?, updated_at = datetime('now') WHERE id = ?"
+          ).run('WP publish failed (retry ' + pubRetry + '/3): ' + publishErr.message, pubRetry, primaryDraft.id);
         }
       }
     } catch (err) {
-      this.logger.error('Unexpected error in processQueue', { error: err.message });
+      this.logger.error('scheduler', 'Unexpected error in processQueue: ' + err.message);
     } finally {
       this._processing = false;
     }
   }
 
   /**
-   * Check whether we are allowed to publish right now based on rate limits.
-   *
-   * Rules:
-   * - Published fewer than MAX_PUBLISH_PER_HOUR articles in the last 60 minutes
-   * - Last publish was more than PUBLISH_COOLDOWN_MINUTES ago
-   *
-   * @returns {boolean}
+   * Rate limit check.
    */
   canPublishNow() {
     try {
-      const now = Date.now();
-      const oneHourAgo = now - 60 * 60 * 1000;
-      const maxPerHour = this.config.MAX_PUBLISH_PER_HOUR || 4;
-      const cooldownMs = (this.config.PUBLISH_COOLDOWN_MINUTES || 10) * 60 * 1000;
+      var now = Date.now();
+      var oneHourAgo = now - 60 * 60 * 1000;
+      var maxPerHour = this.config.MAX_PUBLISH_PER_HOUR || 4;
+      var cooldownMs = (this.config.PUBLISH_COOLDOWN_MINUTES || 10) * 60 * 1000;
 
-      // Prune old entries from publish history
-      this.publishHistory = this.publishHistory.filter((ts) => ts > oneHourAgo);
+      this.publishHistory = this.publishHistory.filter(function (ts) { return ts > oneHourAgo; });
 
-      // Check hourly limit
-      if (this.publishHistory.length >= maxPerHour) {
-        return false;
-      }
+      if (this.publishHistory.length >= maxPerHour) return false;
 
-      // Check cooldown since last publish
       if (this.publishHistory.length > 0) {
-        const lastPublish = Math.max(...this.publishHistory);
-        if (now - lastPublish < cooldownMs) {
-          return false;
-        }
+        var lastPublish = Math.max.apply(null, this.publishHistory);
+        if (now - lastPublish < cooldownMs) return false;
       }
 
       return true;
     } catch (err) {
-      this.logger.error('Error checking publish rate limit', { error: err.message });
+      this.logger.error('scheduler', 'Error checking rate limit: ' + err.message);
       return false;
     }
   }
 
-  /**
-   * Start the 30-second processing loop.
-   */
   start() {
     if (this._intervalHandle) {
-      this.logger.warn('Scheduler already running');
+      this.logger.warn('scheduler', 'Scheduler already running');
       return;
     }
 
-    this.logger.info('Starting publish scheduler', {
-      intervalMs: PROCESS_INTERVAL_MS,
-      maxPerHour: this.config.MAX_PUBLISH_PER_HOUR,
-      cooldownMinutes: this.config.PUBLISH_COOLDOWN_MINUTES,
-    });
+    var self = this;
+    this.logger.info('scheduler', 'Starting publish scheduler (interval=' + PROCESS_INTERVAL_MS + 'ms, max=' + this.config.MAX_PUBLISH_PER_HOUR + '/hr)');
 
-    this._intervalHandle = setInterval(() => {
-      this.processQueue().catch((err) => {
-        this.logger.error('Unhandled error in scheduler loop', { error: err.message });
+    this._intervalHandle = setInterval(function () {
+      self.processQueue().catch(function (err) {
+        self.logger.error('scheduler', 'Unhandled error in scheduler loop: ' + err.message);
       });
     }, PROCESS_INTERVAL_MS);
   }
 
-  /**
-   * Stop the processing loop.
-   */
   stop() {
     if (this._intervalHandle) {
       clearInterval(this._intervalHandle);
       this._intervalHandle = null;
-      this.logger.info('Publish scheduler stopped');
+      this.logger.info('scheduler', 'Publish scheduler stopped');
     }
   }
 
-  /**
-   * Get the current queue and rate-limit status.
-   *
-   * @returns {object}
-   */
   getQueueStatus() {
     try {
-      const now = Date.now();
-      const oneHourAgo = now - 60 * 60 * 1000;
-      const maxPerHour = this.config.MAX_PUBLISH_PER_HOUR || 4;
-      const cooldownMs = (this.config.PUBLISH_COOLDOWN_MINUTES || 10) * 60 * 1000;
+      var now = Date.now();
+      var oneHourAgo = now - 60 * 60 * 1000;
+      var maxPerHour = this.config.MAX_PUBLISH_PER_HOUR || 4;
+      var cooldownMs = (this.config.PUBLISH_COOLDOWN_MINUTES || 10) * 60 * 1000;
 
-      // Prune old entries
-      this.publishHistory = this.publishHistory.filter((ts) => ts > oneHourAgo);
+      this.publishHistory = this.publishHistory.filter(function (ts) { return ts > oneHourAgo; });
 
-      const publishedThisHour = this.publishHistory.length;
-      const rateLimitHit = publishedThisHour >= maxPerHour;
+      var publishedThisHour = this.publishHistory.length;
+      var rateLimitHit = publishedThisHour >= maxPerHour;
 
-      // Calculate when the next publish is allowed
-      let nextPublishIn = 0;
-      if (rateLimitHit) {
-        // Earliest entry will expire, opening a slot
-        const earliest = Math.min(...this.publishHistory);
+      // Count pending auto-drafts (primary only — that's the actual queue)
+      var pendingRow = this.db.prepare(
+        "SELECT COUNT(*) as count FROM drafts WHERE mode = 'auto' AND cluster_role = 'primary' AND status IN ('fetching', 'draft', 'rewriting', 'ready')"
+      ).get();
+      var pendingDrafts = pendingRow ? pendingRow.count : 0;
+
+      var nextPublishIn = 0;
+      if (rateLimitHit && this.publishHistory.length > 0) {
+        var earliest = Math.min.apply(null, this.publishHistory);
         nextPublishIn = Math.max(0, (earliest + 60 * 60 * 1000) - now);
       } else if (this.publishHistory.length > 0) {
-        // Cooldown from last publish
-        const lastPublish = Math.max(...this.publishHistory);
-        const cooldownRemaining = (lastPublish + cooldownMs) - now;
+        var lastPublish = Math.max.apply(null, this.publishHistory);
+        var cooldownRemaining = (lastPublish + cooldownMs) - now;
         nextPublishIn = Math.max(0, cooldownRemaining);
       }
 
       return {
-        queueLength: this.queue.length,
-        nextPublishIn: Math.ceil(nextPublishIn / 1000), // seconds
-        publishedThisHour,
-        rateLimitHit,
+        queueLength: pendingDrafts,
+        pendingDrafts: pendingDrafts,
+        nextPublishIn: Math.ceil(nextPublishIn / 1000),
+        publishedThisHour: publishedThisHour,
+        rateLimitHit: rateLimitHit,
       };
     } catch (err) {
-      this.logger.error('Error getting queue status', { error: err.message });
-      return {
-        queueLength: this.queue.length,
-        nextPublishIn: 0,
-        publishedThisHour: 0,
-        rateLimitHit: false,
-      };
-    }
-  }
-
-  /**
-   * Get the count of articles published in the last hour.
-   *
-   * @returns {number}
-   */
-  _getPublishedThisHour() {
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    this.publishHistory = this.publishHistory.filter((ts) => ts > oneHourAgo);
-    return this.publishHistory.length;
-  }
-
-  /**
-   * Update a cluster's status in the database.
-   *
-   * @param {number|string} clusterId
-   * @param {string} status - 'published' | 'failed'
-   */
-  _updateClusterStatus(clusterId, status) {
-    if (!clusterId) return;
-
-    try {
-      this.db.prepare('UPDATE clusters SET status = ? WHERE id = ?').run(
-        status,
-        clusterId
-      );
-      if (status === 'published') {
-        try {
-          this.db.prepare('UPDATE clusters SET published_at = ? WHERE id = ?').run(
-            new Date().toISOString(),
-            clusterId
-          );
-        } catch (e) { /* published_at column might not exist */ }
-      }
-    } catch (err) {
-      this.logger.error('Failed to update cluster status', {
-        error: err.message,
-        clusterId,
-        status,
-      });
+      this.logger.error('scheduler', 'Error getting queue status: ' + err.message);
+      return { queueLength: 0, pendingDrafts: 0, nextPublishIn: 0, publishedThisHour: 0, rateLimitHit: false };
     }
   }
 }

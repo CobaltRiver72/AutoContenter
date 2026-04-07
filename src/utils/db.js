@@ -297,6 +297,18 @@ function runMigrations() {
       )
     `);
 
+    // ─── Cluster integration columns on drafts ────────────────────────────
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN cluster_id INTEGER DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN cluster_role TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    // Index for cluster lookups
+    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster ON drafts(cluster_id)');
+
     // One-time fix: clean known-wrong model IDs from settings
     var wrongModelIds = {
       'claude-opus-4-6-20250610': 'claude-opus-4-6',
