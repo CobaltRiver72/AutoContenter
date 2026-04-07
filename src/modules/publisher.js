@@ -38,28 +38,31 @@ function generateFilename(slug, imageUrl) {
   return safeName + ext;
 }
 
-function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName) {
+function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName, schemaTypes, targetDomain) {
   var schemas = [];
+  var types = (schemaTypes || 'NewsArticle,FAQPage').split(',');
+  for (var t = 0; t < types.length; t++) types[t] = types[t].trim();
 
-  var newsArticle = {
-    '@context': 'https://schema.org',
-    '@type': 'NewsArticle',
-    'headline': rewrittenArticle.title || '',
-    'description': rewrittenArticle.metaDescription || rewrittenArticle.excerpt || '',
-    'url': wpPostUrl || '',
-    'datePublished': new Date().toISOString(),
-    'dateModified': new Date().toISOString(),
-    'author': { '@type': 'Organization', 'name': siteName || 'HDF News' },
-    'publisher': { '@type': 'Organization', 'name': siteName || 'HDF News' },
-    'mainEntityOfPage': { '@type': 'WebPage', '@id': wpPostUrl || '' }
-  };
-
-  if (rewrittenArticle.targetKeyword) {
-    newsArticle.keywords = rewrittenArticle.targetKeyword;
+  // NewsArticle
+  if (types.indexOf('NewsArticle') !== -1) {
+    var publisherUrl = targetDomain ? ('https://' + targetDomain.replace(/^https?:\/\//, '')) : wpPostUrl;
+    var newsArticle = {
+      '@context': 'https://schema.org',
+      '@type': 'NewsArticle',
+      'headline': rewrittenArticle.title || '',
+      'description': rewrittenArticle.metaDescription || rewrittenArticle.excerpt || '',
+      'datePublished': new Date().toISOString(),
+      'dateModified': new Date().toISOString(),
+      'author': { '@type': 'Organization', 'name': siteName || 'HDF News' },
+      'publisher': { '@type': 'Organization', 'name': siteName || 'HDF News', 'url': publisherUrl },
+      'mainEntityOfPage': { '@type': 'WebPage', '@id': wpPostUrl || '' }
+    };
+    if (rewrittenArticle.targetKeyword) newsArticle.keywords = rewrittenArticle.targetKeyword;
+    schemas.push(newsArticle);
   }
-  schemas.push(newsArticle);
 
-  if (rewrittenArticle.faq && Array.isArray(rewrittenArticle.faq) && rewrittenArticle.faq.length > 0) {
+  // FAQPage
+  if (types.indexOf('FAQPage') !== -1 && rewrittenArticle.faq && Array.isArray(rewrittenArticle.faq) && rewrittenArticle.faq.length > 0) {
     var faqEntities = [];
     for (var i = 0; i < rewrittenArticle.faq.length; i++) {
       var item = rewrittenArticle.faq[i];
@@ -74,6 +77,45 @@ function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName) {
     if (faqEntities.length > 0) {
       schemas.push({ '@context': 'https://schema.org', '@type': 'FAQPage', 'mainEntity': faqEntities });
     }
+  }
+
+  // BreadcrumbList
+  if (types.indexOf('BreadcrumbList') !== -1) {
+    var siteUrl = targetDomain ? ('https://' + targetDomain.replace(/^https?:\/\//, '')) : '';
+    if (siteUrl || wpPostUrl) {
+      schemas.push({
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        'itemListElement': [
+          { '@type': 'ListItem', 'position': 1, 'name': 'Home', 'item': siteUrl || wpPostUrl },
+          { '@type': 'ListItem', 'position': 2, 'name': 'News', 'item': (siteUrl || wpPostUrl) + '/news' },
+          { '@type': 'ListItem', 'position': 3, 'name': rewrittenArticle.title || 'Article' },
+        ],
+      });
+    }
+  }
+
+  // Product
+  if (types.indexOf('Product') !== -1) {
+    schemas.push({
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      'name': rewrittenArticle.title || '',
+      'description': rewrittenArticle.metaDescription || rewrittenArticle.excerpt || '',
+    });
+  }
+
+  // Event
+  if (types.indexOf('Event') !== -1) {
+    schemas.push({
+      '@context': 'https://schema.org',
+      '@type': 'Event',
+      'name': rewrittenArticle.title || '',
+      'description': rewrittenArticle.excerpt || '',
+      'startDate': new Date().toISOString(),
+      'eventStatus': 'https://schema.org/EventScheduled',
+      'eventAttendanceMode': 'https://schema.org/OnlineEventAttendanceMode',
+    });
   }
 
   var html = '';
@@ -237,7 +279,7 @@ class WordPressPublisher {
     } catch (e) {
       siteName = 'HDF News';
     }
-    var schemaHtml = buildSchemaMarkup(rewrittenArticle, '', siteName);
+    var schemaHtml = buildSchemaMarkup(rewrittenArticle, '', siteName, rewrittenArticle.schemaTypes, rewrittenArticle.targetDomain);
 
     // Step 3: Create the WordPress post
     var postContent = (rewrittenArticle.content || '');
@@ -260,7 +302,7 @@ class WordPressPublisher {
     // Step 4: Update schema with actual post URL (non-critical)
     if (postResult.wpPostUrl && schemaHtml) {
       try {
-        var updatedSchema = buildSchemaMarkup(rewrittenArticle, postResult.wpPostUrl, siteName);
+        var updatedSchema = buildSchemaMarkup(rewrittenArticle, postResult.wpPostUrl, siteName, rewrittenArticle.schemaTypes, rewrittenArticle.targetDomain);
         var updatedContent = (rewrittenArticle.content || '') + '\n\n' + updatedSchema;
         await this._wpRequest('post', '/wp/v2/posts/' + postResult.wpPostId, { content: updatedContent });
       } catch (schemaErr) {

@@ -283,6 +283,7 @@
             <div class="settings-row">
               <label class="settings-label">Primary Provider</label>
               <select id="ai-provider" class="setting-select">
+                <option value="openrouter" selected>OpenRouter (Free Models)</option>
                 <option value="anthropic">Anthropic (Claude)</option>
                 <option value="openai">OpenAI (ChatGPT)</option>
               </select>
@@ -302,9 +303,9 @@
                 <select id="anthropic-model" class="setting-select">
                   <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 &mdash; Fast &amp; Cheap</option>
                   <option value="claude-sonnet-4-20250514">Claude Sonnet 4 &mdash; Balanced</option>
-                  <option value="claude-sonnet-4-6-20250610">Claude Sonnet 4.6 &mdash; Latest Balanced</option>
+                  <option value="claude-sonnet-4-6">Claude Sonnet 4.6 &mdash; Latest Balanced</option>
                   <option value="claude-opus-4-20250514">Claude Opus 4 &mdash; Best Quality</option>
-                  <option value="claude-opus-4-6-20250610">Claude Opus 4.6 &mdash; Latest Best</option>
+                  <option value="claude-opus-4-6">Claude Opus 4.6 &mdash; Latest Best</option>
                 </select>
               </div>
             </div>
@@ -332,10 +333,37 @@
                 </select>
               </div>
             </div>
+            <div id="openrouter-settings" class="provider-settings-block">
+              <h4 style="color:#f59e0b; margin:15px 0 10px; font-size:14px;">OpenRouter (Free Models)</h4>
+              <div class="settings-row">
+                <label class="settings-label">API Key</label>
+                <div style="display:flex; gap:8px;">
+                  <input type="password" id="openrouter-key" placeholder="sk-or-v1-..." style="flex:1;" />
+                  <button class="btn btn-sm btn-secondary" id="testOpenrouterBtn">Test</button>
+                </div>
+                <small id="openrouter-key-status" style="color:#888; font-size:11px; display:block; margin-top:4px;"></small>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Model</label>
+                <select id="openrouter-model" class="setting-select">
+                  <option value="qwen/qwen3.6-plus:free">Qwen 3.6 Plus (Free) &mdash; Best Quality</option>
+                  <option value="stepfun/step-3.5-flash:free">Step 3.5 Flash (Free) &mdash; Fast</option>
+                  <option value="nvidia/nemotron-3-super-120b-a12b:free">Nemotron 3 Super (Free) &mdash; 120B</option>
+                  <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (Free) &mdash; Meta</option>
+                  <option value="openai/gpt-oss-120b:free">GPT-OSS 120B (Free) &mdash; OpenAI OSS</option>
+                  <option value="arcee-ai/trinity-large-preview:free">Trinity Large (Free) &mdash; Creative</option>
+                  <option value="z-ai/glm-4.5-air:free">GLM 4.5 Air (Free) &mdash; Reasoning</option>
+                  <option value="minimax/minimax-m2.5:free">MiniMax M2.5 (Free) &mdash; MiniMax</option>
+                  <option value="qwen/qwen3-coder:free">Qwen3 Coder 480B (Free) &mdash; Code</option>
+                  <option value="qwen/qwen3-next-80b-a3b-instruct:free">Qwen3 Next 80B (Free) &mdash; Fast</option>
+                </select>
+              </div>
+              <small style="color:#888; display:block; margin-top:6px;">Free! Get your key at <a href="https://openrouter.ai/settings/keys" target="_blank" style="color:#f59e0b;">openrouter.ai/settings/keys</a></small>
+            </div>
             <div class="settings-row" style="margin-top:15px;">
               <label style="display:flex; align-items:center; gap:10px; cursor:pointer; color:var(--text-secondary);">
                 <input type="checkbox" id="ai-fallback" checked style="width:18px; height:18px; accent-color:#6c63ff;" />
-                Enable fallback &mdash; if primary fails, try the other provider
+                Enable fallback &mdash; if primary fails, try other providers
               </label>
             </div>
             <div class="settings-row">
@@ -469,10 +497,10 @@
               </label>
               <label>Platform
                 <select id="setting-platform">
-                  <option value="blogspot">Blogspot</option>
-                  <option value="wordpress">WordPress</option>
-                  <option value="github_pages">GitHub Pages</option>
-                  <option value="s3">S3 Static</option>
+                  <option value="wordpress" selected>WordPress</option>
+                  <option value="blogspot" disabled>Blogspot (Coming Soon)</option>
+                  <option value="github_pages" disabled>GitHub Pages (Coming Soon)</option>
+                  <option value="s3" disabled>S3 Static (Coming Soon)</option>
                 </select>
               </label>
               <label>Language
@@ -498,6 +526,7 @@
                     <label style="font-size:12px; color:#888; display:block; margin-bottom:4px;">AI Provider</label>
                     <select id="editor-provider" class="setting-select">
                       <option value="default">Default (from Settings)</option>
+                      <option value="openrouter">OpenRouter (Free)</option>
                       <option value="anthropic">Anthropic (Claude)</option>
                       <option value="openai">OpenAI (ChatGPT)</option>
                     </select>

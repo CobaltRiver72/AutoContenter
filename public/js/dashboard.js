@@ -1977,9 +1977,9 @@
         anthropic: [
           { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (Fast)' },
           { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-          { value: 'claude-sonnet-4-6-20250610', label: 'Claude Sonnet 4.6 (Balanced)' },
+          { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Balanced)' },
           { value: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
-          { value: 'claude-opus-4-6-20250610', label: 'Claude Opus 4.6 (Best)' },
+          { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (Best)' },
         ],
         openai: [
           { value: 'gpt-4o', label: 'GPT-4o (Balanced)' },
@@ -1990,6 +1990,18 @@
           { value: 'o3', label: 'O3 (Reasoning)' },
           { value: 'o3-mini', label: 'O3 Mini (Reasoning Fast)' },
           { value: 'o4-mini', label: 'O4 Mini (Latest Reasoning)' },
+        ],
+        openrouter: [
+          { value: 'qwen/qwen3.6-plus:free', label: 'Qwen 3.6 Plus (Free Best)' },
+          { value: 'stepfun/step-3.5-flash:free', label: 'Step 3.5 Flash (Free Fast)' },
+          { value: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'Nemotron 3 Super (Free 120B)' },
+          { value: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (Free Meta)' },
+          { value: 'openai/gpt-oss-120b:free', label: 'GPT-OSS 120B (Free)' },
+          { value: 'arcee-ai/trinity-large-preview:free', label: 'Trinity Large (Free Creative)' },
+          { value: 'z-ai/glm-4.5-air:free', label: 'GLM 4.5 Air (Free)' },
+          { value: 'minimax/minimax-m2.5:free', label: 'MiniMax M2.5 (Free)' },
+          { value: 'qwen/qwen3-coder:free', label: 'Qwen3 Coder 480B (Free)' },
+          { value: 'qwen/qwen3-next-80b-a3b-instruct:free', label: 'Qwen3 Next 80B (Free)' },
         ],
       };
       editorProviderEl.addEventListener('change', function () {
@@ -2142,6 +2154,7 @@
         target_platform: $('setting-platform').value,
         target_language: $('setting-language').value,
         schema_types: schemaTypes.join(','),
+        custom_ai_instructions: $('setting-custom-prompt') ? $('setting-custom-prompt').value : '',
       }
     }).catch(function (err) { showToast('Failed to save settings', 'error'); });
   }
@@ -2556,13 +2569,16 @@
       .then(function (data) {
         if (!data.success) return;
         var el;
-        el = $('ai-provider'); if (el) el.value = data.provider || 'anthropic';
+        el = $('ai-provider'); if (el) el.value = data.provider || 'openrouter';
         el = $('anthropic-key');
         if (el && data.anthropicKey) el.placeholder = data.anthropicKey;
         el = $('anthropic-model'); if (el) el.value = data.anthropicModel || 'claude-haiku-4-5-20251001';
         el = $('openai-key');
         if (el && data.openaiKey) el.placeholder = data.openaiKey;
         el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o';
+        el = $('openrouter-key');
+        if (el && data.openrouterKey) el.placeholder = data.openrouterKey;
+        el = $('openrouter-model'); if (el) el.value = data.openrouterModel || 'qwen/qwen3.6-plus:free';
         el = $('ai-fallback'); if (el) el.checked = data.enableFallback !== false;
         el = $('ai-max-tokens'); if (el) el.value = data.maxTokens || 4096;
         el = $('ai-temperature'); if (el) el.value = data.temperature !== undefined ? data.temperature : 0.7;
@@ -2584,14 +2600,18 @@
 
     var testOaiBtn = $('testOpenaiBtn');
     if (testOaiBtn) testOaiBtn.onclick = function () { testApiKey('openai'); };
+
+    var testOrBtn = $('testOpenrouterBtn');
+    if (testOrBtn) testOrBtn.onclick = function () { testApiKey('openrouter'); };
   }
 
   function saveAISettings() {
     var banner = $('ai-status-banner');
     var payload = {
-      provider: $('ai-provider') ? $('ai-provider').value : 'anthropic',
+      provider: $('ai-provider') ? $('ai-provider').value : 'openrouter',
       anthropicModel: $('anthropic-model') ? $('anthropic-model').value : undefined,
       openaiModel: $('openai-model') ? $('openai-model').value : undefined,
+      openrouterModel: $('openrouter-model') ? $('openrouter-model').value : undefined,
       enableFallback: $('ai-fallback') ? $('ai-fallback').checked : true,
       maxTokens: $('ai-max-tokens') ? parseInt($('ai-max-tokens').value, 10) : undefined,
       temperature: $('ai-temperature') ? parseFloat($('ai-temperature').value) : undefined,
@@ -2605,6 +2625,10 @@
     var oaiKeyInput = $('openai-key');
     if (oaiKeyInput && oaiKeyInput.value && oaiKeyInput.value.length > 10) {
       payload.openaiKey = oaiKeyInput.value.trim();
+    }
+    var orKeyInput = $('openrouter-key');
+    if (orKeyInput && orKeyInput.value && orKeyInput.value.length > 10) {
+      payload.openrouterKey = orKeyInput.value.trim();
     }
 
     fetchApi('/api/ai/settings', { method: 'POST', body: payload })
@@ -2655,22 +2679,26 @@
   }
 
   function updateAIProviderVisibility() {
-    var provider = $('ai-provider') ? $('ai-provider').value : 'anthropic';
+    var provider = $('ai-provider') ? $('ai-provider').value : 'openrouter';
     var antBlock = $('anthropic-settings');
     var oaiBlock = $('openai-settings');
+    var orBlock = $('openrouter-settings');
 
-    // Show both blocks so user can configure both keys for fallback
+    // Show all blocks so user can configure keys for fallback
     if (antBlock) antBlock.style.display = 'block';
     if (oaiBlock) oaiBlock.style.display = 'block';
+    if (orBlock) orBlock.style.display = 'block';
+
+    // Reset all to dimmed
+    var blocks = [antBlock, oaiBlock, orBlock];
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i]) { blocks[i].style.borderLeft = '3px solid #333'; blocks[i].style.opacity = '0.7'; }
+    }
 
     // Highlight primary
-    if (provider === 'anthropic') {
-      if (antBlock) { antBlock.style.borderLeft = '3px solid #a78bfa'; antBlock.style.opacity = '1'; }
-      if (oaiBlock) { oaiBlock.style.borderLeft = '3px solid #333'; oaiBlock.style.opacity = '0.7'; }
-    } else {
-      if (oaiBlock) { oaiBlock.style.borderLeft = '3px solid #10b981'; oaiBlock.style.opacity = '1'; }
-      if (antBlock) { antBlock.style.borderLeft = '3px solid #333'; antBlock.style.opacity = '0.7'; }
-    }
+    var primaryBlock = provider === 'anthropic' ? antBlock : provider === 'openrouter' ? orBlock : oaiBlock;
+    var primaryColor = provider === 'anthropic' ? '#a78bfa' : provider === 'openrouter' ? '#f59e0b' : '#10b981';
+    if (primaryBlock) { primaryBlock.style.borderLeft = '3px solid ' + primaryColor; primaryBlock.style.opacity = '1'; }
   }
 
   function initWpDiagButtons() {

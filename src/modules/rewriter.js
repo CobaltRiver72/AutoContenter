@@ -5,9 +5,9 @@ var AI_MODELS = {
   anthropic: [
     { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', tier: 'Fast & Cheap', type: 'standard' },
     { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', tier: 'Balanced', type: 'standard' },
-    { id: 'claude-sonnet-4-6-20250610', name: 'Claude Sonnet 4.6', tier: 'Latest Balanced', type: 'standard' },
+    { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'Latest Balanced', type: 'standard' },
     { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', tier: 'Best Quality', type: 'standard' },
-    { id: 'claude-opus-4-6-20250610', name: 'Claude Opus 4.6', tier: 'Latest Best', type: 'standard' },
+    { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', tier: 'Latest Best', type: 'standard' },
   ],
   openai: [
     { id: 'gpt-4o', name: 'GPT-4o', tier: 'Balanced', type: 'standard' },
@@ -19,6 +19,18 @@ var AI_MODELS = {
     { id: 'o3-mini', name: 'O3 Mini', tier: 'Reasoning Fast', type: 'reasoning' },
     { id: 'o4-mini', name: 'O4 Mini', tier: 'Latest Reasoning', type: 'reasoning' },
   ],
+  openrouter: [
+    { id: 'qwen/qwen3.6-plus:free', name: 'Qwen 3.6 Plus (Free)', tier: 'Free - Best Quality', type: 'standard' },
+    { id: 'stepfun/step-3.5-flash:free', name: 'Step 3.5 Flash (Free)', tier: 'Free - Fast', type: 'standard' },
+    { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super (Free)', tier: 'Free - 120B', type: 'standard' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (Free)', tier: 'Free - Meta', type: 'standard' },
+    { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B (Free)', tier: 'Free - OpenAI OSS', type: 'standard' },
+    { id: 'arcee-ai/trinity-large-preview:free', name: 'Trinity Large (Free)', tier: 'Free - Creative', type: 'standard' },
+    { id: 'z-ai/glm-4.5-air:free', name: 'GLM 4.5 Air (Free)', tier: 'Free - Reasoning', type: 'standard' },
+    { id: 'minimax/minimax-m2.5:free', name: 'MiniMax M2.5 (Free)', tier: 'Free - MiniMax', type: 'standard' },
+    { id: 'qwen/qwen3-coder:free', name: 'Qwen3 Coder 480B (Free)', tier: 'Free - Code', type: 'standard' },
+    { id: 'qwen/qwen3-next-80b-a3b-instruct:free', name: 'Qwen3 Next 80B (Free)', tier: 'Free - Fast', type: 'standard' },
+  ],
 };
 
 function countWords(html) {
@@ -28,7 +40,8 @@ function countWords(html) {
 
 // ─── SEO Prompt Builder (used by automated pipeline) ──────────────────────
 
-function buildPrompt(article, cluster) {
+function buildPrompt(article, cluster, settings) {
+  var s = settings || {};
   var trendingContext = '';
   if (cluster && cluster.trends_boosted) {
     trendingContext =
@@ -66,7 +79,14 @@ function buildPrompt(article, cluster) {
   '2. SLUG: URL-friendly slug (lowercase, hyphens, under 60 chars). Include primary keyword.\n' +
   '3. EXCERPT: Google Discover-optimized summary (2 sentences, under 160 chars). Must entice clicks.\n' +
   '4. META DESCRIPTION: Unique meta description (under 155 chars). Include primary keyword in first 60 chars.\n' +
-  '5. TARGET KEYWORD: Identify the best long-tail keyword to target (e.g., "OnePlus Nord 6 price in India April 2026"). Prefer date/event-specific keywords with low competition.\n\n' +
+  ((s.targetKeyword && s.targetKeyword.trim())
+    ? '5. TARGET KEYWORD: The user has specified this target keyword: "' + s.targetKeyword.trim() + '". Use this EXACT keyword as the primary keyword. Optimize the title, meta description, slug, and content around this keyword. Place it naturally in the H1, first paragraph, at least 2 H2 subheadings, and the conclusion.\n\n'
+    : '5. TARGET KEYWORD: Identify the best long-tail keyword to target (e.g., "OnePlus Nord 6 price in India April 2026"). Prefer date/event-specific keywords with low competition.\n\n') +
+  (s.language === 'hi'
+    ? 'LANGUAGE: Write the ENTIRE article in Hindi (Devanagari script). All headings, paragraphs, FAQ questions and answers must be in Hindi. Only keep proper nouns, brand names, and technical terms in English where Hindi readers would expect them.\n\n'
+    : s.language === 'en'
+    ? 'LANGUAGE: Write the article in English only. Do NOT include Hindi translations or Devanagari text.\n\n'
+    : 'LANGUAGE: Write in English but naturally include Hindi terms in parentheses where relevant for Indian readers. For FAQ questions, include a Hindi translation in parentheses where appropriate. Use ₹ for Indian prices, IST for times.\n\n') +
   'CONTENT STRUCTURE (800-1200 words):\n' +
   '1. Opening paragraph: Lead with the most newsworthy fact (who, what, when, where, why). Hook the reader in the first sentence. Include the target keyword naturally.\n' +
   '2. Key Details section (H2): Expand on the core facts with data, quotes, and context.\n' +
@@ -98,6 +118,9 @@ function buildPrompt(article, cluster) {
   '- For FAQ section: use <h2>Frequently Asked Questions</h2> then <div class="faq-item"><h3>Question?</h3><p>Answer.</p></div> pattern\n' +
   '- Do NOT include inline styles or CSS\n' +
   '- Do NOT include <script> tags\n\n' +
+  ((s.customPrompt && s.customPrompt.trim())
+    ? 'ADDITIONAL INSTRUCTIONS FROM EDITOR:\n' + s.customPrompt.trim() + '\nFollow these additional instructions while also following all the above requirements.\n\n'
+    : '') +
   'SOURCE ARTICLES:\n' +
   sourceArticles + '\n\n' +
   'OUTPUT FORMAT (respond in valid JSON only, no markdown code fences):\n' +
@@ -162,21 +185,26 @@ class ArticleRewriter {
       // Check if at least one provider is configured
       var hasAnthropic = !!this._cfg.anthropicKey;
       var hasOpenAI = !!this._cfg.openaiKey;
-      if (!hasAnthropic && !hasOpenAI) {
+      var hasOpenRouter = !!this._cfg.openrouterKey;
+      if (!hasAnthropic && !hasOpenAI && !hasOpenRouter) {
         this.status = 'disabled';
         this.enabled = false;
-        this.logger.warn('rewriter', 'No AI API keys configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.');
+        this.logger.warn('rewriter', 'No AI API keys configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY.');
         return;
       }
 
       this.enabled = true;
       this.ready = true;
-      this.status = hasAnthropic && hasOpenAI ? 'connected' : 'degraded';
+      var keyCount = [hasAnthropic, hasOpenAI, hasOpenRouter].filter(Boolean).length;
+      this.status = keyCount >= 2 ? 'connected' : 'degraded';
 
-      this.logger.info('rewriter', 'Rewriter ready. Provider: ' + this._cfg.provider +
-        ', Model: ' + (this._cfg.provider === 'anthropic' ? this._cfg.anthropicModel : this._cfg.openaiModel));
-      this.logger.info('rewriter', 'Anthropic key: ' + (this._cfg.anthropicKey ? 'SET (' + this._cfg.anthropicKey.substring(0, 10) + '...)' : 'NOT SET'));
-      this.logger.info('rewriter', 'OpenAI key: ' + (this._cfg.openaiKey ? 'SET (' + this._cfg.openaiKey.substring(0, 8) + '...)' : 'NOT SET'));
+      var activeModel = this._cfg.provider === 'anthropic' ? this._cfg.anthropicModel
+        : this._cfg.provider === 'openrouter' ? this._cfg.openrouterModel
+        : this._cfg.openaiModel;
+      this.logger.info('rewriter', 'Rewriter ready. Provider: ' + this._cfg.provider + ', Model: ' + activeModel);
+      this.logger.info('rewriter', 'Anthropic key: ' + (hasAnthropic ? 'SET' : 'NOT SET') +
+        ', OpenAI key: ' + (hasOpenAI ? 'SET' : 'NOT SET') +
+        ', OpenRouter key: ' + (hasOpenRouter ? 'SET' : 'NOT SET'));
     } catch (err) {
       this.logger.error('rewriter', 'Init failed: ' + err.message);
       this.status = 'error';
@@ -190,6 +218,7 @@ class ArticleRewriter {
       { name: 'ai_model', type: 'TEXT DEFAULT NULL' },
       { name: 'ai_tokens_used', type: 'INTEGER DEFAULT 0' },
       { name: 'rewritten_at', type: 'TEXT DEFAULT NULL' },
+      { name: 'custom_ai_instructions', type: 'TEXT DEFAULT NULL' },
     ];
     for (var i = 0; i < columns.length; i++) {
       try {
@@ -215,14 +244,16 @@ class ArticleRewriter {
 
   _loadConfig() {
     this._cfg = {
-      provider:       this._getSetting('AI_PROVIDER')       || process.env.AI_PROVIDER       || 'anthropic',
-      anthropicKey:   this._getSetting('ANTHROPIC_API_KEY')  || process.env.ANTHROPIC_API_KEY  || '',
-      anthropicModel: this._getSetting('ANTHROPIC_MODEL')    || process.env.ANTHROPIC_MODEL    || process.env.AI_PRIMARY_MODEL || 'claude-haiku-4-5-20251001',
-      openaiKey:      this._getSetting('OPENAI_API_KEY')     || process.env.OPENAI_API_KEY     || '',
-      openaiModel:    this._getSetting('OPENAI_MODEL')       || process.env.OPENAI_MODEL       || process.env.AI_FALLBACK_MODEL || 'gpt-4o',
-      enableFallback: (this._getSetting('ENABLE_FALLBACK')   || process.env.ENABLE_FALLBACK   || 'true') === 'true',
-      maxTokens:      parseInt(this._getSetting('MAX_TOKENS') || process.env.MAX_TOKENS        || '4096', 10),
-      temperature:    parseFloat(this._getSetting('TEMPERATURE') || process.env.TEMPERATURE    || '0.7'),
+      provider:         this._getSetting('AI_PROVIDER')         || process.env.AI_PROVIDER         || 'openrouter',
+      anthropicKey:     this._getSetting('ANTHROPIC_API_KEY')    || process.env.ANTHROPIC_API_KEY    || '',
+      anthropicModel:   this._getSetting('ANTHROPIC_MODEL')      || process.env.ANTHROPIC_MODEL      || 'claude-haiku-4-5-20251001',
+      openaiKey:        this._getSetting('OPENAI_API_KEY')       || process.env.OPENAI_API_KEY       || '',
+      openaiModel:      this._getSetting('OPENAI_MODEL')         || process.env.OPENAI_MODEL         || 'gpt-4o',
+      openrouterKey:    this._getSetting('OPENROUTER_API_KEY')   || process.env.OPENROUTER_API_KEY   || '',
+      openrouterModel:  this._getSetting('OPENROUTER_MODEL')     || process.env.OPENROUTER_MODEL     || 'qwen/qwen3.6-plus:free',
+      enableFallback:   (this._getSetting('ENABLE_FALLBACK')     || process.env.ENABLE_FALLBACK     || 'true') === 'true',
+      maxTokens:        parseInt(this._getSetting('MAX_TOKENS')  || process.env.MAX_TOKENS           || '4096', 10),
+      temperature:      parseFloat(this._getSetting('TEMPERATURE') || process.env.TEMPERATURE        || '0.7'),
     };
   }
 
@@ -235,6 +266,8 @@ class ArticleRewriter {
       anthropicModel: 'ANTHROPIC_MODEL',
       openaiKey: 'OPENAI_API_KEY',
       openaiModel: 'OPENAI_MODEL',
+      openrouterKey: 'OPENROUTER_API_KEY',
+      openrouterModel: 'OPENROUTER_MODEL',
       enableFallback: 'ENABLE_FALLBACK',
       maxTokens: 'MAX_TOKENS',
       temperature: 'TEMPERATURE',
@@ -255,9 +288,11 @@ class ArticleRewriter {
     // Re-check enabled status
     var hasAnthropic = !!this._cfg.anthropicKey;
     var hasOpenAI = !!this._cfg.openaiKey;
-    this.enabled = hasAnthropic || hasOpenAI;
+    var hasOpenRouter = !!this._cfg.openrouterKey;
+    this.enabled = hasAnthropic || hasOpenAI || hasOpenRouter;
     this.ready = this.enabled;
-    this.status = this.enabled ? (hasAnthropic && hasOpenAI ? 'connected' : 'degraded') : 'disabled';
+    var keyCount = [hasAnthropic, hasOpenAI, hasOpenRouter].filter(Boolean).length;
+    this.status = this.enabled ? (keyCount >= 2 ? 'connected' : 'degraded') : 'disabled';
 
     this.logger.info('rewriter', 'Settings updated. Provider: ' + this._cfg.provider);
   }
@@ -270,6 +305,8 @@ class ArticleRewriter {
       anthropicModel: this._cfg.anthropicModel,
       openaiKey: this._cfg.openaiKey ? '***' + this._cfg.openaiKey.slice(-4) : '',
       openaiModel: this._cfg.openaiModel,
+      openrouterKey: this._cfg.openrouterKey ? '***' + this._cfg.openrouterKey.slice(-4) : '',
+      openrouterModel: this._cfg.openrouterModel,
       enableFallback: this._cfg.enableFallback,
       maxTokens: this._cfg.maxTokens,
       temperature: this._cfg.temperature,
@@ -287,6 +324,12 @@ class ArticleRewriter {
   // Returns: { title, content, excerpt, metaDescription, slug, targetKeyword,
   //            relatedKeywords, faq, wordCount, aiModel, aiProvider, tokensUsed }
 
+  _getProviderKeyModel(provider, opts) {
+    if (provider === 'anthropic') return { key: this._cfg.anthropicKey, model: opts.model || this._cfg.anthropicModel };
+    if (provider === 'openrouter') return { key: this._cfg.openrouterKey, model: opts.model || this._cfg.openrouterModel };
+    return { key: this._cfg.openaiKey, model: opts.model || this._cfg.openaiModel };
+  }
+
   async rewrite(article, cluster, options) {
     this._loadConfig();
     var opts = options || {};
@@ -294,15 +337,9 @@ class ArticleRewriter {
     var provider = opts.provider || this._cfg.provider;
     var enableFallback = this._cfg.enableFallback;
 
-    // Determine key + model for primary provider
-    var primaryKey, primaryModel;
-    if (provider === 'anthropic') {
-      primaryKey = this._cfg.anthropicKey;
-      primaryModel = opts.model || this._cfg.anthropicModel;
-    } else {
-      primaryKey = this._cfg.openaiKey;
-      primaryModel = opts.model || this._cfg.openaiModel;
-    }
+    var pkm = this._getProviderKeyModel(provider, opts);
+    var primaryKey = pkm.key;
+    var primaryModel = pkm.model;
 
     if (!primaryKey) {
       var errMsg = provider.toUpperCase() + ' API key is not configured. Go to Settings and enter your API key.';
@@ -310,8 +347,15 @@ class ArticleRewriter {
       throw new Error(errMsg);
     }
 
-    // Build the SEO prompt from article + cluster
-    var prompt = buildPrompt(article, cluster || { articles: [article] });
+    // Build the SEO prompt from article + cluster + user settings
+    var promptSettings = {
+      targetKeyword: opts.targetKeyword || '',
+      targetDomain: opts.targetDomain || '',
+      language: opts.language || 'en+hi',
+      schemaTypes: opts.schemaTypes || 'NewsArticle,FAQPage,BreadcrumbList',
+      customPrompt: opts.customPrompt || '',
+    };
+    var prompt = buildPrompt(article, cluster || { articles: [article] }, promptSettings);
 
     // Try primary
     try {
@@ -320,10 +364,7 @@ class ArticleRewriter {
       result.aiProvider = provider;
       result.aiModel = primaryModel;
 
-      // Update stats
       this.stats.totalRewrites++;
-      if (provider === 'anthropic') this.stats.claudeCount++;
-      else this.stats.openaiCount++;
       this.stats.lastRewriteAt = new Date().toISOString();
       this.stats.totalTokens += result.tokensUsed || 0;
 
@@ -332,38 +373,39 @@ class ArticleRewriter {
     } catch (primaryErr) {
       this.logger.error('rewriter', 'PRIMARY FAILED (' + provider + '): ' + primaryErr.message);
 
-      if (!enableFallback) {
-        throw primaryErr;
+      if (!enableFallback) throw primaryErr;
+
+      // 3-provider fallback chain
+      var allProviders = ['openrouter', 'anthropic', 'openai'];
+      var fallbackProviders = allProviders.filter(function (p) { return p !== provider; });
+      var self = this;
+      var lastError = primaryErr;
+
+      for (var fi = 0; fi < fallbackProviders.length; fi++) {
+        var fbProvider = fallbackProviders[fi];
+        var fb = self._getProviderKeyModel(fbProvider, {});
+        if (!fb.key) continue;
+
+        self.logger.info('rewriter', 'Trying fallback: ' + fbProvider + ' / ' + fb.model + '...');
+        try {
+          var fbResult = await self._callProviderStructured(fbProvider, fb.key, fb.model, prompt);
+          fbResult.aiProvider = fbProvider;
+          fbResult.aiModel = fb.model;
+          fbResult.usedFallback = true;
+
+          self.stats.totalRewrites++;
+          self.stats.lastRewriteAt = new Date().toISOString();
+          self.stats.totalTokens += fbResult.tokensUsed || 0;
+
+          self.logger.info('rewriter', 'FALLBACK SUCCESS: ' + fbProvider + ' / ' + fb.model);
+          return fbResult;
+        } catch (fbErr) {
+          self.logger.error('rewriter', 'FALLBACK FAILED (' + fbProvider + '): ' + fbErr.message);
+          lastError = fbErr;
+        }
       }
 
-      // Try fallback
-      var fallbackProvider = provider === 'anthropic' ? 'openai' : 'anthropic';
-      var fallbackKey = fallbackProvider === 'anthropic' ? this._cfg.anthropicKey : this._cfg.openaiKey;
-      var fallbackModel = fallbackProvider === 'anthropic' ? this._cfg.anthropicModel : this._cfg.openaiModel;
-
-      if (!fallbackKey) {
-        throw new Error(provider + ' rewrite failed: ' + primaryErr.message + '. Fallback provider (' + fallbackProvider + ') has no API key configured.');
-      }
-
-      this.logger.info('rewriter', 'Trying fallback: ' + fallbackProvider + ' / ' + fallbackModel + '...');
-      try {
-        var fbResult = await this._callProviderStructured(fallbackProvider, fallbackKey, fallbackModel, prompt);
-        fbResult.aiProvider = fallbackProvider;
-        fbResult.aiModel = fallbackModel;
-        fbResult.usedFallback = true;
-
-        this.stats.totalRewrites++;
-        if (fallbackProvider === 'anthropic') this.stats.claudeCount++;
-        else this.stats.openaiCount++;
-        this.stats.lastRewriteAt = new Date().toISOString();
-        this.stats.totalTokens += fbResult.tokensUsed || 0;
-
-        this.logger.info('rewriter', 'FALLBACK SUCCESS: ' + fallbackProvider + ' / ' + fallbackModel);
-        return fbResult;
-      } catch (fbErr) {
-        this.logger.error('rewriter', 'FALLBACK ALSO FAILED (' + fallbackProvider + '): ' + fbErr.message);
-        throw new Error('Both providers failed.\nPrimary (' + provider + '): ' + primaryErr.message + '\nFallback (' + fallbackProvider + '): ' + fbErr.message);
-      }
+      throw new Error('All providers failed. Last error: ' + lastError.message);
     }
   }
 
@@ -376,24 +418,32 @@ class ArticleRewriter {
     var provider = opts.provider || this._cfg.provider;
     var enableFallback = this._cfg.enableFallback;
 
-    var primaryKey, primaryModel;
-    if (provider === 'anthropic') {
-      primaryKey = this._cfg.anthropicKey;
-      primaryModel = opts.model || this._cfg.anthropicModel;
-    } else {
-      primaryKey = this._cfg.openaiKey;
-      primaryModel = opts.model || this._cfg.openaiModel;
-    }
+    var pkm = this._getProviderKeyModel(provider, opts);
+    var primaryKey = pkm.key;
+    var primaryModel = pkm.model;
 
     if (!primaryKey) {
       throw new Error(provider.toUpperCase() + ' API key is not configured. Go to Settings and enter your API key.');
     }
 
+    // Build dynamic language/keyword notes for simple rewrite system prompt
+    var langNote = '';
+    if (opts.language === 'hi') {
+      langNote = ' Write the output entirely in Hindi (Devanagari script).';
+    } else if (opts.language === 'en') {
+      langNote = ' Write the output in English only, no Hindi.';
+    } else {
+      langNote = ' Write in English with Hindi terms in parentheses where relevant for Indian readers.';
+    }
+    var keywordNote = '';
+    if (opts.targetKeyword && opts.targetKeyword.trim()) {
+      keywordNote = ' Optimize for the target keyword: "' + opts.targetKeyword.trim() + '". Place it naturally in the title, first paragraph, and key headings.';
+    }
+    var systemExtra = langNote + keywordNote;
+
     try {
-      var result = await this._callProviderSimple(provider, primaryKey, primaryModel, content, customPrompt);
+      var result = await this._callProviderSimple(provider, primaryKey, primaryModel, content, customPrompt, systemExtra);
       this.stats.totalRewrites++;
-      if (provider === 'anthropic') this.stats.claudeCount++;
-      else this.stats.openaiCount++;
       this.stats.lastRewriteAt = new Date().toISOString();
       this.stats.totalTokens += result.tokensUsed || 0;
       return result;
@@ -402,30 +452,38 @@ class ArticleRewriter {
 
       if (!enableFallback) throw primaryErr;
 
-      var fbProvider = provider === 'anthropic' ? 'openai' : 'anthropic';
-      var fbKey = fbProvider === 'anthropic' ? this._cfg.anthropicKey : this._cfg.openaiKey;
-      var fbModel = fbProvider === 'anthropic' ? this._cfg.anthropicModel : this._cfg.openaiModel;
+      // 3-provider fallback chain
+      var allProviders = ['openrouter', 'anthropic', 'openai'];
+      var fallbackProviders = allProviders.filter(function (p) { return p !== provider; });
+      var self = this;
+      var lastError = primaryErr;
 
-      if (!fbKey) {
-        throw new Error(provider + ' rewrite failed: ' + primaryErr.message + '. No ' + fbProvider + ' API key for fallback.');
+      for (var fi = 0; fi < fallbackProviders.length; fi++) {
+        var fbProvider = fallbackProviders[fi];
+        var fb = self._getProviderKeyModel(fbProvider, {});
+        if (!fb.key) continue;
+
+        try {
+          var fbResult = await self._callProviderSimple(fbProvider, fb.key, fb.model, content, customPrompt, systemExtra);
+          fbResult.usedFallback = true;
+          self.stats.totalRewrites++;
+          self.stats.lastRewriteAt = new Date().toISOString();
+          self.stats.totalTokens += fbResult.tokensUsed || 0;
+          return fbResult;
+        } catch (fbErr) {
+          lastError = fbErr;
+        }
       }
 
-      try {
-        var fbResult = await this._callProviderSimple(fbProvider, fbKey, fbModel, content, customPrompt);
-        fbResult.usedFallback = true;
-        return fbResult;
-      } catch (fbErr) {
-        throw new Error('Both providers failed. Primary: ' + primaryErr.message + '. Fallback: ' + fbErr.message);
-      }
+      throw new Error('All providers failed. Last error: ' + lastError.message);
     }
   }
 
   // ─── Provider calls (structured JSON output for pipeline) ───────────────
 
   async _callProviderStructured(provider, apiKey, model, prompt) {
-    if (provider === 'anthropic') {
-      return this._callAnthropicStructured(apiKey, model, prompt);
-    }
+    if (provider === 'anthropic') return this._callAnthropicStructured(apiKey, model, prompt);
+    if (provider === 'openrouter') return this._callOpenRouterStructured(apiKey, model, prompt);
     return this._callOpenAIStructured(apiKey, model, prompt);
   }
 
@@ -530,14 +588,13 @@ class ArticleRewriter {
 
   // ─── Provider calls (simple HTML output for draft rewrite) ──────────────
 
-  async _callProviderSimple(provider, apiKey, model, content, customPrompt) {
-    if (provider === 'anthropic') {
-      return this._callAnthropicSimple(apiKey, model, content, customPrompt);
-    }
-    return this._callOpenAISimple(apiKey, model, content, customPrompt);
+  async _callProviderSimple(provider, apiKey, model, content, customPrompt, systemExtra) {
+    if (provider === 'anthropic') return this._callAnthropicSimple(apiKey, model, content, customPrompt, systemExtra);
+    if (provider === 'openrouter') return this._callOpenRouterSimple(apiKey, model, content, customPrompt, systemExtra);
+    return this._callOpenAISimple(apiKey, model, content, customPrompt, systemExtra);
   }
 
-  async _callAnthropicSimple(apiKey, model, content, customPrompt) {
+  async _callAnthropicSimple(apiKey, model, content, customPrompt, systemExtra) {
     var Anthropic = require('@anthropic-ai/sdk');
     var maxTokens = this._cfg.maxTokens || 4096;
     var temperature = this._cfg.temperature;
@@ -545,7 +602,7 @@ class ArticleRewriter {
 
     var client = new Anthropic({ apiKey: apiKey.trim() });
 
-    var systemPrompt = 'You are an expert news article rewriter for an Indian news website. Rewrite the given article completely in your own words while maintaining all key facts, names, dates, numbers, quotes, SEO value, and the original language. Output clean HTML with h2/h3 headings and paragraphs. Do NOT include html/head/body tags.';
+    var systemPrompt = 'You are an expert news article rewriter for an Indian news website. Rewrite the given article completely in your own words while maintaining all key facts, names, dates, numbers, quotes, and SEO value.' + (systemExtra || '') + ' Output clean HTML with h2/h3 headings and paragraphs. Do NOT include html/head/body tags.';
     var userPrompt = customPrompt
       ? customPrompt + '\n\n---\n\nSource article to rewrite:\n' + content
       : 'Rewrite this news article completely in your own words. Maintain all facts and SEO value. Output clean HTML.\n\n' + content;
@@ -575,7 +632,7 @@ class ArticleRewriter {
     };
   }
 
-  async _callOpenAISimple(apiKey, model, content, customPrompt) {
+  async _callOpenAISimple(apiKey, model, content, customPrompt, systemExtra) {
     var OpenAI = require('openai');
     var maxTokens = this._cfg.maxTokens || 4096;
     var temperature = this._cfg.temperature;
@@ -584,7 +641,7 @@ class ArticleRewriter {
     var isOModel = model.startsWith('o3') || model.startsWith('o4');
     var client = new OpenAI({ apiKey: apiKey.trim() });
 
-    var systemPrompt = 'You are an expert news article rewriter for an Indian news website. Rewrite the given article completely in your own words while maintaining all key facts, names, dates, numbers, quotes, SEO value, and the original language. Output clean HTML with h2/h3 headings and paragraphs. Do NOT include html/head/body tags.';
+    var systemPrompt = 'You are an expert news article rewriter for an Indian news website. Rewrite the given article completely in your own words while maintaining all key facts, names, dates, numbers, quotes, and SEO value.' + (systemExtra || '') + ' Output clean HTML with h2/h3 headings and paragraphs. Do NOT include html/head/body tags.';
     var userPrompt = customPrompt
       ? customPrompt + '\n\n---\n\nSource article to rewrite:\n' + content
       : 'Rewrite this news article completely in your own words. Maintain all facts and SEO value. Output clean HTML.\n\n' + content;
@@ -628,6 +685,99 @@ class ArticleRewriter {
     };
   }
 
+  // ─── OpenRouter calls (uses OpenAI SDK with custom baseURL) ──────────
+
+  _openRouterClient(apiKey) {
+    var OpenAI = require('openai');
+    return new OpenAI({
+      apiKey: apiKey.trim(),
+      baseURL: 'https://openrouter.ai/api/v1',
+      defaultHeaders: {
+        'HTTP-Referer': 'https://hdf-autopub.com',
+        'X-Title': 'HDF AutoPub',
+      },
+    });
+  }
+
+  async _callOpenRouterStructured(apiKey, model, prompt) {
+    var maxTokens = this._cfg.maxTokens || 4096;
+    var temperature = this._cfg.temperature;
+    if (temperature === undefined || temperature === null) temperature = 0.7;
+
+    var client = this._openRouterClient(apiKey);
+
+    var response = await client.chat.completions.create({
+      model: model,
+      max_tokens: maxTokens,
+      temperature: temperature,
+      messages: [
+        { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON.' },
+        { role: 'user', content: prompt },
+      ],
+    });
+
+    var rawText = response.choices && response.choices[0] ? response.choices[0].message.content : '';
+    if (!rawText || rawText.length < 50) {
+      throw new Error('OpenRouter returned empty or too-short response');
+    }
+
+    var parsed = parseAIResponse(rawText);
+    var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
+    var wc = parsed.content ? countWords(parsed.content) : (parsed.word_count || 0);
+
+    return {
+      title: parsed.title,
+      content: parsed.content,
+      excerpt: parsed.excerpt,
+      metaDescription: parsed.meta_description,
+      slug: parsed.slug,
+      targetKeyword: parsed.target_keyword || '',
+      relatedKeywords: parsed.related_keywords || [],
+      faq: parsed.faq || [],
+      wordCount: wc,
+      tokensUsed: tokensUsed,
+    };
+  }
+
+  async _callOpenRouterSimple(apiKey, model, content, customPrompt, systemExtra) {
+    var maxTokens = this._cfg.maxTokens || 4096;
+    var temperature = this._cfg.temperature;
+    if (temperature === undefined || temperature === null) temperature = 0.7;
+
+    var client = this._openRouterClient(apiKey);
+
+    var systemPrompt = 'You are an expert news article rewriter for an Indian news website. Rewrite the given article completely in your own words while maintaining all key facts, names, dates, numbers, quotes, and SEO value.' + (systemExtra || '') + ' Output clean HTML with h2/h3 headings and paragraphs. Do NOT include html/head/body tags.';
+    var userPrompt = customPrompt
+      ? customPrompt + '\n\n---\n\nSource article to rewrite:\n' + content
+      : 'Rewrite this news article completely in your own words. Maintain all facts and SEO value. Output clean HTML.\n\n' + content;
+
+    var response = await client.chat.completions.create({
+      model: model,
+      max_tokens: maxTokens,
+      temperature: temperature,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+    });
+
+    var rewrittenContent = response.choices && response.choices[0] ? response.choices[0].message.content : '';
+    if (!rewrittenContent || rewrittenContent.length < 50) {
+      throw new Error('OpenRouter returned empty or too-short content');
+    }
+
+    var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
+
+    return {
+      success: true,
+      rewrittenContent: rewrittenContent,
+      wordCount: countWords(rewrittenContent),
+      provider: 'openrouter',
+      model: model,
+      tokensUsed: tokensUsed,
+    };
+  }
+
   // ─── Test connection ────────────────────────────────────────────────────
 
   async testConnection(provider, apiKey) {
@@ -641,6 +791,14 @@ class ArticleRewriter {
           messages: [{ role: 'user', content: 'Say "OK" and nothing else.' }],
         });
         return { success: true, response: res.content && res.content[0] ? res.content[0].text : '' };
+      } else if (provider === 'openrouter') {
+        var orClient = this._openRouterClient(apiKey);
+        var orRes = await orClient.chat.completions.create({
+          model: 'qwen/qwen3.6-plus:free',
+          max_tokens: 20,
+          messages: [{ role: 'user', content: 'Say "OK" and nothing else.' }],
+        });
+        return { success: true, response: orRes.choices && orRes.choices[0] ? orRes.choices[0].message.content : '' };
       } else {
         var OpenAI = require('openai');
         var oaiClient = new OpenAI({ apiKey: apiKey.trim() });

@@ -439,13 +439,18 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
       schemaTypes: draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList',
     };
 
-    // Per-call AI overrides (provider, model)
+    // Per-call AI overrides (provider, model) + draft settings
     var opts = aiOptions || {};
+    opts.targetKeyword = opts.targetKeyword || draft.target_keyword || '';
+    opts.targetDomain = opts.targetDomain || draft.target_domain || '';
+    opts.language = opts.language || draft.target_language || 'en+hi';
+    opts.schemaTypes = opts.schemaTypes || draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList';
+    opts.customPrompt = opts.customPrompt || draft.custom_ai_instructions || customPrompt || '';
 
     // Use rewriteSimple for draft content (returns HTML), falling back to rewrite (returns structured JSON)
     var result;
     if (typeof rewriter.rewriteSimple === 'function') {
-      result = await rewriter.rewriteSimple(content, customPrompt || null, opts);
+      result = await rewriter.rewriteSimple(content, opts.customPrompt || null, opts);
     } else {
       result = await rewriter.rewrite(articleObj, clusterObj, opts);
     }

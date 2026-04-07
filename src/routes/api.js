@@ -393,7 +393,7 @@ function createApiRouter(deps) {
   router.get('/ai/settings', function (req, res) {
     try {
       var settings = rewriter.getSettings();
-      res.json({ success: true, provider: settings.provider, anthropicKey: settings.anthropicKey, anthropicModel: settings.anthropicModel, openaiKey: settings.openaiKey, openaiModel: settings.openaiModel, enableFallback: settings.enableFallback, maxTokens: settings.maxTokens, temperature: settings.temperature, models: settings.models });
+      res.json({ success: true, provider: settings.provider, anthropicKey: settings.anthropicKey, anthropicModel: settings.anthropicModel, openaiKey: settings.openaiKey, openaiModel: settings.openaiModel, openrouterKey: settings.openrouterKey, openrouterModel: settings.openrouterModel, enableFallback: settings.enableFallback, maxTokens: settings.maxTokens, temperature: settings.temperature, models: settings.models });
     } catch (err) {
       logger.error('api', 'Get AI settings failed: ' + err.message);
       res.status(500).json({ success: false, error: err.message });
@@ -409,6 +409,8 @@ function createApiRouter(deps) {
         anthropicModel: body.anthropicModel,
         openaiKey: body.openaiKey,
         openaiModel: body.openaiModel,
+        openrouterKey: body.openrouterKey,
+        openrouterModel: body.openrouterModel,
         enableFallback: body.enableFallback === true || body.enableFallback === 'true',
         maxTokens: body.maxTokens ? parseInt(body.maxTokens, 10) : undefined,
         temperature: body.temperature !== undefined ? parseFloat(body.temperature) : undefined,
@@ -1139,7 +1141,7 @@ function createApiRouter(deps) {
       var updates = [];
       var params = [];
 
-      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status', 'featured_image'];
+      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status', 'featured_image', 'custom_ai_instructions'];
       for (var i = 0; i < fields.length; i++) {
         if (body[fields[i]] !== undefined) {
           updates.push(fields[i] + ' = ?');
@@ -1205,10 +1207,22 @@ function createApiRouter(deps) {
 
       db.prepare("UPDATE drafts SET status = 'rewriting', updated_at = datetime('now') WHERE id = ?").run(id);
 
-      var customPrompt = (req.body && req.body.custom_prompt) || '';
+      var customPrompt = (req.body && req.body.custom_prompt) || draft.custom_ai_instructions || '';
+
+      // Save custom instructions if provided
+      if (req.body && req.body.custom_prompt) {
+        db.prepare('UPDATE drafts SET custom_ai_instructions = ? WHERE id = ?').run(req.body.custom_prompt, id);
+      }
+
       var aiOptions = {};
       if (req.body && req.body.provider) aiOptions.provider = req.body.provider;
       if (req.body && req.body.model) aiOptions.model = req.body.model;
+      // Pass all draft settings through to the rewriter
+      aiOptions.targetKeyword = draft.target_keyword || '';
+      aiOptions.targetDomain = draft.target_domain || '';
+      aiOptions.language = draft.target_language || 'en+hi';
+      aiOptions.schemaTypes = draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList';
+      aiOptions.customPrompt = customPrompt;
 
       rewriteDraftContent(id, customPrompt, draftDeps, aiOptions).catch(function (err) {
         logger.warn('api', 'Rewrite failed for draft ' + id + ': ' + err.message);
@@ -1334,6 +1348,8 @@ function createApiRouter(deps) {
             aiModel: draft.ai_model_used || 'manual',
             tokensUsed: 0,
             featuredImage: draft.featured_image || null,
+            schemaTypes: draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList',
+            targetDomain: draft.target_domain || '',
           };
 
           // Build a minimal cluster with articles for image extraction
