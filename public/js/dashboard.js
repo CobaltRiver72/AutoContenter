@@ -2206,6 +2206,12 @@
               '<span class="action-btn-text">Retry Failed</span>' +
               '<span class="action-btn-badge action-btn-badge-red">' + counts.failed + '</span>' +
             '</button>' : '') +
+          (counts.failed > 0 ?
+            '<button class="action-btn action-btn-delete" onclick="window.__batchDeleteFailed()">' +
+              '<span class="action-btn-icon">&#128465;</span>' +
+              '<span class="action-btn-text">Delete Failed</span>' +
+              '<span class="action-btn-badge action-btn-badge-red">' + counts.failed + '</span>' +
+            '</button>' : '') +
           '<button class="action-btn action-btn-ai" id="batchRewriteBtn"' +
             (readyForRewriteCount === 0 ? ' disabled title="No clusters ready — extract articles first"' : '') + '>' +
             '<span class="action-btn-icon">&#129302;</span>' +
@@ -2487,6 +2493,7 @@
           '<span class="cluster-status-pill" style="background:' + clusterStatusColor + '">' + clusterStatusLabel + '</span>' +
           '<span class="cluster-article-count">' + total + ' source' + (total !== 1 ? 's' : '') + '</span>' +
           wpLinkHTML +
+          '<button class="cluster-delete-btn" onclick="window.__deleteCluster(' + clusterId + ', event)" title="Delete this cluster and all its drafts">&#128465;</button>' +
         '</div>' +
         '<h3 class="cluster-header-title">' + escapeHtml(primaryTitle) + '</h3>' +
         progressHTML +
@@ -2577,6 +2584,10 @@
     }
     if (draft.status === 'failed') {
       actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__retryDraft(' + draft.id + ')">&#8635; Retry</button>';
+    }
+    // Always show delete (except for published)
+    if (draft.status !== 'published') {
+      actionsHTML += '<button class="btn btn-xs btn-outline-danger" onclick="window.__deleteDraft(' + draft.id + ')" title="Delete draft">&#128465;</button>';
     }
 
     var errorHTML = '';
@@ -2745,6 +2756,43 @@
     fetchApi('/api/drafts/' + id, { method: 'DELETE' })
       .then(function () { showToast('Draft deleted', 'info'); loadPublished(); })
       .catch(function (err) { showToast('Error: ' + err.message, 'error'); });
+  };
+
+  // ─── Delete entire cluster (all drafts) ──────────────────────────
+  window.__deleteCluster = function (clusterId, event) {
+    if (event) event.stopPropagation();
+    if (!confirm('Delete Cluster #' + clusterId + ' and ALL its drafts?\n\nThis cannot be undone.')) return;
+
+    fetchApi('/api/clusters/' + clusterId + '/drafts', { method: 'DELETE' })
+      .then(function (data) {
+        if (data.success) {
+          showToast('Cluster #' + clusterId + ' deleted (' + data.draftsDeleted + ' drafts removed)', 'success');
+          loadPublished();
+        } else {
+          showToast(data.error || 'Failed to delete cluster', 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Error: ' + err.message, 'error');
+      });
+  };
+
+  // ─── Batch delete all failed drafts ──────────────────────────────
+  window.__batchDeleteFailed = function () {
+    if (!confirm('Delete ALL failed drafts?\n\nThis will permanently remove every draft that failed extraction. This cannot be undone.')) return;
+
+    fetchApi('/api/drafts/batch-failed', { method: 'DELETE' })
+      .then(function (data) {
+        if (data.success) {
+          showToast('Deleted ' + data.deletedCount + ' failed drafts', 'success');
+          loadPublished();
+        } else {
+          showToast(data.error || 'Failed', 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Error: ' + err.message, 'error');
+      });
   };
 
   function startPublishedPolling() {

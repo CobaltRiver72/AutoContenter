@@ -784,6 +784,73 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── DELETE /api/clusters/:id/drafts ──────────────────────────────────────
+  //
+  // Deletes ALL drafts for a cluster and marks cluster as dismissed.
+  // Safety: refuses to delete if any draft is already published to WordPress.
+  //
+  router.delete('/clusters/:id/drafts', function (req, res) {
+    try {
+      var clusterId = parseInt(req.params.id, 10);
+      if (isNaN(clusterId)) {
+        return res.status(400).json({ success: false, error: 'Invalid cluster ID' });
+      }
+
+      // Safety check: don't delete if any draft is already published
+      var publishedDraft = db.prepare(
+        "SELECT id FROM drafts WHERE cluster_id = ? AND status = 'published' LIMIT 1"
+      ).get(clusterId);
+
+      if (publishedDraft) {
+        return res.status(409).json({
+          success: false,
+          error: 'Cannot delete — cluster has published articles. Remove from WordPress first.'
+        });
+      }
+
+      // Count what we're deleting
+      var draftCount = db.prepare(
+        'SELECT COUNT(*) as cnt FROM drafts WHERE cluster_id = ?'
+      ).get(clusterId);
+
+      if (!draftCount || draftCount.cnt === 0) {
+        return res.status(404).json({ success: false, error: 'No drafts found for cluster #' + clusterId });
+      }
+
+      // Delete all drafts in a transaction
+      var deleteAll = db.transaction(function () {
+        // Release any locks first
+        db.prepare(
+          "UPDATE drafts SET locked_by = NULL, locked_at = NULL, lease_expires_at = NULL WHERE cluster_id = ? AND locked_by IS NOT NULL"
+        ).run(clusterId);
+
+        // Delete all drafts for this cluster
+        var result = db.prepare('DELETE FROM drafts WHERE cluster_id = ?').run(clusterId);
+
+        // Mark cluster as dismissed
+        db.prepare(
+          "UPDATE clusters SET status = 'dismissed' WHERE id = ?"
+        ).run(clusterId);
+
+        return result.changes;
+      });
+
+      var deletedCount = deleteAll();
+
+      logger.info('api', 'Cluster #' + clusterId + ': deleted ' + deletedCount + ' drafts, status -> dismissed');
+
+      res.json({
+        success: true,
+        message: 'Cluster deleted',
+        clusterId: clusterId,
+        draftsDeleted: deletedCount
+      });
+    } catch (err) {
+      logger.error('api', 'Failed to delete cluster #' + req.params.id + ' drafts: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // ─── POST /api/clusters/:id/skip ──────────────────────────────────────────
 
   router.post('/clusters/:id/skip', function (req, res) {
@@ -1647,6 +1714,51 @@ function createApiRouter(deps) {
     } catch (err) {
       logger.error('api', 'Batch extract failed: ' + err.message);
       res.status(500).json({ success: false, error: 'Batch extract failed: ' + err.message });
+    }
+  });
+
+  // ─── DELETE /api/drafts/batch-failed ────────────────────────────────────
+  //
+  // Deletes ALL drafts with extraction_status = 'failed'.
+  // Safety: won't delete published articles.
+  //
+  router.delete('/drafts/batch-failed', function (req, res) {
+    try {
+      // Count before deleting
+      var failedCount = db.prepare(
+        "SELECT COUNT(*) as cnt FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
+      ).get().cnt;
+
+      if (failedCount === 0) {
+        return res.json({ success: true, message: 'No failed drafts to delete', deletedCount: 0 });
+      }
+
+      var deleteResult = db.transaction(function () {
+        // Release locks
+        db.prepare(
+          "UPDATE drafts SET locked_by = NULL WHERE extraction_status = 'failed' AND locked_by IS NOT NULL"
+        ).run();
+
+        // Delete failed (but not published) drafts
+        var result = db.prepare(
+          "DELETE FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
+        ).run();
+
+        return result.changes;
+      });
+
+      var deleted = deleteResult();
+
+      logger.info('api', 'Batch delete: removed ' + deleted + ' failed drafts');
+
+      res.json({
+        success: true,
+        message: 'Deleted ' + deleted + ' failed drafts',
+        deletedCount: deleted
+      });
+    } catch (err) {
+      logger.error('api', 'Batch delete failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 

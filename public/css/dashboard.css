@@ -2545,6 +2545,50 @@ select:focus {
   background: rgba(255,255,255,0.3);
 }
 
+/* ─── Delete Buttons ──────────────────────────────────────────────── */
+
+.action-btn-delete {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+.action-btn-delete:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+.cluster-delete-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.5;
+}
+.cluster-delete-btn:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.btn-outline-danger {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: all 0.15s;
+}
+.btn-outline-danger:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  opacity: 1;
+}
+
 @media (max-width: 768px) {
   .editor-panels { flex-direction: column; }
   .editor-left { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 40vh; }
