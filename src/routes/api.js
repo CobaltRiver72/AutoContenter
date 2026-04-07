@@ -966,6 +966,45 @@ function createApiRouter(deps) {
   var { extractDraftContent, rewriteDraftContent } = require('../utils/draft-helpers');
   var draftDeps = { db: db, logger: logger, extractor: extractor, rewriter: rewriter };
 
+  // POST /api/drafts/check-urls — Check which URLs already exist as drafts
+  router.post('/drafts/check-urls', function (req, res) {
+    try {
+      var urls = req.body && req.body.urls;
+      if (!urls || !Array.isArray(urls)) {
+        return res.json({ drafts: {} });
+      }
+      if (urls.length > 500) urls = urls.slice(0, 500);
+
+      var result = {};
+      var stmt = db.prepare('SELECT id, source_url, status, wp_post_url FROM drafts WHERE source_url = ?');
+      for (var i = 0; i < urls.length; i++) {
+        var row = stmt.get(urls[i]);
+        if (row) {
+          result[urls[i]] = { draft_id: row.id, status: row.status, wp_post_url: row.wp_post_url || null };
+        }
+      }
+      return res.json({ drafts: result });
+    } catch (err) {
+      logger.error('api', 'POST /api/drafts/check-urls failed: ' + err.message);
+      return res.status(500).json({ drafts: {} });
+    }
+  });
+
+  // GET /api/drafts/status?url=... — Check draft status for a single URL
+  router.get('/drafts/status', function (req, res) {
+    try {
+      var url = req.query.url;
+      if (!url) return res.json({ exists: false });
+      var row = db.prepare('SELECT id, status, wp_post_url, wp_post_id FROM drafts WHERE source_url = ?').get(url);
+      if (row) {
+        return res.json({ exists: true, draft_id: row.id, status: row.status, wp_post_url: row.wp_post_url, wp_post_id: row.wp_post_id });
+      }
+      return res.json({ exists: false });
+    } catch (err) {
+      return res.json({ exists: false });
+    }
+  });
+
   // POST /api/drafts — Create draft from selected article
   router.post('/drafts', function (req, res) {
     try {
@@ -1038,6 +1077,7 @@ function createApiRouter(deps) {
       var created = 0;
       var skipped = 0;
       var createdIds = [];
+      var urlMap = {};
 
       for (var i = 0; i < articles.length; i++) {
         var a = articles[i];
@@ -1063,6 +1103,7 @@ function createApiRouter(deps) {
             draftPlatform
           );
           createdIds.push(result.lastInsertRowid);
+          urlMap[url] = result.lastInsertRowid;
           created++;
         } catch (insertErr) {
           logger.warn('api', 'Bulk draft insert failed for ' + url + ': ' + insertErr.message);
@@ -1085,7 +1126,7 @@ function createApiRouter(deps) {
         })();
       }
 
-      return res.json({ success: true, created: created, skipped: skipped, total: articles.length, draftIds: createdIds });
+      return res.json({ success: true, created: created, skipped: skipped, total: articles.length, draftIds: createdIds, urlMap: urlMap });
     } catch (err) {
       logger.error('api', 'POST /api/drafts/bulk-create failed: ' + err.message);
       return res.status(500).json({ success: false, error: err.message });

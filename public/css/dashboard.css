@@ -1306,6 +1306,92 @@ select:focus {
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* ─── Live Feed Draft Status Badges ──────────────────────────────────── */
+.draft-status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.draft-status-badge.status-adding {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  animation: pulse-badge 1.5s infinite;
+}
+.draft-status-badge.status-fetching {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  animation: pulse-badge 1.5s infinite;
+}
+.draft-status-badge.status-rewriting {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  animation: pulse-badge 1.5s infinite;
+}
+.draft-status-badge.status-draft {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+.draft-status-badge.status-ready {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.draft-status-badge.status-published {
+  background: rgba(16, 185, 129, 0.25);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  font-weight: 800;
+}
+.draft-status-badge.status-failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.article-card.card-in-drafts { border-left: 3px solid #3b82f6; opacity: 0.85; }
+.article-card.card-published { border-left: 3px solid #10b981; opacity: 0.75; }
+.article-card.card-failed { border-left: 3px solid #ef4444; opacity: 0.85; }
+.btn-added {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  cursor: not-allowed;
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.btn-published {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  cursor: not-allowed;
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 /* ─── Draft Cards ─────────────────────────────────────────────────────── */
 .drafts-list {
   display: flex;

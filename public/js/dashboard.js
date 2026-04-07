@@ -27,6 +27,11 @@
   var selectedArticles = {};
   var selectedCount = 0;
 
+  // Draft status tracking for Live Feed cards
+  var draftStatusCache = {};
+  var pendingAddUrls = {};
+  var showOnlyNew = false;
+
   // ─── Rule Templates ────────────────────────────────────────────────────
 
   // ─── Firehose Lucene Rule Reference ──────────────────────────────────
@@ -566,6 +571,8 @@
           // Clear empty state
           var emptyState = feedList.querySelector('.feed-empty');
           if (emptyState && articles.length > 0) feedList.removeChild(emptyState);
+          // Load draft statuses for batch
+          loadDraftStatuses();
         } catch (err) {
           // Ignore parse errors
         }
@@ -598,6 +605,18 @@
           // Apply filters
           if (shouldShowArticle(article)) {
             renderArticleCard(feedList, article, true);
+          }
+
+          // Check if this article is already in drafts
+          if (article.url && !draftStatusCache[article.url]) {
+            fetchApi('/api/drafts/status?url=' + encodeURIComponent(article.url))
+              .then(function (d) {
+                if (d.draft) {
+                  draftStatusCache[article.url] = d.draft;
+                  var c = document.querySelector('.article-card[data-article-url="' + CSS.escape(article.url) + '"]');
+                  if (c) updateCardStatusBadge(c, article.url);
+                }
+              }).catch(function () {});
           }
 
           // Remove excess DOM children
@@ -663,9 +682,25 @@
             }
           }
           if (feedCounter) feedCounter.textContent = data.total + ' total';
+          // Load draft statuses after initial feed load
+          loadDraftStatuses();
         }
       })
       .catch(function () { /* silent */ });
+
+    // Refresh transient statuses every 30s (fetching, rewriting, adding)
+    var statusRefreshTimer = setInterval(function () {
+      if (state.currentPage !== 'feed') return;
+      var hasTransient = false;
+      var cacheKeys = Object.keys(draftStatusCache);
+      for (var ti = 0; ti < cacheKeys.length; ti++) {
+        var st = draftStatusCache[cacheKeys[ti]].status;
+        if (st === 'fetching' || st === 'rewriting') { hasTransient = true; break; }
+      }
+      if (Object.keys(pendingAddUrls).length > 0) hasTransient = true;
+      if (hasTransient) loadDraftStatuses();
+    }, 30000);
+    state.refreshTimers.push(statusRefreshTimer);
   }
 
   function shouldShowArticle(article) {
@@ -678,6 +713,10 @@
       if (article.language !== state.feedFilterLang) {
         return false;
       }
+    }
+    // "Show Only New" filter — hide articles already in drafts
+    if (showOnlyNew && article.url && draftStatusCache[article.url]) {
+      return false;
     }
     return true;
   }
@@ -714,7 +753,8 @@
         '<option value="kn">Kannada</option>' +
         '<option value="ml">Malayalam</option>' +
         '<option value="pa">Punjabi</option>' +
-      '</select>';
+      '</select>' +
+      '<button id="feedFilterNew" class="btn btn-sm" style="font-size:12px;padding:5px 12px;margin-left:6px">Show Only New</button>';
 
     // Insert after page header
     pageHeader.parentNode.insertBefore(filtersDiv, pageHeader.nextSibling);
@@ -735,6 +775,17 @@
         reRenderFeed();
       });
     }
+
+    var newBtn = $('feedFilterNew');
+    if (newBtn) {
+      newBtn.addEventListener('click', function () {
+        showOnlyNew = !showOnlyNew;
+        newBtn.textContent = showOnlyNew ? 'Show All' : 'Show Only New';
+        newBtn.style.background = showOnlyNew ? '#6366f1' : '';
+        newBtn.style.color = showOnlyNew ? '#fff' : '';
+        reRenderFeed();
+      });
+    }
   }
 
   function reRenderFeed() {
@@ -748,6 +799,95 @@
     }
   }
 
+  // ─── Draft Status Tracking for Live Feed ─────────────────────────────
+
+  function loadDraftStatuses() {
+    var urls = [];
+    for (var i = 0; i < state.feedArticles.length; i++) {
+      var url = state.feedArticles[i].url;
+      if (url && !draftStatusCache[url]) urls.push(url);
+    }
+    if (urls.length === 0) return;
+
+    fetchApi('/api/drafts/check-urls', { method: 'POST', body: { urls: urls } })
+      .then(function (data) {
+        if (data.drafts) {
+          var keys = Object.keys(data.drafts);
+          for (var i = 0; i < keys.length; i++) draftStatusCache[keys[i]] = data.drafts[keys[i]];
+          updateAllCardStatuses();
+        }
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function updateAllCardStatuses() {
+    var cards = document.querySelectorAll('.article-card[data-article-url]');
+    for (var i = 0; i < cards.length; i++) {
+      var url = cards[i].getAttribute('data-article-url');
+      if (url) updateCardStatusBadge(cards[i], url);
+    }
+  }
+
+  function updateCardStatusBadge(card, url) {
+    var existing = card.querySelector('.draft-status-badge');
+    if (existing) existing.remove();
+
+    var status = draftStatusCache[url] || null;
+    var pending = pendingAddUrls[url] || false;
+    if (!status && !pending) return;
+
+    var badge = document.createElement('span');
+    badge.className = 'draft-status-badge';
+
+    if (pending) {
+      badge.className += ' status-adding';
+      badge.textContent = 'Adding...';
+    } else if (status.status === 'published' || status.wp_post_url) {
+      badge.className += ' status-published';
+      badge.innerHTML = '&#10003; Published';
+    } else if (status.status === 'ready') {
+      badge.className += ' status-ready';
+      badge.textContent = 'Ready';
+    } else if (status.status === 'rewriting') {
+      badge.className += ' status-rewriting';
+      badge.textContent = 'Rewriting...';
+    } else if (status.status === 'fetching') {
+      badge.className += ' status-fetching';
+      badge.textContent = 'Extracting...';
+    } else if (status.status === 'failed') {
+      badge.className += ' status-failed';
+      badge.textContent = 'Failed';
+    } else {
+      badge.className += ' status-draft';
+      badge.textContent = 'In Drafts';
+    }
+
+    var metaDiv = card.querySelector('.article-meta');
+    if (metaDiv) metaDiv.insertBefore(badge, metaDiv.firstChild);
+
+    // Card border state
+    card.classList.remove('card-in-drafts', 'card-published', 'card-failed');
+    if (status) {
+      if (status.status === 'published' || status.wp_post_url) card.classList.add('card-published');
+      else if (status.status === 'failed') card.classList.add('card-failed');
+      else card.classList.add('card-in-drafts');
+    }
+
+    // Disable select button for already-added articles
+    var selectBtn = card.querySelector('.article-select-btn, .btn-selected');
+    if (selectBtn && status && !pending) {
+      selectBtn.disabled = true;
+      selectBtn.style.cursor = 'not-allowed';
+      if (status.status === 'published' || status.wp_post_url) {
+        selectBtn.innerHTML = '&#10003; Published';
+        selectBtn.className = 'btn-published';
+      } else {
+        selectBtn.innerHTML = '&#10003; Added';
+        selectBtn.className = 'btn-added';
+      }
+    }
+  }
+
   function renderArticleCard(container, article, prepend) {
     var artKey = article.url || article.firehose_event_id || article.id || '';
     var isSelected = !!selectedArticles[artKey];
@@ -755,6 +895,7 @@
     var card = document.createElement('div');
     card.className = 'article-card' + (isSelected ? ' feed-card-selected' : '');
     card.setAttribute('data-article-key', artKey);
+    card.setAttribute('data-article-url', article.url || '');
 
     var tierClass = 'badge-tier' + (article.authority_tier || 3);
     var tierLabel = 'T' + (article.authority_tier || 3);
@@ -780,11 +921,31 @@
       ruleTagHtml = '<span class="badge badge-detected">' + escapeHtml(article.query_id) + '</span>';
     }
 
-    // Content preview
+    // Content preview — handle JSON content_markdown ({"chunks":...})
     var previewHtml = '';
     var fullContentHtml = '';
     if (article.content_markdown) {
-      var stripped = stripMarkdown(article.content_markdown);
+      var rawContent = article.content_markdown;
+      // Detect JSON content_markdown and extract text from chunks
+      if (typeof rawContent === 'string' && rawContent.charAt(0) === '{') {
+        try {
+          var parsed = JSON.parse(rawContent);
+          var parts = [];
+          if (parsed.chunks && Array.isArray(parsed.chunks)) {
+            for (var ci = 0; ci < parsed.chunks.length; ci++) {
+              var chunk = parsed.chunks[ci];
+              var t = chunk.text || chunk.content || chunk.value || '';
+              if (t) parts.push(t);
+            }
+          } else if (parsed.text) {
+            parts.push(parsed.text);
+          } else if (parsed.content) {
+            parts.push(parsed.content);
+          }
+          if (parts.length > 0) rawContent = parts.join(' ');
+        } catch (e) { /* not JSON, use as-is */ }
+      }
+      var stripped = stripMarkdown(rawContent);
       var previewText = truncate(stripped, 200);
       previewHtml = '<div class="article-preview">' + escapeHtml(previewText) + '</div>';
       if (stripped.length > 200) {
@@ -852,6 +1013,9 @@
       card.appendChild(expandBtn);
     }
 
+    // Apply draft status badge if known
+    if (article.url) updateCardStatusBadge(card, article.url);
+
     if (prepend) {
       container.insertBefore(card, container.firstChild);
     } else {
@@ -862,6 +1026,10 @@
   // ─── Multi-Select for Live Feed ──────────────────────────────────────────
 
   function toggleSelectArticle(key, article, card) {
+    // Skip articles already in drafts or pending
+    var artUrl = article && article.url;
+    if (artUrl && (draftStatusCache[artUrl] || pendingAddUrls[artUrl])) return;
+
     if (selectedArticles[key]) {
       delete selectedArticles[key];
       selectedCount--;
@@ -903,6 +1071,9 @@
       var key = card.getAttribute('data-article-key');
       var article = card._articleData;
       if (key && article && !selectedArticles[key]) {
+        // Skip already-added articles
+        var artUrl = article.url;
+        if (artUrl && (draftStatusCache[artUrl] || pendingAddUrls[artUrl])) continue;
         selectedArticles[key] = article;
         selectedCount++;
         card.classList.add('feed-card-selected');
@@ -919,7 +1090,10 @@
     if (!bar) return;
     if (selectedCount > 0) {
       bar.style.display = 'flex';
-      if (countEl) countEl.textContent = selectedCount + ' selected';
+      var addedCount = Object.keys(draftStatusCache).length;
+      var label = selectedCount + ' selected';
+      if (addedCount > 0) label += ' | ' + addedCount + ' already in drafts';
+      if (countEl) countEl.textContent = label;
     } else {
       bar.style.display = 'none';
     }
@@ -935,6 +1109,12 @@
     var articles = [];
     for (var i = 0; i < keys.length; i++) {
       var a = selectedArticles[keys[i]];
+      // Mark pending immediately for optimistic UI
+      if (a.url) {
+        pendingAddUrls[a.url] = true;
+        var pendingCard = document.querySelector('.article-card[data-article-url="' + CSS.escape(a.url) + '"]');
+        if (pendingCard) updateCardStatusBadge(pendingCard, a.url);
+      }
       articles.push({
         article_id: a.id || null,
         url: a.url || '',
@@ -950,16 +1130,40 @@
     fetchApi('/api/drafts/bulk-create', { method: 'POST', body: { articles: articles } })
       .then(function (data) {
         if (data.success) {
+          // Update cache from urlMap returned by API
+          if (data.urlMap) {
+            var mapKeys = Object.keys(data.urlMap);
+            for (var j = 0; j < mapKeys.length; j++) {
+              draftStatusCache[mapKeys[j]] = { draft_id: data.urlMap[mapKeys[j]], status: 'fetching' };
+              delete pendingAddUrls[mapKeys[j]];
+            }
+          }
+          // Clear remaining pending entries (duplicates that were skipped)
+          for (var k = 0; k < articles.length; k++) {
+            if (articles[k].url) delete pendingAddUrls[articles[k].url];
+          }
+          updateAllCardStatuses();
           var msg = data.created + ' article(s) added to drafts!';
           if (data.skipped > 0) msg += ' (' + data.skipped + ' duplicates skipped)';
           showToast(msg, 'success');
           clearSelection();
           showGoToPublishedPrompt(data.created);
         } else {
+          // Clear pending on failure
+          for (var m = 0; m < articles.length; m++) {
+            if (articles[m].url) delete pendingAddUrls[articles[m].url];
+          }
+          updateAllCardStatuses();
           showToast('Failed: ' + (data.error || 'Unknown'), 'error');
         }
       })
-      .catch(function (err) { showToast('Failed: ' + err.message, 'error'); })
+      .catch(function (err) {
+        for (var n = 0; n < articles.length; n++) {
+          if (articles[n].url) delete pendingAddUrls[articles[n].url];
+        }
+        updateAllCardStatuses();
+        showToast('Failed: ' + err.message, 'error');
+      })
       .finally(function () {
         if (btn) { btn.disabled = false; btn.textContent = 'Fetch & Add to Drafts'; btn.style.opacity = '1'; }
       });
