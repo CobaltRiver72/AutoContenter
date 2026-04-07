@@ -170,10 +170,20 @@ function createApiRouter(deps) {
     }
 
     req.on('close', function () {
-      clearInterval(heartbeat);
       if (firehose && typeof firehose.removeListener === 'function') {
         firehose.removeListener('article', onArticle);
       }
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = null;
+    });
+
+    // Also handle broken pipe / error
+    req.on('error', function () {
+      if (firehose && typeof firehose.removeListener === 'function') {
+        firehose.removeListener('article', onArticle);
+      }
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = null;
     });
   });
 

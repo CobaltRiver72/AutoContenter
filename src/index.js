@@ -61,6 +61,7 @@ async function boot() {
   firehose.on('article', async function(article) {
     try {
       var articleId = buffer.addArticle(article);
+      firehose._pendingCount--;
       if (!articleId) return; // duplicate or failed insert
       // buffer.addArticle() now attaches id + fingerprint to article object
 

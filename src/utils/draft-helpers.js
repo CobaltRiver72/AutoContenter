@@ -118,18 +118,22 @@ function parseWithReadability(rawHtml, sourceUrl) {
   var dom = new JSDOM(rawHtml, { url: sourceUrl });
   try {
     var reader = new Readability(dom.window.document, { charThreshold: 100 });
-    return reader.parse();
+    var result = reader.parse();
+    return result;
   } finally {
-    dom.window.close();
+    if (dom && dom.window) dom.window.close();
+    dom = null;  // Allow GC to collect immediately
   }
 }
 
 function extractImageFromHtml(rawHtml, sourceUrl) {
   var dom = new JSDOM(rawHtml, { url: sourceUrl });
   try {
-    return extractFeaturedImage(dom.window.document, sourceUrl);
+    var result = extractFeaturedImage(dom.window.document, sourceUrl);
+    return result;
   } finally {
-    dom.window.close();
+    if (dom && dom.window) dom.window.close();
+    dom = null;  // Allow GC to collect immediately
   }
 }
 

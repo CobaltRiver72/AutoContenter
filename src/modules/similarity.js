@@ -39,6 +39,17 @@ class SimilarityEngine {
   }
 
   _initWorker() {
+    // CLEANUP: Terminate old worker if it exists
+    if (this._worker) {
+      try {
+        this._worker.terminate();
+      } catch (e) {
+        // Worker may already be dead — that's fine
+      }
+      this._worker = null;
+    }
+    this._workerReady = false;
+
     try {
       var WorkerClass = require('worker_threads').Worker;
       var path = require('path');

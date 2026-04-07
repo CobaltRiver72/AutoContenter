@@ -86,40 +86,43 @@ class Pipeline {
   // duplicate processing. Dead jobs auto-recover when lease expires.
 
   claimJobs(status, workerName, count, extraConditions) {
-    var leaseMinutes = 3;
+    var leaseMinutes = this.LEASE_MINUTES || 3;
     var conditions = "status = ? AND mode = 'auto'" +
       " AND (locked_by IS NULL OR lease_expires_at < datetime('now'))" +
       " AND (next_run_at IS NULL OR next_run_at <= datetime('now'))";
-    if (extraConditions) conditions += ' AND ' + extraConditions;
 
-    // Find unclaimed jobs
-    var findSql = 'SELECT id FROM drafts WHERE ' + conditions +
-      ' ORDER BY CASE WHEN cluster_role = \'primary\' THEN 0 ELSE 1 END, created_at ASC' +
-      ' LIMIT ?';
-
-    var ids;
-    try {
-      ids = this._getStmt('find_' + status + '_' + (extraConditions || ''), findSql)
-        .all(status, count)
-        .map(function (r) { return r.id; });
-    } catch (e) {
-      // If prepared statement cache is stale, recreate
-      delete this._stmts['find_' + status + '_' + (extraConditions || '')];
-      ids = this.db.prepare(findSql).all(status, count).map(function (r) { return r.id; });
+    // SAFETY: Only allow known extra conditions (prevent SQL injection)
+    if (extraConditions === "extraction_status NOT IN ('success','cached','fallback')") {
+      conditions += " AND extraction_status NOT IN ('success','cached','fallback')";
+    } else if (extraConditions === "cluster_role = 'primary'") {
+      conditions += " AND cluster_role = 'primary'";
     }
+    // Any other extraConditions value is silently ignored for safety
 
-    if (ids.length === 0) return [];
+    // ATOMIC: Claim and select in a transaction so no other worker can race us
+    var self = this;
+    var claimTransaction = this.db.transaction(function () {
+      // Step 1: Find unclaimed jobs
+      var findSql = 'SELECT id FROM drafts WHERE ' + conditions +
+        " ORDER BY cluster_role = 'primary' DESC, created_at ASC LIMIT ?";
+      var found = self.db.prepare(findSql).all(status, count);
+      if (found.length === 0) return [];
 
-    // Claim them atomically
-    var claimSql = "UPDATE drafts SET locked_by = ?, locked_at = datetime('now'), " +
-      "lease_expires_at = datetime('now', '+" + leaseMinutes + " minutes') " +
-      "WHERE id IN (" + ids.join(',') + ") AND (locked_by IS NULL OR lease_expires_at < datetime('now'))";
+      var ids = found.map(function (r) { return r.id; });
 
-    this.db.prepare(claimSql).run(workerName);
+      // Step 2: Claim them atomically (in same transaction)
+      var placeholders = ids.map(function () { return '?'; }).join(',');
+      var claimSql = "UPDATE drafts SET locked_by = ?, locked_at = datetime('now'), " +
+        "lease_expires_at = datetime('now', '+" + leaseMinutes + " minutes') " +
+        "WHERE id IN (" + placeholders + ") AND (locked_by IS NULL OR lease_expires_at < datetime('now'))";
+      self.db.prepare(claimSql).run.apply(null, [workerName].concat(ids));
 
-    // Return claimed drafts
-    var claimedSql = 'SELECT * FROM drafts WHERE id IN (' + ids.join(',') + ') AND locked_by = ?';
-    return this.db.prepare(claimedSql).all(workerName);
+      // Step 3: Return claimed drafts
+      var claimedSql = 'SELECT * FROM drafts WHERE id IN (' + placeholders + ') AND locked_by = ?';
+      return self.db.prepare(claimedSql).all.apply(null, ids.concat([workerName]));
+    });
+
+    return claimTransaction();
   }
 
   releaseJob(draftId) {
@@ -660,31 +663,32 @@ class Pipeline {
   // ─── LIFECYCLE ──────────────────────────────────────────────────────
 
   async init() {
-    // Release any stale locks from previous crash
+    // Only release EXPIRED locks (not all locks — some might still be processing)
     try {
-      var stale = this.db.prepare(
+      var staleResult = this.db.prepare(
         "UPDATE drafts SET locked_by = NULL, locked_at = NULL, lease_expires_at = NULL " +
-        "WHERE locked_by IS NOT NULL"
+        "WHERE locked_by IS NOT NULL AND lease_expires_at < datetime('now')"
       ).run();
-      if (stale.changes > 0) {
-        this.logger.info(MODULE, 'Released ' + stale.changes + ' stale locks from previous session');
+      if (staleResult.changes > 0) {
+        this.logger.info(MODULE, 'Released ' + staleResult.changes + ' expired locks from previous session');
       }
     } catch (e) {
       this.logger.warn(MODULE, 'Could not release stale locks (columns may not exist yet): ' + e.message);
     }
 
-    // Recover drafts stuck in 'rewriting' (server crashed mid-rewrite)
+    // Recover drafts stuck in transient states (from server crash)
     try {
-      var stuck = this.db.prepare(
+      var stuckResult = this.db.prepare(
         "UPDATE drafts SET status = 'draft', locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
         "error_message = 'Recovered from stuck state (server restarted)', updated_at = datetime('now') " +
-        "WHERE status = 'rewriting' AND mode = 'auto'"
+        "WHERE status IN ('fetching', 'rewriting') AND locked_by IS NULL AND " +
+        "updated_at < datetime('now', '-5 minutes')"
       ).run();
-      if (stuck.changes > 0) {
-        this.logger.info(MODULE, 'Recovered ' + stuck.changes + ' stuck rewriting drafts');
+      if (stuckResult.changes > 0) {
+        this.logger.info(MODULE, 'Recovered ' + stuckResult.changes + ' stuck drafts from previous crash');
       }
     } catch (e) {
-      this.logger.warn(MODULE, 'Could not recover stuck rewriting drafts (columns may not exist yet): ' + e.message);
+      this.logger.warn(MODULE, 'Could not recover stuck drafts (columns may not exist yet): ' + e.message);
     }
 
     this.logger.info(MODULE, 'Pipeline V2 initialized (extract:' + this.EXTRACTION_CONCURRENCY +

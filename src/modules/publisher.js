@@ -323,15 +323,12 @@ class WordPressPublisher {
 
       // If 401 — auth header likely stripped by Nginx
       if (status1 === 401) {
-        // Method 2: credentials in URL
-        self.logger.info('publisher', 'WP API Method 2: URL-encoded credentials');
+        // Method 2: header-only auth with different URL format
+        self.logger.info('publisher', 'WP API Method 2: header auth with alternate URL');
         try {
-          var encodedUser = encodeURIComponent(self.config.WP_USERNAME);
-          var encodedPwd = encodeURIComponent(self.config.WP_APP_PASSWORD);
-          var urlParsed = new URL(self.wpBaseUrl);
-          var authBaseUrl = urlParsed.protocol + '//' + encodedUser + ':' + encodedPwd + '@' + urlParsed.host + urlParsed.pathname.replace(/\/+$/, '');
-          var url2 = authBaseUrl + '/?rest_route=' + encodeURIComponent(restPath);
-          var headers2 = Object.assign({ 'Content-Type': 'application/json' }, extraHeaders || {});
+          var authHeader2 = 'Basic ' + Buffer.from(self.config.WP_USERNAME + ':' + self.config.WP_APP_PASSWORD).toString('base64');
+          var url2 = self.config.WP_URL.replace(/\/+$/, '') + '/?rest_route=' + encodeURIComponent(restPath);
+          var headers2 = Object.assign({ 'Content-Type': 'application/json', 'Authorization': authHeader2 }, extraHeaders || {});
 
           var res2 = await axios({ method: method, url: url2, data: data, headers: headers2, timeout: WP_TIMEOUT_MS });
           self.logger.info('publisher', 'Method 2 succeeded (' + res2.status + ')');

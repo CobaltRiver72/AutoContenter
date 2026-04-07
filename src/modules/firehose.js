@@ -28,6 +28,7 @@ class FirehoseListener extends EventEmitter {
     this._reconnectTimer = null;
     this._lastConnectAttempt = 0;
     this._stopped = false;
+    this._pendingCount = 0;
 
     // Module independence
     this.enabled = false;
@@ -248,6 +249,13 @@ class FirehoseListener extends EventEmitter {
       eventId: article.firehose_event_id,
     });
 
+    // Backpressure: don't emit if too many articles are queued
+    if (this._pendingCount > 500) {
+      this.logger.warn(MODULE, 'Backpressure: ' + this._pendingCount + ' articles queued, dropping article from ' + (article.domain || 'unknown'));
+      return;
+    }
+
+    this._pendingCount++;
     this.emit('article', article);
   }
 

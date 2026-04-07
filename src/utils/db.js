@@ -28,6 +28,12 @@ try {
 
   // Reasonable busy timeout (5 seconds)
   db.pragma('busy_timeout = 5000');
+
+  // Performance tuning for 4GB server
+  db.pragma('synchronous = NORMAL');      // Safe with WAL — 2x faster writes
+  db.pragma('cache_size = -64000');        // 64MB page cache (default is 2MB)
+  db.pragma('temp_store = MEMORY');        // Temp tables in RAM, not disk
+  db.pragma('mmap_size = 268435456');      // Memory-map 256MB of DB for faster reads
 } catch (err) {
   console.error('[db] Failed to open database:', err.message);
   process.exit(1);
