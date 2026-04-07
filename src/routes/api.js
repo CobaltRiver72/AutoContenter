@@ -1243,7 +1243,7 @@ function createApiRouter(deps) {
       var draftPlatform = (draftConfig.WP_URL && draftConfig.WP_USERNAME && draftConfig.WP_APP_PASSWORD) ? 'wordpress' : 'blogspot';
 
       var insertStmt = db.prepare(
-        "INSERT INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode) " +
+        "INSERT OR IGNORE INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual')"
       );
       var checkDup = db.prepare('SELECT id FROM drafts WHERE source_url = ?');
@@ -1258,9 +1258,11 @@ function createApiRouter(deps) {
         var url = a.url || '';
         if (!url) { skipped++; continue; }
 
-        // Skip duplicates
-        if (checkDup.get(url)) {
+        // Skip known duplicates (fast path)
+        var existingDraft = checkDup.get(url);
+        if (existingDraft) {
           skipped++;
+          urlMap[url] = existingDraft.id;
           continue;
         }
 

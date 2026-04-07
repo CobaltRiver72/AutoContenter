@@ -59,6 +59,7 @@ function runMigrations() {
     db.exec('CREATE INDEX IF NOT EXISTS idx_articles_cluster ON articles(cluster_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_articles_domain ON articles(domain)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_articles_fingerprint ON articles(fingerprint)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_articles_url ON articles(url)');
 
     // Clusters table
     db.exec(`
@@ -217,6 +218,13 @@ function runMigrations() {
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_url ON drafts(source_url)');
+
+    // UNIQUE constraint on source_url to prevent duplicates at scale
+    try {
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_url_unique ON drafts(source_url)');
+    } catch (e) {
+      console.warn('[db] Could not create UNIQUE index on drafts.source_url — duplicates may exist');
+    }
 
     // Add featured_image column to drafts if it doesn't exist
     try {

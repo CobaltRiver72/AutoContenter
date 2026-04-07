@@ -1048,6 +1048,11 @@
       selectBtn.innerHTML = '&#10003; In Drafts';
     }
 
+    // ─── Show draft ID on the button for tracking ───
+    if (status && status.draft_id) {
+      selectBtn.title = 'Draft #' + status.draft_id + ' — ' + (status.status || 'draft');
+    }
+
     // ─── Card-level visual treatment ───
     card.classList.remove('card-in-drafts', 'card-published', 'card-failed');
     if (status) {
@@ -1386,14 +1391,23 @@
           if (data.urlMap) {
             var mapKeys = Object.keys(data.urlMap);
             for (var j = 0; j < mapKeys.length; j++) {
-              draftStatusCache[mapKeys[j]] = { draft_id: data.urlMap[mapKeys[j]], status: 'fetching' };
+              // If not already in cache, mark as fetching (newly created)
+              // If already in cache (duplicate), keep existing status
+              if (!draftStatusCache[mapKeys[j]]) {
+                draftStatusCache[mapKeys[j]] = { draft_id: data.urlMap[mapKeys[j]], status: 'fetching' };
+              }
               delete pendingAddUrls[mapKeys[j]];
             }
           }
-          // Clear remaining pending entries (duplicates that were skipped)
+          // Clear pending for any articles not in urlMap; force status check if needed
+          var needsRefresh = false;
           for (var k = 0; k < articles.length; k++) {
-            if (articles[k].url) delete pendingAddUrls[articles[k].url];
+            if (articles[k].url) {
+              delete pendingAddUrls[articles[k].url];
+              if (!draftStatusCache[articles[k].url]) needsRefresh = true;
+            }
           }
+          if (needsRefresh) loadDraftStatuses();
           updateAllCardStatuses();
           var msg = '';
           if (data.created > 0) {
