@@ -2132,18 +2132,33 @@
       if (counts[st] !== undefined) counts[st]++;
     }
 
+    // Count un-extracted articles for the batch button badge
+    var unextractedCount = counts.fetching + counts.failed;
+
     var filterHTML =
-      '<div class="status-filters">' +
-        '<button class="filter-btn active" data-filter="all">All (' + counts.all + ')</button>' +
-        '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterIds.length + ')</button>' +
-        '<button class="filter-btn" data-filter="manual">&#128100; Manual (' + manualDrafts.length + ')</button>' +
-        '<span class="filter-divider"></span>' +
-        '<button class="filter-btn" data-filter="fetching">Fetching (' + counts.fetching + ')</button>' +
-        '<button class="filter-btn" data-filter="draft">Extracted (' + counts.draft + ')</button>' +
-        '<button class="filter-btn" data-filter="rewriting">Rewriting (' + counts.rewriting + ')</button>' +
-        '<button class="filter-btn" data-filter="ready">Ready (' + counts.ready + ')</button>' +
-        '<button class="filter-btn" data-filter="published">Published (' + counts.published + ')</button>' +
-        (counts.failed > 0 ? '<button class="filter-btn" data-filter="failed">&#10060; Failed (' + counts.failed + ')</button>' : '') +
+      '<div class="published-toolbar">' +
+        '<div class="status-filters">' +
+          '<button class="filter-btn active" data-filter="all">All (' + counts.all + ')</button>' +
+          '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterIds.length + ')</button>' +
+          '<button class="filter-btn" data-filter="manual">&#128100; Manual (' + manualDrafts.length + ')</button>' +
+          '<span class="filter-divider"></span>' +
+          '<button class="filter-btn" data-filter="fetching">Fetching (' + counts.fetching + ')</button>' +
+          '<button class="filter-btn" data-filter="draft">Extracted (' + counts.draft + ')</button>' +
+          '<button class="filter-btn" data-filter="rewriting">Rewriting (' + counts.rewriting + ')</button>' +
+          '<button class="filter-btn" data-filter="ready">Ready (' + counts.ready + ')</button>' +
+          '<button class="filter-btn" data-filter="published">Published (' + counts.published + ')</button>' +
+          (counts.failed > 0 ? '<button class="filter-btn" data-filter="failed">&#10060; Failed (' + counts.failed + ')</button>' : '') +
+        '</div>' +
+        '<div class="batch-actions">' +
+          '<button class="batch-extract-btn" id="batchExtractBtn" title="Re-queue all pending and stuck articles for extraction">' +
+            '&#9889; Extract All' +
+            (unextractedCount > 0 ? ' <span class="batch-badge">' + unextractedCount + '</span>' : '') +
+          '</button>' +
+          (counts.failed > 0 ?
+            '<button class="batch-extract-btn batch-retry-failed" id="batchRetryFailedBtn" title="Retry all failed extractions">' +
+              '&#128260; Retry Failed <span class="batch-badge batch-badge-red">' + counts.failed + '</span>' +
+            '</button>' : '') +
+        '</div>' +
       '</div>';
 
     // Render cluster groups
@@ -2206,6 +2221,104 @@
         for (var dv = 0; dv < dividers.length; dv++) {
           dividers[dv].style.display = (filter === 'all') ? '' : 'none';
         }
+      });
+    }
+
+    // ─── Batch Extract button handler ──────────────────────────────
+    var batchExtractBtn = container.querySelector('#batchExtractBtn');
+    if (batchExtractBtn) {
+      batchExtractBtn.addEventListener('click', function () {
+        var btn = this;
+        if (btn.disabled) return;
+
+        btn.disabled = true;
+        btn.innerHTML = '&#9889; Queuing...';
+
+        fetchApi('/api/drafts/batch-extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ include_failed: false })
+        })
+        .then(function (data) {
+          if (data.success) {
+            var stats = data.stats;
+            btn.innerHTML = '&#9989; Queued ' + stats.totalReQueued + ' articles';
+            btn.classList.add('batch-success');
+
+            // Refresh the published list after a short delay
+            setTimeout(function () {
+              loadPublished();
+            }, 2000);
+
+            // Reset button after 5 seconds
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.classList.remove('batch-success');
+              btn.innerHTML = '&#9889; Extract All';
+            }, 5000);
+          } else {
+            btn.innerHTML = '&#10060; ' + (data.error || 'Failed');
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.innerHTML = '&#9889; Extract All';
+            }, 3000);
+          }
+        })
+        .catch(function (err) {
+          btn.innerHTML = '&#10060; Error';
+          btn.disabled = false;
+          setTimeout(function () {
+            btn.innerHTML = '&#9889; Extract All';
+          }, 3000);
+        });
+      });
+    }
+
+    // ─── Retry Failed button handler ───────────────────────────────
+    var batchRetryBtn = container.querySelector('#batchRetryFailedBtn');
+    if (batchRetryBtn) {
+      batchRetryBtn.addEventListener('click', function () {
+        var btn = this;
+        if (btn.disabled) return;
+
+        btn.disabled = true;
+        btn.innerHTML = '&#128260; Retrying...';
+
+        fetchApi('/api/drafts/batch-extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ include_failed: true })
+        })
+        .then(function (data) {
+          if (data.success) {
+            var stats = data.stats;
+            btn.innerHTML = '&#9989; Retrying ' + stats.failedReQueued + ' failed';
+            btn.classList.add('batch-success');
+
+            setTimeout(function () {
+              loadPublished();
+            }, 2000);
+
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.classList.remove('batch-success');
+              btn.innerHTML = '&#128260; Retry Failed';
+            }, 5000);
+          } else {
+            btn.innerHTML = '&#10060; ' + (data.error || 'Failed');
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.innerHTML = '&#128260; Retry Failed';
+            }, 3000);
+          }
+        })
+        .catch(function (err) {
+          btn.innerHTML = '&#10060; Error';
+          btn.disabled = false;
+          setTimeout(function () {
+            btn.innerHTML = '&#128260; Retry Failed';
+          }, 3000);
+        });
       });
     }
 

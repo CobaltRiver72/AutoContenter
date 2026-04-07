@@ -1551,6 +1551,129 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/drafts/batch-extract ─────────────────────────────────────
+  //
+  // Re-queues all un-extracted and optionally failed drafts for Pipeline V2.
+  // Does NOT extract inline — just resets statuses so the extraction loop picks them up.
+  //
+  router.post('/drafts/batch-extract', function (req, res) {
+    try {
+      var includeFailed = req.body && req.body.include_failed;
+      var now = new Date().toISOString();
+
+      // Count what we're about to re-queue
+      var pendingCount = db.prepare(
+        "SELECT COUNT(*) as cnt FROM drafts WHERE extraction_status IN ('pending') AND status IN ('draft', 'fetching')"
+      ).get().cnt;
+
+      var stuckCount = db.prepare(
+        "SELECT COUNT(*) as cnt FROM drafts WHERE status = 'fetching' AND locked_by IS NOT NULL AND lease_expires_at < ?"
+      ).get(now).cnt;
+
+      var failedCount = 0;
+      if (includeFailed) {
+        failedCount = db.prepare(
+          "SELECT COUNT(*) as cnt FROM drafts WHERE extraction_status = 'failed'"
+        ).get().cnt;
+      }
+
+      // Run all resets in a single transaction for atomicity
+      var batchReset = db.transaction(function () {
+        var totalReset = 0;
+
+        // 1. Reset stuck/locked articles (stale leases from crashed workers)
+        var stuckResult = db.prepare(
+          "UPDATE drafts SET " +
+          "  locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+          "  status = 'fetching', " +
+          "  updated_at = datetime('now') " +
+          "WHERE locked_by IS NOT NULL AND lease_expires_at < ?"
+        ).run(now);
+        totalReset += stuckResult.changes;
+
+        // 2. Reset pending articles that might be in wrong status
+        var pendingResult = db.prepare(
+          "UPDATE drafts SET " +
+          "  status = 'fetching', " +
+          "  locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+          "  updated_at = datetime('now') " +
+          "WHERE extraction_status = 'pending' AND status NOT IN ('fetching')"
+        ).run();
+        totalReset += pendingResult.changes;
+
+        // 3. Reset failed articles if requested (clear retry count so they get another chance)
+        var failedReset = 0;
+        if (includeFailed) {
+          var failedResult = db.prepare(
+            "UPDATE drafts SET " +
+            "  extraction_status = 'pending', " +
+            "  status = 'fetching', " +
+            "  retry_count = 0, " +
+            "  next_run_at = NULL, " +
+            "  locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+            "  updated_at = datetime('now') " +
+            "WHERE extraction_status = 'failed'"
+          ).run();
+          failedReset = failedResult.changes;
+          totalReset += failedReset;
+        }
+
+        return { totalReset: totalReset, failedReset: failedReset };
+      });
+
+      var result = batchReset();
+
+      logger.info('api', 'Batch extract: re-queued ' + result.totalReset + ' drafts (pending=' + pendingCount + ', stuck=' + stuckCount + ', failed=' + result.failedReset + ')');
+
+      // Nudge the pipeline if it has a processQueue method (backward compat)
+      if (scheduler && typeof scheduler.processQueue === 'function') {
+        setTimeout(function () {
+          scheduler.processQueue().catch(function (err) {
+            logger.warn('api', 'Pipeline nudge after batch-extract failed: ' + err.message);
+          });
+        }, 500);
+      }
+
+      res.json({
+        success: true,
+        message: 'Batch extraction queued',
+        stats: {
+          totalReQueued: result.totalReset,
+          pending: pendingCount,
+          stuck: stuckCount,
+          failedReQueued: result.failedReset
+        }
+      });
+    } catch (err) {
+      logger.error('api', 'Batch extract failed: ' + err.message);
+      res.status(500).json({ success: false, error: 'Batch extract failed: ' + err.message });
+    }
+  });
+
+  // ─── GET /api/drafts/stats ──────────────────────────────────────────────
+  //
+  // Returns counts by extraction status for the batch extract button badge.
+  //
+  router.get('/drafts/stats', function (req, res) {
+    try {
+      var stats = db.prepare(
+        "SELECT " +
+        "  COUNT(*) as total, " +
+        "  SUM(CASE WHEN extraction_status = 'pending' THEN 1 ELSE 0 END) as pending, " +
+        "  SUM(CASE WHEN extraction_status = 'failed' THEN 1 ELSE 0 END) as failed, " +
+        "  SUM(CASE WHEN extraction_status IN ('success','cached','fallback') THEN 1 ELSE 0 END) as extracted, " +
+        "  SUM(CASE WHEN status = 'fetching' AND locked_by IS NOT NULL THEN 1 ELSE 0 END) as in_progress, " +
+        "  SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) as published, " +
+        "  SUM(CASE WHEN status = 'rewriting' THEN 1 ELSE 0 END) as rewriting " +
+        "FROM drafts"
+      ).get();
+
+      res.json({ success: true, stats: stats });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // POST /api/drafts/:id/extract — Re-trigger extraction
   router.post('/drafts/:id/extract', function (req, res) {
     try {
