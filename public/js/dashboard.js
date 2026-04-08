@@ -2559,7 +2559,7 @@
     var isPulsing = draft.status === 'fetching' || draft.status === 'rewriting';
 
     var rawContent = draft.extracted_content || draft.source_content_markdown || '';
-    var contentPreview = extractReadableText(rawContent).substring(0, isPrimary ? 300 : 150);
+    var contentPreview = extractReadableText(rawContent).substring(0, isPrimary ? 800 : 400);
 
     var extractedChars = (draft.extracted_content || '').length;
     var extractInfo = '';
@@ -2638,7 +2638,7 @@
           extractInfo + aiInfo + wordCountInfo +
         '</div>' +
         '<div class="compact-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</div>' +
-        (contentPreview ? '<p class="compact-preview">' + escapeHtml(truncate(contentPreview, isPrimary ? 300 : 150)) + '</p>' : '') +
+        (contentPreview ? '<p class="compact-preview">' + escapeHtml(contentPreview) + '</p>' : '') +
         errorHTML +
       '</div>' +
       (actionsHTML ? '<div class="compact-card-actions">' + actionsHTML + '</div>' : '') +
@@ -3124,8 +3124,12 @@
                       '</a>' +
                     '</div>' +
                     (sdContent ?
-                      '<div style="font-size:12px;color:var(--text-secondary);line-height:1.4;max-height:80px;overflow:hidden">' +
-                        escapeHtml(sdContent.substring(0, 300)) +
+                      '<div class="source-article-content" style="font-size:12px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap;max-height:120px;overflow:hidden;position:relative;cursor:pointer" ' +
+                        'onclick="var el=this;if(el.style.maxHeight===\'120px\'){el.style.maxHeight=\'none\';el.querySelector(\'.expand-label\').textContent=\'\\u25B2 Collapse\'}else{el.style.maxHeight=\'120px\';var n=el.textContent.length;var lbl=n>=10000?Math.round(n/1000)+\'k chars\':n>=1000?(n/1000).toFixed(1)+\'k chars\':n+\' chars\';el.querySelector(\'.expand-label\').textContent=\'\\u25BC Show full content (\'+lbl+\')\'}">' +
+                        escapeHtml(sdContent) +
+                        '<div class="expand-label" style="position:sticky;bottom:0;left:0;right:0;text-align:center;padding:4px;background:linear-gradient(transparent,var(--bg-card) 40%);color:var(--accent);font-size:11px;font-weight:600">' +
+                          '\u25BC Show full content (' + formatCharCount(sdContent.length) + ')' +
+                        '</div>' +
                       '</div>' : '') +
                   '</div>';
               }
@@ -3219,6 +3223,15 @@
     doc.write(html);
     doc.close();
   }
+
+  // Click-to-expand compact previews (delegated)
+  document.addEventListener('click', function (e) {
+    var preview = e.target.closest('.compact-preview');
+    if (preview) {
+      e.stopPropagation();
+      preview.classList.toggle('expanded');
+    }
+  });
 
   // Tab switching (delegated)
   document.addEventListener('click', function (e) {
