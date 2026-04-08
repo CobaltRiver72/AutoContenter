@@ -545,6 +545,23 @@ async function extractDraftContent(draftId, deps) {
     }
   }
 
+  // ── CLUSTER IMAGE SHARING: Copy image from sibling articles in same cluster ──
+  if (!featuredImage && draft.cluster_id) {
+    try {
+      var siblingImage = db.prepare(
+        "SELECT featured_image FROM drafts " +
+        "WHERE cluster_id = ? AND id != ? AND featured_image IS NOT NULL AND featured_image != '' " +
+        "ORDER BY cluster_role = 'primary' DESC " +
+        "LIMIT 1"
+      ).get(draft.cluster_id, draftId);
+
+      if (siblingImage && siblingImage.featured_image) {
+        featuredImage = siblingImage.featured_image;
+        logger.info('draft-helpers', 'Draft ' + draftId + ': Image copied from cluster #' + draft.cluster_id + ' sibling');
+      }
+    } catch (sibErr) { /* ignore */ }
+  }
+
   // ── SAVE RESULT ──
   if (content) {
     db.prepare(`
@@ -573,6 +590,20 @@ async function extractDraftContent(draftId, deps) {
       draftId
     );
     updateDomainStats(db, draft.source_domain, true, extractionMethod);
+
+    // Back-fill image to cluster siblings that don't have one
+    if (featuredImage && draft.cluster_id) {
+      try {
+        var backfilled = db.prepare(
+          "UPDATE drafts SET featured_image = ?, updated_at = datetime('now') " +
+          "WHERE cluster_id = ? AND id != ? AND (featured_image IS NULL OR featured_image = '')"
+        ).run(featuredImage, draft.cluster_id, draftId);
+
+        if (backfilled.changes > 0) {
+          logger.info('draft-helpers', 'Draft ' + draftId + ': Back-filled image to ' + backfilled.changes + ' cluster siblings');
+        }
+      } catch (bfErr) { /* ignore */ }
+    }
   } else {
     var extractErr = 'All extraction methods failed for ' + draft.source_domain + '. Site may require JavaScript rendering or has anti-bot protection.';
 
@@ -615,6 +646,23 @@ async function extractDraftContent(draftId, deps) {
     updateDomainStats(db, draft.source_domain, false, null);
 
     logger.warn('draft-helpers', 'Draft ' + draftId + ': All extraction layers failed for ' + draft.source_domain);
+
+    // Even on failed content extraction, save the image if we found one
+    if (featuredImage) {
+      db.prepare(
+        "UPDATE drafts SET featured_image = ? WHERE id = ? AND (featured_image IS NULL OR featured_image = '')"
+      ).run(featuredImage, draftId);
+
+      // Back-fill to cluster siblings
+      if (draft.cluster_id) {
+        try {
+          db.prepare(
+            "UPDATE drafts SET featured_image = ?, updated_at = datetime('now') " +
+            "WHERE cluster_id = ? AND id != ? AND (featured_image IS NULL OR featured_image = '')"
+          ).run(featuredImage, draft.cluster_id, draftId);
+        } catch (bfErr) { /* ignore */ }
+      }
+    }
   }
 }
 

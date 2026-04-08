@@ -2668,6 +2668,12 @@
           '<span class="compact-domain">' + escapeHtml(draft.source_domain || '') + '</span>' +
           extractInfo + aiInfo + wordCountInfo +
         '</div>' +
+        (draft.featured_image ?
+          '<div class="compact-thumb" style="float:right;margin-left:8px">' +
+            '<img src="' + escapeHtml(draft.featured_image) + '" ' +
+              'style="width:60px;height:45px;border-radius:4px;object-fit:cover" ' +
+              'onerror="this.parentElement.style.display=\'none\'" />' +
+          '</div>' : '') +
         '<div class="compact-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</div>' +
         (contentPreview ? '<p class="compact-preview">' + escapeHtml(contentPreview) + '</p>' : '') +
         errorHTML +
@@ -3149,6 +3155,12 @@
                       (sd.cluster_role === 'primary' ?
                         '<span style="font-size:10px;padding:1px 6px;background:#f59e0b;color:#000;border-radius:8px">Primary</span>' : '') +
                     '</div>' +
+                    (sd.featured_image ?
+                      '<div style="margin-bottom:8px">' +
+                        '<img src="' + escapeHtml(sd.featured_image) + '" ' +
+                          'style="max-width:120px;max-height:80px;border-radius:6px;object-fit:cover" ' +
+                          'onerror="this.style.display=\'none\'" />' +
+                      '</div>' : '') +
                     '<div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--text-primary)">' +
                       '<a href="' + escapeHtml(sd.source_url || '#') + '" target="_blank" style="color:var(--accent);text-decoration:none">' +
                         escapeHtml(sd.extracted_title || sd.source_title || sd.source_url || 'Untitled') +
