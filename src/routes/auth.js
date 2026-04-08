@@ -51,7 +51,10 @@ function setupSession(db) {
     cookie: {
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       httpOnly: true,
-      secure: 'auto',
+      // 'auto' relies on req.secure, which depends on Express trust-proxy
+      // being configured correctly behind nginx/Cloudflare. Pinning to
+      // NODE_ENV makes the contract explicit: dev = http, prod = https.
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
     },
   });

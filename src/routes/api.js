@@ -19,6 +19,9 @@ var { getConfig } = require('../utils/config');
 function createApiRouter(deps) {
   var router = express.Router();
   var axios = require('axios');
+  var { assertSafeUrl, safeAxiosOptions } = require('../utils/safe-http');
+  var { parseId, httpError, sanitizeForClient } = require('../utils/api-helpers');
+  var { validateAndNormalizeUrl } = require('../utils/draft-helpers');
   var { firehose, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
 
   // ─── Simple in-memory cache for expensive API responses ────────────────────
@@ -359,14 +362,12 @@ function createApiRouter(deps) {
 
   router.get('/clusters/:id', function (req, res) {
     try {
-      var clusterId = parseInt(req.params.id, 10);
-      if (isNaN(clusterId)) {
-        return res.status(400).json({ error: 'Invalid cluster ID' });
-      }
+      var clusterId = parseId(req.params.id);
+      if (!clusterId) return res.status(400).json({ success: false, error: 'Invalid cluster id' });
 
       var cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
       if (!cluster) {
-        return res.status(404).json({ error: 'Cluster not found' });
+        return res.status(404).json({ success: false, error: 'Cluster not found' });
       }
 
       var articles = db.prepare(
@@ -375,8 +376,8 @@ function createApiRouter(deps) {
 
       res.json({ cluster: cluster, articles: articles });
     } catch (err) {
-      logger.error('api', 'Failed to fetch cluster', err.message);
-      res.status(500).json({ error: 'Failed to fetch cluster' });
+      logger.error('api', 'Failed to fetch cluster: ' + err.message);
+      res.status(500).json({ success: false, error: 'Failed to fetch cluster' });
     }
   });
 
@@ -711,14 +712,12 @@ function createApiRouter(deps) {
   //
   router.post('/clusters/:id/publish', function (req, res) {
     try {
-      var clusterId = parseInt(req.params.id, 10);
-      if (isNaN(clusterId)) {
-        return res.status(400).json({ error: 'Invalid cluster ID' });
-      }
+      var clusterId = parseId(req.params.id);
+      if (!clusterId) return res.status(400).json({ success: false, error: 'Invalid cluster id' });
 
       var cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
       if (!cluster) {
-        return res.status(404).json({ error: 'Cluster not found' });
+        return res.status(404).json({ success: false, error: 'Cluster not found' });
       }
 
       if (cluster.status === 'published' || cluster.status === 'queued') {
@@ -824,7 +823,7 @@ function createApiRouter(deps) {
       });
     } catch (err) {
       logger.error('api', 'Failed to create drafts for cluster ' + req.params.id + ': ' + err.message);
-      res.status(500).json({ error: 'Failed to enqueue cluster: ' + err.message });
+      res.status(500).json({ success: false, error: 'Failed to enqueue cluster' });
     }
   });
 
@@ -835,10 +834,8 @@ function createApiRouter(deps) {
   //
   router.delete('/clusters/:id/drafts', function (req, res) {
     try {
-      var clusterId = parseInt(req.params.id, 10);
-      if (isNaN(clusterId)) {
-        return res.status(400).json({ success: false, error: 'Invalid cluster ID' });
-      }
+      var clusterId = parseId(req.params.id);
+      if (!clusterId) return res.status(400).json({ success: false, error: 'Invalid cluster id' });
 
       // Safety check: don't delete if any draft is already published
       var publishedDraft = db.prepare(
@@ -891,7 +888,7 @@ function createApiRouter(deps) {
       });
     } catch (err) {
       logger.error('api', 'Failed to delete cluster #' + req.params.id + ' drafts: ' + err.message);
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, error: 'Failed to delete cluster drafts' });
     }
   });
 
@@ -899,10 +896,8 @@ function createApiRouter(deps) {
 
   router.post('/clusters/:id/skip', function (req, res) {
     try {
-      var clusterId = parseInt(req.params.id, 10);
-      if (isNaN(clusterId)) {
-        return res.status(400).json({ error: 'Invalid cluster ID' });
-      }
+      var clusterId = parseId(req.params.id);
+      if (!clusterId) return res.status(400).json({ success: false, error: 'Invalid cluster id' });
 
       var reason = (req.body && req.body.reason) || 'Manually skipped';
 
@@ -911,14 +906,14 @@ function createApiRouter(deps) {
       ).run(clusterId);
 
       if (result.changes === 0) {
-        return res.status(404).json({ error: 'Cluster not found' });
+        return res.status(404).json({ success: false, error: 'Cluster not found' });
       }
 
       logger.info('api', 'Cluster skipped', { clusterId: clusterId, reason: reason });
       res.json({ success: true, clusterId: clusterId, status: 'skipped', reason: reason });
     } catch (err) {
-      logger.error('api', 'Failed to skip cluster', err.message);
-      res.status(500).json({ error: 'Failed to skip cluster' });
+      logger.error('api', 'Failed to skip cluster: ' + err.message);
+      res.status(500).json({ success: false, error: 'Failed to skip cluster' });
     }
   });
 
@@ -1448,14 +1443,18 @@ function createApiRouter(deps) {
   router.post('/drafts', function (req, res) {
     try {
       var body = req.body || {};
-      var url = body.url;
 
-      if (!url) {
-        return res.status(400).json({ success: false, error: 'URL is required' });
+      // Validate + normalise the URL through the same helper used by
+      // manual-import. We can't trust body.url to be well-formed, and we
+      // also can't trust body.domain — it must be derived from the
+      // canonicalised URL so the dashboard groups sources correctly.
+      var v = validateAndNormalizeUrl(body.url);
+      if (!v) {
+        return res.status(400).json({ success: false, error: 'Invalid URL' });
       }
 
       // Check for duplicate
-      var existing = db.prepare('SELECT id FROM drafts WHERE source_url = ?').get(url);
+      var existing = db.prepare('SELECT id FROM drafts WHERE source_url = ?').get(v.url);
       if (existing) {
         return res.json({ success: true, draft_id: existing.id, message: 'Draft already exists' });
       }
@@ -1468,8 +1467,8 @@ function createApiRouter(deps) {
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual')"
       ).run(
         body.article_id || null,
-        url,
-        body.domain || null,
+        v.url,
+        v.domain,
         body.title || null,
         body.content_markdown || '',
         body.language || null,
@@ -1479,7 +1478,7 @@ function createApiRouter(deps) {
       );
 
       var draftId = result.lastInsertRowid;
-      logger.info('api', 'Draft ' + draftId + ' created from ' + (body.domain || 'unknown') + ': "' + (body.title || url) + '"');
+      logger.info('api', 'Draft ' + draftId + ' created from ' + v.domain + ': "' + (body.title || v.url) + '"');
 
       // Trigger extraction in background
       extractDraftContent(draftId, draftDeps).catch(function (err) {
@@ -1489,7 +1488,7 @@ function createApiRouter(deps) {
       return res.json({ success: true, draft_id: draftId });
     } catch (err) {
       logger.error('api', 'POST /api/drafts failed: ' + err.message);
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'Failed to create draft' });
     }
   });
 
@@ -1515,27 +1514,32 @@ function createApiRouter(deps) {
 
       var created = 0;
       var skipped = 0;
+      var invalid = 0;
       var createdIds = [];
       var urlMap = {};
 
       for (var i = 0; i < articles.length; i++) {
         var a = articles[i];
-        var url = a.url || '';
-        if (!url) { skipped++; continue; }
+        // Validate + normalise URL — same helper as manual-import + POST
+        // /drafts. We use the canonical form (not the raw input) for both
+        // dedupe and storage so the same article entered different ways
+        // (with/without www., with/without trailing slash) collapses.
+        var bv = validateAndNormalizeUrl(a.url);
+        if (!bv) { invalid++; continue; }
 
         // Skip known duplicates (fast path)
-        var existingDraft = checkDup.get(url);
+        var existingDraft = checkDup.get(bv.url);
         if (existingDraft) {
           skipped++;
-          urlMap[url] = existingDraft.id;
+          urlMap[bv.url] = existingDraft.id;
           continue;
         }
 
         try {
           var result = insertStmt.run(
             a.article_id || null,
-            url,
-            a.domain || null,
+            bv.url,
+            bv.domain,
             a.title || null,
             a.content_markdown || '',
             a.language || null,
@@ -1544,10 +1548,10 @@ function createApiRouter(deps) {
             draftPlatform
           );
           createdIds.push(result.lastInsertRowid);
-          urlMap[url] = result.lastInsertRowid;
+          urlMap[bv.url] = result.lastInsertRowid;
           created++;
         } catch (insertErr) {
-          logger.warn('api', 'Bulk draft insert failed for ' + url + ': ' + insertErr.message);
+          logger.warn('api', 'Bulk draft insert failed for ' + bv.url + ': ' + insertErr.message);
           skipped++;
         }
       }
@@ -1567,10 +1571,10 @@ function createApiRouter(deps) {
         })();
       }
 
-      return res.json({ success: true, created: created, skipped: skipped, total: articles.length, draftIds: createdIds, urlMap: urlMap });
+      return res.json({ success: true, created: created, skipped: skipped, invalid: invalid, total: articles.length, draftIds: createdIds, urlMap: urlMap });
     } catch (err) {
       logger.error('api', 'POST /api/drafts/bulk-create failed: ' + err.message);
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'Failed to create drafts' });
     }
   });
 
@@ -1633,21 +1637,25 @@ function createApiRouter(deps) {
   // GET /api/drafts/:id — Get single draft
   router.get('/drafts/:id', function (req, res) {
     try {
-      var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(req.params.id);
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
+      var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
       if (!draft) {
         return res.status(404).json({ success: false, error: 'Draft not found' });
       }
       return res.json({ success: true, data: draft });
     } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
+      logger.error('api', 'GET /drafts/:id: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to load draft' });
     }
   });
 
   // PUT /api/drafts/:id — Update draft settings
   router.put('/drafts/:id', function (req, res) {
     try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
       var body = req.body || {};
-      var id = req.params.id;
 
       var updates = [];
       var params = [];
@@ -1660,6 +1668,10 @@ function createApiRouter(deps) {
         }
       }
 
+      if (updates.length === 0) {
+        return res.status(400).json({ success: false, error: 'No fields to update' });
+      }
+
       updates.push("updated_at = datetime('now')");
       params.push(id);
 
@@ -1669,7 +1681,8 @@ function createApiRouter(deps) {
       logger.info('api', 'Draft ' + id + ' updated');
       return res.json({ success: true });
     } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
+      logger.error('api', 'PUT /drafts/:id: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to update draft' });
     }
   });
 
@@ -1695,8 +1708,6 @@ function createApiRouter(deps) {
 
       logger.info('api', 'Batch image fetch: starting for ' + missingImages.length + ' articles');
 
-      var axios = require('axios');
-
       (async function () {
         var found = 0;
         var failed = 0;
@@ -1704,7 +1715,11 @@ function createApiRouter(deps) {
         for (var i = 0; i < missingImages.length; i++) {
           var draft = missingImages[i];
           try {
-            var imgRes = await axios.get(draft.source_url, {
+            // SSRF: source_url originated from a user-supplied URL, so the
+            // background image-fetch must use the same defenses as the
+            // foreground extractor.
+            assertSafeUrl(draft.source_url);
+            var imgRes = await axios.get(draft.source_url, safeAxiosOptions({
               timeout: 8000,
               maxContentLength: 50 * 1024,
               headers: {
@@ -1714,7 +1729,7 @@ function createApiRouter(deps) {
               },
               maxRedirects: 3,
               validateStatus: function (s) { return s < 400; },
-            });
+            }));
 
             if (imgRes.data && typeof imgRes.data === 'string') {
               var imageUrl = extractImageFromHtml(imgRes.data, draft.source_url);
@@ -1799,46 +1814,19 @@ function createApiRouter(deps) {
         return res.status(400).json({ success: false, error: 'Maximum 100 URLs per import request' });
       }
 
-      // Normalize + validate URLs
-      // Per RFC 7230, browsers and servers commonly cap URLs around 2048 chars.
-      // We reject anything longer to avoid pathological inputs and prevent
-      // accidental rejection later by the extractor / WordPress.
-      var MAX_URL_LENGTH = 2048;
+      // Normalize + validate via shared helper. Centralising the rules
+      // (string-only, 2048-char cap, http(s) scheme, hostname required)
+      // means POST /drafts, bulk-create, and manual-import all enforce
+      // the same shape.
       var validUrls = [];
       var invalidUrls = [];
       for (var i = 0; i < rawUrls.length; i++) {
-        // I6: only accept string entries — silently coercing arbitrary types
-        // (numbers, objects, null) hides client bugs and may produce nonsense URLs.
-        if (typeof rawUrls[i] !== 'string') {
+        var v = validateAndNormalizeUrl(rawUrls[i]);
+        if (!v) {
           invalidUrls.push(rawUrls[i]);
           continue;
         }
-        var u = rawUrls[i].trim();
-        if (!u) continue;
-
-        if (u.length > MAX_URL_LENGTH) {
-          invalidUrls.push(rawUrls[i]);
-          continue;
-        }
-
-        // Must start with http:// or https://
-        if (!/^https?:\/\//i.test(u)) {
-          // Try adding https://
-          u = 'https://' + u;
-        }
-
-        try {
-          var parsed = new URL(u);
-          if (!parsed.hostname) throw new Error('no hostname');
-          // Re-check length after normalization (URL constructor may percent-encode)
-          if (parsed.href.length > MAX_URL_LENGTH) {
-            invalidUrls.push(rawUrls[i]);
-            continue;
-          }
-          validUrls.push({ url: parsed.href, domain: parsed.hostname.replace(/^www\./, '') });
-        } catch (e) {
-          invalidUrls.push(rawUrls[i]);
-        }
+        validUrls.push(v);
       }
 
       if (validUrls.length === 0) {
@@ -1992,13 +1980,16 @@ function createApiRouter(deps) {
   // DELETE /api/drafts/:id — Delete a draft
   router.delete('/drafts/:id', function (req, res) {
     try {
-      var result = db.prepare('DELETE FROM drafts WHERE id = ?').run(req.params.id);
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
+      var result = db.prepare('DELETE FROM drafts WHERE id = ?').run(id);
       if (result.changes === 0) {
         return res.status(404).json({ success: false, error: 'Draft not found' });
       }
       return res.json({ success: true });
     } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
+      logger.error('api', 'DELETE /drafts/:id: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to delete draft' });
     }
   });
 
@@ -2104,7 +2095,8 @@ function createApiRouter(deps) {
   // POST /api/drafts/:id/extract — Re-trigger extraction
   router.post('/drafts/:id/extract', function (req, res) {
     try {
-      var id = req.params.id;
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
       db.prepare("UPDATE drafts SET extraction_status = 'pending', status = 'fetching', updated_at = datetime('now') WHERE id = ?").run(id);
 
       extractDraftContent(id, draftDeps).catch(function (err) {
@@ -2113,7 +2105,8 @@ function createApiRouter(deps) {
 
       return res.json({ success: true, message: 'Extraction re-triggered' });
     } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
+      logger.error('api', 'POST /drafts/:id/extract: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to re-trigger extraction' });
     }
   });
 
@@ -2153,10 +2146,8 @@ function createApiRouter(deps) {
   //
   router.post('/clusters/:clusterId/rewrite', async function (req, res) {
     try {
-      var clusterId = parseInt(req.params.clusterId, 10);
-      if (isNaN(clusterId)) {
-        return res.status(400).json({ success: false, error: 'Invalid cluster ID' });
-      }
+      var clusterId = parseId(req.params.clusterId);
+      if (!clusterId) return res.status(400).json({ success: false, error: 'Invalid cluster id' });
 
       if (!scheduler || typeof scheduler.rewriteClusterManual !== 'function') {
         return res.status(500).json({ success: false, error: 'Pipeline not available' });
@@ -2171,14 +2162,17 @@ function createApiRouter(deps) {
       });
     } catch (err) {
       logger.error('api', 'Cluster rewrite failed: ' + err.message);
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, error: 'Cluster rewrite failed' });
     }
   });
 
   // POST /api/drafts/:id/rewrite — Trigger AI rewrite
   router.post('/drafts/:id/rewrite', function (req, res) {
     try {
-      var id = req.params.id;
+      var id = parseId(req.params.id);
+      if (!id) {
+        return res.status(400).json({ success: false, error: 'Invalid draft id' });
+      }
       var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
 
       if (!draft) {
@@ -2188,8 +2182,6 @@ function createApiRouter(deps) {
       if (!draft.extracted_content && !draft.source_content_markdown) {
         return res.status(400).json({ success: false, error: 'No content available to rewrite. Extract content first.' });
       }
-
-      db.prepare("UPDATE drafts SET status = 'rewriting', updated_at = datetime('now') WHERE id = ?").run(id);
 
       var customPrompt = (req.body && req.body.custom_prompt) || draft.custom_ai_instructions || '';
 
@@ -2208,27 +2200,38 @@ function createApiRouter(deps) {
       aiOptions.schemaTypes = draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList';
       aiOptions.customPrompt = customPrompt;
 
+      // IMPORTANT: rewriteDraftContent owns ALL status transitions
+      // (rewriting → ready / draft / failed) and writes retry_count +
+      // error_message on failure. Earlier this route also flipped status
+      // to 'rewriting' before calling the helper AND reset to 'draft' in
+      // the .catch handler — that race could clobber the helper's
+      // 'failed' status when retries were exhausted, causing drafts to
+      // appear retryable forever. Now we just log and trust the helper.
       rewriteDraftContent(id, customPrompt, draftDeps, aiOptions).catch(function (err) {
         logger.warn('api', 'Rewrite failed for draft ' + id + ': ' + err.message);
-        db.prepare("UPDATE drafts SET status = 'draft', updated_at = datetime('now') WHERE id = ?").run(id);
       });
 
       return res.json({ success: true, message: 'Rewrite started' });
     } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
+      logger.error('api', 'POST /drafts/' + req.params.id + '/rewrite: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to start rewrite' });
     }
   });
 
   // PUT /api/drafts/:id/html — Save edited HTML
   router.put('/drafts/:id/html', function (req, res) {
     try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
       var html = req.body && req.body.html;
-      var id = req.params.id;
+      if (typeof html !== 'string') return res.status(400).json({ success: false, error: 'html field required' });
 
-      db.prepare("UPDATE drafts SET rewritten_html = ?, updated_at = datetime('now') WHERE id = ?").run(html, id);
+      var info = db.prepare("UPDATE drafts SET rewritten_html = ?, updated_at = datetime('now') WHERE id = ?").run(html, id);
+      if (info.changes === 0) return res.status(404).json({ success: false, error: 'Draft not found' });
       return res.json({ success: true });
     } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
+      logger.error('api', 'PUT /drafts/:id/html: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to save HTML' });
     }
   });
 
@@ -2292,14 +2295,15 @@ function createApiRouter(deps) {
       return res.json({ success: true, xml: bloggerXML });
     } catch (err) {
       logger.error('api', 'Blogger XML conversion failed: ' + err.message);
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'Blogger XML conversion failed' });
     }
   });
 
   // POST /api/drafts/:id/publish — Publish to platform
   router.post('/drafts/:id/publish', function (req, res) {
     try {
-      var id = req.params.id;
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
       var body = req.body || {};
       // Default to wordpress if WP credentials are configured
       var config = getConfig();
@@ -2410,7 +2414,7 @@ function createApiRouter(deps) {
       return res.json({ success: true, url: publishUrl });
     } catch (err) {
       logger.error('api', 'Publish failed for draft ' + id + ': ' + err.message);
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'Publish failed' });
     }
   });
 
@@ -2441,7 +2445,8 @@ function createApiRouter(deps) {
 
   router.post('/drafts/:id/retry', function (req, res) {
     try {
-      var id = parseInt(req.params.id, 10);
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
       var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
 
@@ -2453,7 +2458,8 @@ function createApiRouter(deps) {
       logger.info('api', 'Draft ' + id + ' reset for retry');
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ success: false, error: err.message });
+      logger.error('api', 'POST /drafts/:id/retry: ' + err.message);
+      res.status(500).json({ success: false, error: 'Failed to reset draft' });
     }
   });
 

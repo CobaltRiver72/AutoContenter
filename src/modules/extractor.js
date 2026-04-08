@@ -3,6 +3,7 @@
 var axios = require('axios');
 var { JSDOM } = require('jsdom');
 var { Readability } = require('@mozilla/readability');
+var { assertSafeUrl, safeAxiosOptions } = require('../utils/safe-http');
 
 var MODULE = 'extractor';
 
@@ -137,7 +138,12 @@ class ContentExtractor {
   }
 
   async _fetchAndExtract(url) {
-    var response = await axios.get(url, {
+    // SSRF: structural pre-flight before axios. The safe agents below
+    // also intercept DNS + redirects, but pre-flight is needed for the
+    // case where the URL itself is an IP literal (DNS never called).
+    assertSafeUrl(url);
+
+    var response = await axios.get(url, safeAxiosOptions({
       timeout: FETCH_TIMEOUT_MS,
       maxContentLength: MAX_CONTENT_LENGTH,
       headers: {
@@ -149,7 +155,7 @@ class ContentExtractor {
       },
       maxRedirects: 5,
       validateStatus: function(status) { return status >= 200 && status < 300; },
-    });
+    }));
 
     var html = response.data;
     if (typeof html !== 'string' || html.length < 500) {

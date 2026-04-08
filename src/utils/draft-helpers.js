@@ -3,6 +3,8 @@
 var axios = require('axios');
 var { JSDOM } = require('jsdom');
 var { Readability } = require('@mozilla/readability');
+var { assertSafeUrl, safeAxiosOptions, isBlockedIp } = require('./safe-http');
+var net = require('net');
 
 // ─── Featured Image Extraction ──────────────────────────────────────────
 
@@ -106,7 +108,64 @@ var BROWSER_HEADERS = {
   'Referer': 'https://www.google.com/',
 };
 
+/**
+ * Normalise + validate a user-supplied URL string.
+ *
+ * Returns `{ url, domain }` on success or `null` on failure. The caller
+ * decides whether to surface the rejection (manual-import returns the
+ * offending raw value in `invalid[]`, single-draft endpoints just 400).
+ *
+ * Rules:
+ *   - Must be a string. Numbers, objects, null, etc. are rejected — silent
+ *     coercion hides client bugs.
+ *   - Trimmed. Empty after trim → reject.
+ *   - 2048-char cap (RFC 7230 practical limit). Checked twice: once on the
+ *     raw input, once after `new URL()` normalises (percent-encoding can
+ *     grow the string).
+ *   - Scheme: only http/https. If no scheme is present we prepend
+ *     `https://` so users can paste `example.com/article` without ceremony.
+ *   - Hostname required (URL constructor accepts e.g. `http:///foo`).
+ *   - `domain` strips a leading `www.` so the dashboard groups source
+ *     domains consistently.
+ */
+var MAX_URL_LENGTH = 2048;
+
+function validateAndNormalizeUrl(raw) {
+  if (typeof raw !== 'string') return null;
+  var u = raw.trim();
+  if (!u) return null;
+  if (u.length > MAX_URL_LENGTH) return null;
+
+  if (!/^https?:\/\//i.test(u)) {
+    u = 'https://' + u;
+  }
+
+  try {
+    var parsed = new URL(u);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (!parsed.hostname) return null;
+    if (parsed.href.length > MAX_URL_LENGTH) return null;
+    // SSRF pre-flight at intake: reject IP-literal hostnames in blocked
+    // ranges so we never queue a draft we know we'll refuse to fetch
+    // (assertSafeUrl would also catch it later, but rejecting at the
+    // dashboard gives the user immediate feedback instead of a silent
+    // failed extraction half a minute later).
+    if (net.isIP(parsed.hostname) && isBlockedIp(parsed.hostname)) return null;
+    return {
+      url: parsed.href,
+      domain: parsed.hostname.replace(/^www\./, ''),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 async function fetchHtml(url) {
+  // SSRF: structural pre-flight before we hand the URL to axios. The
+  // safe agents below also intercept DNS lookups + redirects, but the
+  // pre-flight catches IP-literal hostnames where DNS is never called.
+  assertSafeUrl(url);
+
   var attempts = 0;
   var maxAttempts = 2;
   var lastErr = null;
@@ -114,18 +173,19 @@ async function fetchHtml(url) {
   while (attempts < maxAttempts) {
     attempts++;
     try {
-      var res = await axios.get(url, {
+      var res = await axios.get(url, safeAxiosOptions({
         timeout: attempts === 1 ? 15000 : 25000,
         maxContentLength: 5 * 1024 * 1024,
         headers: BROWSER_HEADERS,
         maxRedirects: 5,
         validateStatus: function (status) { return status < 400; },
-      });
+      }));
 
       var html = res.data;
       if (!html || typeof html !== 'string') return null;
 
-      // Handle meta-refresh redirects (some sites use these)
+      // Handle meta-refresh redirects (some sites use these). Re-validate
+      // the redirect target — a fetched page is untrusted input.
       var metaMatch = html.match(/<meta[^>]*http-equiv=["']refresh["'][^>]*content=["']\d+;\s*url=([^"']+)["']/i);
       if (metaMatch && metaMatch[1] && html.length < 5000) {
         var redirectUrl = metaMatch[1];
@@ -133,12 +193,13 @@ async function fetchHtml(url) {
           var urlObj = new URL(url);
           redirectUrl = urlObj.origin + redirectUrl;
         }
-        var redirectRes = await axios.get(redirectUrl, {
+        assertSafeUrl(redirectUrl);
+        var redirectRes = await axios.get(redirectUrl, safeAxiosOptions({
           timeout: 15000,
           maxContentLength: 5 * 1024 * 1024,
           headers: BROWSER_HEADERS,
           maxRedirects: 5,
-        });
+        }));
         if (redirectRes.data && typeof redirectRes.data === 'string') {
           return redirectRes.data;
         }
@@ -147,6 +208,9 @@ async function fetchHtml(url) {
       return html;
     } catch (err) {
       lastErr = err;
+      // Never retry SSRF rejections — the URL is structurally bad and
+      // a second try will fail identically. Bail straight out.
+      if (err && err.code === 'ESSRF') throw err;
       if (attempts < maxAttempts && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || err.code === 'ECONNRESET')) {
         continue;
       }
@@ -792,4 +856,5 @@ module.exports = {
   rewriteDraftContent: rewriteDraftContent,
   validateRewriteOutput: validateRewriteOutput,
   updateDomainStats: updateDomainStats,
+  validateAndNormalizeUrl: validateAndNormalizeUrl,
 };

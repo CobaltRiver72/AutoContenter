@@ -12,6 +12,7 @@ var config = getConfig();
 
 // ─── 2. Initialize SQLite database (runs migrations on require) ─────────────
 var { db, closeDb, recoverStuckDrafts } = require('./utils/db');
+var { sanitizeForClient } = require('./utils/api-helpers');
 
 // ─── 3. Initialize logger, set db reference ────────────────────────────────
 var logger = require('./utils/logger');
@@ -245,8 +246,12 @@ async function boot() {
     message: { error: 'Too many login attempts' }
   }));
 
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: false }));
+  // Body limits — manual-import accepts up to 100 URLs at once, but the
+  // largest realistic settings save is well under 256 KB. 2 MB on JSON
+  // gives headroom for bulk imports without inviting memory abuse from
+  // arbitrary giant payloads.
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ extended: false, limit: '256kb' }));
   app.use(setupSession(db));
 
   // Dashboard routes (/, /login, /logout)
@@ -275,10 +280,22 @@ async function boot() {
   app.use('/img', express.static(path.resolve(__dirname, '..', 'public', 'img')));
   app.use('/fonts', express.static(path.resolve(__dirname, '..', 'public', 'fonts')));
 
-  // Global error handler — NEVER expose stack traces
+  // Global error handler — NEVER expose stack traces.
+  //
+  // Routes throw `httpError(status, msg)` (or any Error with `statusCode`)
+  // and we map that to a safe response here. 4xx with `expose !== false`
+  // is echoed verbatim; everything else collapses to "Internal server
+  // error" so SQL fragments, hostnames, and SDK error codes never leak.
+  // The original message is always logged for debugging.
   app.use(function(err, req, res, next) {
-    logger.error('express', err.message);
-    res.status(500).json({ error: 'Internal server error' });
+    var safe = sanitizeForClient(err);
+    if (safe.status >= 500) {
+      logger.error('express', (req.method || '?') + ' ' + (req.originalUrl || req.url) + ' — ' + (err && err.message));
+      if (err && err.stack) logger.error('express', err.stack);
+    } else {
+      logger.warn('express', (req.method || '?') + ' ' + (req.originalUrl || req.url) + ' → ' + safe.status + ' ' + (err && err.message));
+    }
+    res.status(safe.status).json({ success: false, error: safe.message });
   });
 
   // ─── Start server ────────────────────────────────────────────────────────
