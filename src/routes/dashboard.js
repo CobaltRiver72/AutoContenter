@@ -16,6 +16,15 @@ function createDashboardRouter() {
 
   router.get('/', function (req, res) {
     if (req.session && req.session.authenticated) {
+      // Never cache the SPA shell — its <script src="?v=N"> tags are the only
+      // way the browser learns about new JS/CSS bundles. If the HTML is cached,
+      // a new dashboard.js is never requested even after a hard refresh.
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      // RFC 7234: an invalid Expires value (e.g. "0") MUST be treated as already
+      // expired by conformant caches. Use a real, in-the-past date instead so
+      // misbehaving intermediaries don't fall back to caching the SPA shell.
+      res.set('Expires', 'Thu, 01 Jan 1970 00:00:00 GMT');
       return res.sendFile(path.resolve(__dirname, '..', '..', 'public', 'index.html'));
     }
     return res.redirect('/login');

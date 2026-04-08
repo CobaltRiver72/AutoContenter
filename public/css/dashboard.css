@@ -2722,3 +2722,152 @@ select:focus {
   .batch-actions-bar { flex-direction: column; }
   .multi-select-bar-inner { flex-wrap: wrap; justify-content: center; }
 }
+
+/* ─── Manual URL Import Modal ──────────────────────────────────────────── */
+.manual-import-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.manual-import-modal.hidden { display: none; }
+.manual-import-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+.manual-import-content {
+  position: relative;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 10px;
+  width: 90vw;
+  max-width: 640px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.manual-import-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #2a2a2a;
+}
+.manual-import-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #f0f0f0;
+}
+.manual-import-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 28px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+.manual-import-close:hover { color: #fff; }
+.manual-import-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+.manual-import-description {
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+.manual-import-content textarea {
+  width: 100%;
+  min-height: 220px;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  padding: 12px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #0e0e0e;
+  color: #e0e0e0;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.manual-import-content textarea:focus {
+  outline: none;
+  border-color: #6c63ff;
+}
+.manual-import-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #888;
+}
+.manual-import-hint {
+  font-style: italic;
+}
+.manual-import-result {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.manual-import-result.hidden { display: none; }
+.manual-import-result .result-success {
+  background: rgba(34, 197, 94, 0.1);
+  border-left: 3px solid #22c55e;
+  color: #22c55e;
+  padding: 12px;
+  border-radius: 4px;
+}
+.manual-import-result .result-error {
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+  color: #ef4444;
+  padding: 12px;
+  border-radius: 4px;
+}
+.manual-import-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #2a2a2a;
+}
+
+/* Manual import badge on draft cards */
+.badge-manual-import {
+  display: inline-block;
+  background: linear-gradient(135deg, #8e44ad, #9b59b6);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-right: 6px;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Import URLs button — right-aligned in the action bar */
+.btn-import-urls {
+  margin-left: auto;
+  background: linear-gradient(135deg, #8e44ad, #9b59b6);
+  color: #fff;
+  border: none;
+}
+.btn-import-urls:hover {
+  background: linear-gradient(135deg, #9b59b6, #af6cc4);
+  filter: brightness(1.1);
+}
+.btn-import-urls .action-btn-icon,
+.btn-import-urls .action-btn-text {
+  color: #fff;
+}

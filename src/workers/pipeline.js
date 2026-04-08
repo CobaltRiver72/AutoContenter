@@ -28,6 +28,11 @@ class Pipeline {
     this.REWRITE_CONCURRENCY = 3;
     this.REWRITE_POLL_MS = 5000;
     this.PUBLISH_POLL_MS = 30000;
+    // Slow domains (paywalled / heavy JS) and Anthropic-mediated extraction
+    // can occasionally cross the 3-minute mark, leaving the lease to expire
+    // mid-work. 8 minutes gives extraction enough headroom without leaving
+    // genuinely stuck drafts locked for too long.
+    this.LEASE_MINUTES = 8;
 
     // Track active workers
     this._extractionRunning = false;
@@ -54,83 +59,6 @@ class Pipeline {
       publishesFailed: 0,
     };
 
-    // Prepared statements (lazy)
-    this._stmts = {};
-
-    // Flag for backward compat with old scheduler code
-    this._processing = false;
-  }
-
-  // ─── PREPARED STATEMENTS ─────────────────────────────────────────────
-
-  _getStmt(name, sql) {
-    if (!this._stmts[name]) {
-      this._stmts[name] = this.db.prepare(sql);
-    }
-    return this._stmts[name];
-  }
-
-  // ─── ATOMIC JOB CLAIMING ─────────────────────────────────────────────
-  //
-  // Claims a batch of jobs atomically. Uses lease_expires_at to prevent
-  // duplicate processing. Dead jobs auto-recover when lease expires.
-
-  claimJobs(status, workerName, count, extraConditions) {
-    var leaseMinutes = this.LEASE_MINUTES || 3;
-    var conditions = "status = ? AND mode = 'auto'" +
-      " AND (locked_by IS NULL OR lease_expires_at < datetime('now'))" +
-      " AND (next_run_at IS NULL OR next_run_at <= datetime('now'))";
-
-    // SAFETY: Only allow known extra conditions (prevent SQL injection)
-    if (extraConditions === "extraction_status NOT IN ('success','cached','fallback')") {
-      conditions += " AND extraction_status NOT IN ('success','cached','fallback')";
-    } else if (extraConditions === "cluster_role = 'primary'") {
-      conditions += " AND cluster_role = 'primary'";
-    }
-    // Any other extraConditions value is silently ignored for safety
-
-    // ATOMIC: Claim and select in a transaction so no other worker can race us
-    var self = this;
-    var claimTransaction = this.db.transaction(function () {
-      // Step 1: Find unclaimed jobs
-      var findSql = 'SELECT id FROM drafts WHERE ' + conditions +
-        " ORDER BY cluster_role = 'primary' DESC, created_at ASC LIMIT ?";
-      var found = self.db.prepare(findSql).all(status, count);
-      if (found.length === 0) return [];
-
-      var ids = found.map(function (r) { return r.id; });
-
-      // Step 2: Claim them atomically (in same transaction)
-      var placeholders = ids.map(function () { return '?'; }).join(',');
-      var claimSql = "UPDATE drafts SET locked_by = ?, locked_at = datetime('now'), " +
-        "lease_expires_at = datetime('now', '+" + leaseMinutes + " minutes') " +
-        "WHERE id IN (" + placeholders + ") AND (locked_by IS NULL OR lease_expires_at < datetime('now'))";
-      self.db.prepare(claimSql).run.apply(null, [workerName].concat(ids));
-
-      // Step 3: Return claimed drafts
-      var claimedSql = 'SELECT * FROM drafts WHERE id IN (' + placeholders + ') AND locked_by = ?';
-      return self.db.prepare(claimedSql).all.apply(null, ids.concat([workerName]));
-    });
-
-    return claimTransaction();
-  }
-
-  releaseJob(draftId) {
-    this.db.prepare(
-      "UPDATE drafts SET locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, updated_at = datetime('now') WHERE id = ?"
-    ).run(draftId);
-  }
-
-  // ─── MEMORY WATCHDOG ─────────────────────────────────────────────────
-
-  _checkMemory() {
-    var memUsage = process.memoryUsage();
-    var rssMB = Math.round(memUsage.rss / 1024 / 1024);
-    if (rssMB > this.MEMORY_LIMIT_MB) {
-      this.logger.warn(MODULE, 'MEMORY HIGH: RSS=' + rssMB + 'MB (limit=' + this.MEMORY_LIMIT_MB + 'MB). Pausing extraction 30s');
-      return false;
-    }
-    return true;
   }
 
   // ─── EXTRACTION WORKER LOOP ──────────────────────────────────────────
@@ -144,21 +72,25 @@ class Pipeline {
     try {
       // Find ONE draft that needs extraction
       var draft = this.db.prepare(
-        "SELECT * FROM drafts WHERE status = 'fetching' AND mode = 'auto' " +
-        "AND (locked_by IS NULL OR lease_expires_at < datetime('now')) " +
-        "AND (next_run_at IS NULL OR next_run_at <= datetime('now')) " +
-        "ORDER BY cluster_role = 'primary' DESC, created_at ASC " +
+        "SELECT * FROM drafts WHERE status = 'fetching' " +
+        "  AND mode IN ('auto', 'manual_import') " +
+        "  AND (locked_by IS NULL OR lease_expires_at < datetime('now')) " +
+        "  AND (next_run_at IS NULL OR next_run_at <= datetime('now')) " +
+        "ORDER BY " +
+        "  CASE WHEN mode = 'manual_import' THEN 0 ELSE 1 END, " +
+        "  cluster_role = 'primary' DESC, " +
+        "  created_at ASC " +
         "LIMIT 1"
       ).get();
 
       if (!draft) return;
 
-      // Lock this one draft
+      // Lock this one draft (lease window must match this.LEASE_MINUTES)
       var lockResult = this.db.prepare(
         "UPDATE drafts SET locked_by = 'extractor', locked_at = datetime('now'), " +
-        "lease_expires_at = datetime('now', '+3 minutes') " +
+        "lease_expires_at = datetime('now', '+' || ? || ' minutes') " +
         "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
-      ).run(draft.id);
+      ).run(this.LEASE_MINUTES, draft.id);
 
       if (lockResult.changes === 0) return;
 
@@ -178,10 +110,52 @@ class Pipeline {
 
         this.stats.extractionsCompleted++;
 
-        var updated = this.db.prepare('SELECT extraction_status, extracted_content FROM drafts WHERE id = ?').get(draft.id);
+        var updated = this.db.prepare(
+          'SELECT extraction_status, extracted_content, mode FROM drafts WHERE id = ?'
+        ).get(draft.id);
+
         if (updated) {
           this.logger.info(MODULE, 'Extracted #' + draft.id + ' -> ' +
             updated.extraction_status + ' (' + (updated.extracted_content || '').length + ' chars)');
+
+          // ─── MANUAL IMPORT: Auto-publish after extraction ───────────────
+          // Manual imports skip the rewrite queue entirely. The raw extracted
+          // content IS the final content. Mark as published locally (no WP push).
+          if (updated.mode === 'manual_import') {
+            // Accept any extraction state where we got usable content. The
+            // extractor writes 'success', 'cached' (Google Cache), or 'fallback'
+            // (low-quality Readability) — all three produce content worth keeping.
+            var extractionOk = updated.extraction_status === 'success'
+              || updated.extraction_status === 'cached'
+              || updated.extraction_status === 'fallback';
+
+            if (extractionOk && updated.extracted_content && updated.extracted_content.length >= 50) {
+              this.db.prepare(
+                "UPDATE drafts SET status = 'published', " +
+                "published_at = datetime('now'), " +
+                "updated_at = datetime('now') " +
+                "WHERE id = ?"
+              ).run(draft.id);
+              this.logger.info(MODULE, 'Manual import #' + draft.id + ' auto-published (local only, ' +
+                updated.extraction_status + ')');
+            } else {
+              // Extraction failed — populate error tracking so the UI can show
+              // a useful message and (eventually) a retry button.
+              var failMsg = 'Manual import extraction failed (status=' +
+                (updated.extraction_status || 'unknown') + ', content length=' +
+                ((updated.extracted_content || '').length) + ')';
+              this.db.prepare(
+                "UPDATE drafts SET status = 'failed', " +
+                "failed_permanent = 1, " +
+                "error_message = COALESCE(error_message, ?), " +
+                "last_error_at = datetime('now'), " +
+                "updated_at = datetime('now') " +
+                "WHERE id = ?"
+              ).run(failMsg, draft.id);
+              this.logger.warn(MODULE, 'Manual import #' + draft.id + ' failed extraction — ' + failMsg);
+            }
+          }
+          // ─── END MANUAL IMPORT HANDLING ─────────────────────────────────
         }
       } catch (err) {
         this.logger.warn(MODULE, 'Extraction #' + draft.id + ' error: ' + err.message);
@@ -498,11 +472,11 @@ class Pipeline {
 
       var clusterId = readyPrimary.cluster_id;
 
-      // Lock it
+      // Lock it (lease window must match this.LEASE_MINUTES)
       this.db.prepare(
         "UPDATE drafts SET locked_by = 'publisher', locked_at = datetime('now'), " +
-        "lease_expires_at = datetime('now', '+3 minutes') WHERE id = ?"
-      ).run(readyPrimary.id);
+        "lease_expires_at = datetime('now', '+' || ? || ' minutes') WHERE id = ?"
+      ).run(this.LEASE_MINUTES, readyPrimary.id);
 
       this.logger.info(MODULE, 'Publishing cluster #' + clusterId + ': "' +
         (readyPrimary.rewritten_title || readyPrimary.source_title || '').substring(0, 60) + '"');

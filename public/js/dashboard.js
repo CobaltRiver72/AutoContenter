@@ -37,6 +37,10 @@
   var _selectedDraftCount = 0;
   var _selectModeActive = false;
 
+  // ─── Published page UI state (preserved across re-renders) ────────────
+  var _publishedFilter = 'all';
+  var _loadPublishedInFlight = false;
+
   // ─── Rule Templates ────────────────────────────────────────────────────
 
   // ─── Firehose Lucene Rule Reference ──────────────────────────────────
@@ -2084,6 +2088,12 @@
   var publishedPollInterval = null;
 
   function loadPublished() {
+    // Guard: never run two loadPublished() calls in parallel.
+    // Without this, rapid nav clicks (or polling races) caused empty/partial
+    // renders and ghost listeners.
+    if (_loadPublishedInFlight) return;
+    _loadPublishedInFlight = true;
+
     _selectedDraftIds = {};
     _selectedDraftCount = 0;
     _selectModeActive = false;
@@ -2103,6 +2113,9 @@
       .catch(function (err) {
         if (container) container.innerHTML = '<p class="placeholder-text">Failed to load</p>';
         showToast('Failed to load drafts: ' + err.message, 'error');
+      })
+      .finally(function () {
+        _loadPublishedInFlight = false;
       });
   }
 
@@ -2119,15 +2132,20 @@
       return;
     }
 
-    // Separate cluster drafts from manual drafts
+    // Separate cluster drafts from manual drafts and imported (manual_import) drafts.
+    // Note: legacy "manual" tab = drafts without cluster_id AND not from manual_import.
+    // The new "imported" tab is its own list with mode='manual_import'.
     var clusterMap = {};
     var manualDrafts = [];
+    var importedDrafts = [];
     for (var i = 0; i < drafts.length; i++) {
       var d = drafts[i];
       if (d.cluster_id) {
         if (!clusterMap[d.cluster_id]) clusterMap[d.cluster_id] = { drafts: [], primary: null };
         clusterMap[d.cluster_id].drafts.push(d);
         if (d.cluster_role === 'primary') clusterMap[d.cluster_id].primary = d;
+      } else if (d.mode === 'manual_import') {
+        importedDrafts.push(d);
       } else {
         manualDrafts.push(d);
       }
@@ -2172,6 +2190,7 @@
           '<button class="filter-btn active" data-filter="all">All (' + counts.all + ')</button>' +
           '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterIds.length + ')</button>' +
           '<button class="filter-btn" data-filter="manual">&#128100; Manual (' + manualDrafts.length + ')</button>' +
+          '<button class="filter-btn" data-filter="imported">&#128229; Imported (' + importedDrafts.length + ')</button>' +
           '<span class="filter-divider"></span>' +
           '<button class="filter-btn" data-filter="fetching">Fetching (' + counts.fetching + ')</button>' +
           '<button class="filter-btn" data-filter="draft">Extracted (' + counts.draft + ')</button>' +
@@ -2234,6 +2253,10 @@
             '<span class="action-btn-icon">&#128247;</span>' +
             '<span class="action-btn-text">Fetch Images</span>' +
           '</button>' +
+          '<button type="button" class="action-btn btn-import-urls" id="btn-manual-import" onclick="window.__openManualImportModal()">' +
+            '<span class="action-btn-icon">&#128229;</span>' +
+            '<span class="action-btn-text">Import URLs</span>' +
+          '</button>' +
         '</div>' +
       '</div>';
 
@@ -2259,6 +2282,14 @@
       cardsHTML += renderDraftCard(manualDrafts[mi]);
     }
 
+    // Imported (manual_import) section
+    if (importedDrafts.length > 0) {
+      cardsHTML += '<div class="section-divider"><span>Imported URLs</span></div>';
+    }
+    for (var ii = 0; ii < importedDrafts.length; ii++) {
+      cardsHTML += renderDraftCard(importedDrafts[ii]);
+    }
+
     var multiSelectBarHTML =
       '<div id="multi-select-bar" class="multi-select-bar">' +
         '<div class="multi-select-bar-inner">' +
@@ -2271,43 +2302,76 @@
 
     container.innerHTML = filterHTML + '<div class="drafts-list">' + cardsHTML + '</div>' + multiSelectBarHTML;
 
+    // ─── Apply a filter to the rendered list (used by click handler + restore-after-poll) ───
+    function applyPublishedFilter(filter) {
+      var siblings = container.querySelectorAll('.filter-btn');
+      for (var s = 0; s < siblings.length; s++) {
+        if (siblings[s].getAttribute('data-filter') === filter) {
+          siblings[s].classList.add('active');
+        } else {
+          siblings[s].classList.remove('active');
+        }
+      }
+
+      var groups = container.querySelectorAll('.cluster-group');
+      var singles = container.querySelectorAll('.draft-card');
+      var dividers = container.querySelectorAll('.section-divider');
+
+      for (var g = 0; g < groups.length; g++) {
+        if (filter === 'all' || filter === 'cluster') {
+          groups[g].style.display = '';
+        } else if (filter === 'manual' || filter === 'imported') {
+          groups[g].style.display = 'none';
+        } else {
+          var hasMatch = groups[g].querySelector('[data-status="' + filter + '"]');
+          groups[g].style.display = hasMatch ? '' : 'none';
+        }
+      }
+      for (var dd = 0; dd < singles.length; dd++) {
+        var cardStatus = singles[dd].getAttribute('data-status');
+        var cardMode = singles[dd].getAttribute('data-mode');
+        if (filter === 'all') {
+          singles[dd].style.display = '';
+        } else if (filter === 'manual') {
+          // Legacy "manual" tab: drafts without cluster_id and NOT manual_import
+          singles[dd].style.display = (cardMode !== 'manual_import') ? '' : 'none';
+        } else if (filter === 'imported') {
+          // New "imported" tab: only manual_import drafts
+          singles[dd].style.display = (cardMode === 'manual_import') ? '' : 'none';
+        } else if (filter === 'cluster') {
+          singles[dd].style.display = 'none';
+        } else {
+          singles[dd].style.display = (cardStatus === filter) ? '' : 'none';
+        }
+      }
+      // Dividers are only meaningful when "all" or "manual"/"imported" sections are visible
+      for (var dv = 0; dv < dividers.length; dv++) {
+        var divLabel = (dividers[dv].textContent || '').toLowerCase();
+        if (filter === 'all') {
+          dividers[dv].style.display = '';
+        } else if (filter === 'manual' && divLabel.indexOf('manual') !== -1 && divLabel.indexOf('imported') === -1) {
+          dividers[dv].style.display = '';
+        } else if (filter === 'imported' && divLabel.indexOf('imported') !== -1) {
+          dividers[dv].style.display = '';
+        } else {
+          dividers[dv].style.display = 'none';
+        }
+      }
+    }
+
     // Attach filter listeners
     var filterBtns = container.querySelectorAll('.filter-btn');
     for (var f = 0; f < filterBtns.length; f++) {
       filterBtns[f].addEventListener('click', function () {
         var filter = this.getAttribute('data-filter');
-        var siblings = container.querySelectorAll('.filter-btn');
-        for (var s = 0; s < siblings.length; s++) siblings[s].classList.remove('active');
-        this.classList.add('active');
-
-        var groups = container.querySelectorAll('.cluster-group');
-        var singles = container.querySelectorAll('.draft-card');
-        var dividers = container.querySelectorAll('.section-divider');
-
-        for (var g = 0; g < groups.length; g++) {
-          if (filter === 'all' || filter === 'cluster') {
-            groups[g].style.display = '';
-          } else if (filter === 'manual') {
-            groups[g].style.display = 'none';
-          } else {
-            var hasMatch = groups[g].querySelector('[data-status="' + filter + '"]');
-            groups[g].style.display = hasMatch ? '' : 'none';
-          }
-        }
-        for (var dd = 0; dd < singles.length; dd++) {
-          var cardStatus = singles[dd].getAttribute('data-status');
-          if (filter === 'all' || filter === 'manual') {
-            singles[dd].style.display = '';
-          } else if (filter === 'cluster') {
-            singles[dd].style.display = 'none';
-          } else {
-            singles[dd].style.display = (cardStatus === filter) ? '' : 'none';
-          }
-        }
-        for (var dv = 0; dv < dividers.length; dv++) {
-          dividers[dv].style.display = (filter === 'all') ? '' : 'none';
-        }
+        _publishedFilter = filter;
+        applyPublishedFilter(filter);
       });
+    }
+
+    // Restore the previously-active filter after polling re-renders the DOM
+    if (_publishedFilter && _publishedFilter !== 'all') {
+      applyPublishedFilter(_publishedFilter);
     }
 
     // ─── Batch Extract button handler ──────────────────────────────
@@ -2653,7 +2717,7 @@
     if (draft.status === 'published') cardClass += ' compact-published';
     if (draft.status === 'failed') cardClass += ' compact-failed';
 
-    return '<div class="' + cardClass + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
+    return '<div class="' + cardClass + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '" data-mode="' + escapeHtml(draft.mode || '') + '">' +
       (draft.status !== 'published' ?
         '<input type="checkbox" class="draft-select-checkbox" data-draft-id="' + draft.id + '" ' +
           'onclick="window.__toggleDraftSelect(' + draft.id + ', event)" ' +
@@ -2674,7 +2738,10 @@
               'style="width:60px;height:45px;border-radius:4px;object-fit:cover" ' +
               'onerror="this.parentElement.style.display=\'none\'" />' +
           '</div>' : '') +
-        '<div class="compact-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</div>' +
+        '<div class="compact-title">' +
+          (draft.mode === 'manual_import' ? '<span class="badge-manual-import" title="Manually imported">&#128229; MANUAL IMPORT</span>' : '') +
+          escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) +
+        '</div>' +
         (contentPreview ? '<p class="compact-preview">' + escapeHtml(contentPreview) + '</p>' : '') +
         errorHTML +
       '</div>' +
@@ -2732,7 +2799,11 @@
       imageHTML = '<div class="draft-card-image"><img src="' + escapeHtml(draft.featured_image) + '" alt="" onerror="this.parentElement.style.display=\'none\'"></div>';
     }
 
-    return '<div class="draft-card' + (draft.featured_image ? ' has-image' : '') + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '">' +
+    var manualImportBadge = (draft.mode === 'manual_import')
+      ? '<span class="badge-manual-import" title="Manually imported &mdash; not pushed to WordPress">&#128229; MANUAL IMPORT</span>'
+      : '';
+
+    return '<div class="draft-card' + (draft.featured_image ? ' has-image' : '') + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '" data-mode="' + escapeHtml(draft.mode || '') + '">' +
       imageHTML +
       '<div class="draft-card-body">' +
         '<div class="draft-header">' +
@@ -2742,7 +2813,7 @@
           '<span class="draft-mode">&#128100; Manual</span>' +
           '<span class="draft-time">' + formatTime(draft.created_at) + '</span>' +
         '</div>' +
-        '<h3 class="draft-title">' + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</h3>' +
+        '<h3 class="draft-title">' + manualImportBadge + escapeHtml(draft.extracted_title || draft.source_title || draft.source_url) + '</h3>' +
         '<div class="draft-meta">' +
           '<span class="domain-badge">' + escapeHtml(draft.source_domain || '--') + '</span>' +
           (draft.source_language ? '<span class="domain-badge">' + escapeHtml(draft.source_language.toUpperCase()) + '</span>' : '') +
@@ -3028,7 +3099,8 @@
           });
 
           // Full re-render to correctly update cluster groups and progress bars
-          renderDraftsView(drafts);
+          var pollContainer = $('publishedList');
+          renderDraftsView(pollContainer, drafts);
 
           if (!hasActive) {
             clearInterval(publishedPollInterval);
@@ -3369,18 +3441,8 @@
           { value: 'o3-mini', label: 'O3 Mini (Reasoning Fast)' },
           { value: 'o4-mini', label: 'O4 Mini (Latest Reasoning)' },
         ],
-        openrouter: [
-          { value: 'qwen/qwen3.6-plus:free', label: 'Qwen 3.6 Plus (Free Best)' },
-          { value: 'stepfun/step-3.5-flash:free', label: 'Step 3.5 Flash (Free Fast)' },
-          { value: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'Nemotron 3 Super (Free 120B)' },
-          { value: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (Free Meta)' },
-          { value: 'openai/gpt-oss-120b:free', label: 'GPT-OSS 120B (Free)' },
-          { value: 'arcee-ai/trinity-large-preview:free', label: 'Trinity Large (Free Creative)' },
-          { value: 'z-ai/glm-4.5-air:free', label: 'GLM 4.5 Air (Free)' },
-          { value: 'minimax/minimax-m2.5:free', label: 'MiniMax M2.5 (Free)' },
-          { value: 'qwen/qwen3-coder:free', label: 'Qwen3 Coder 480B (Free)' },
-          { value: 'qwen/qwen3-next-80b-a3b-instruct:free', label: 'Qwen3 Next 80B (Free)' },
-        ],
+        // OpenRouter populated dynamically from /api/ai/models (cached on window)
+        openrouter: [],
       };
       editorProviderEl.addEventListener('change', function () {
         var prov = editorProviderEl.value;
@@ -3391,12 +3453,18 @@
           return;
         }
         if (modelChoice) modelChoice.style.display = '';
+        // For OpenRouter, use cached dynamic list if available
+        if (prov === 'openrouter' && window.__openrouterModels && window.__openrouterModels.length > 0) {
+          AI_MODELS.openrouter = window.__openrouterModels.map(function (m) {
+            return { value: m.id, label: m.name + (m.tier ? ' — ' + m.tier : '') };
+          });
+        }
         if (modelSelect && AI_MODELS[prov]) {
           var optHtml = '';
           for (var m = 0; m < AI_MODELS[prov].length; m++) {
             optHtml += '<option value="' + AI_MODELS[prov][m].value + '">' + AI_MODELS[prov][m].label + '</option>';
           }
-          modelSelect.innerHTML = optHtml;
+          modelSelect.innerHTML = optHtml || '<option value="">No models available</option>';
         }
       });
     }
@@ -3974,7 +4042,8 @@
         el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o';
         el = $('openrouter-key');
         if (el && data.openrouterKey) el.placeholder = data.openrouterKey;
-        el = $('openrouter-model'); if (el) el.value = data.openrouterModel || 'qwen/qwen3.6-plus:free';
+        window.__lastSavedOpenrouterModel = data.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
+        el = $('openrouter-model'); if (el) el.value = window.__lastSavedOpenrouterModel;
         el = $('ai-fallback'); if (el) el.checked = data.enableFallback !== false;
         el = $('ai-max-tokens'); if (el) el.value = data.maxTokens || 4096;
         el = $('ai-temperature'); if (el) el.value = data.temperature !== undefined ? data.temperature : 0.7;
@@ -3999,6 +4068,19 @@
 
     var testOrBtn = $('testOpenrouterBtn');
     if (testOrBtn) testOrBtn.onclick = function () { testApiKey('openrouter'); };
+
+    // Load OpenRouter models dynamically (cached 1h server-side)
+    __loadOpenRouterModels().then(function () {
+      // Re-apply saved model selection after dropdown is populated
+      var orEl = $('openrouter-model');
+      if (orEl && window.__lastSavedOpenrouterModel) {
+        orEl.value = window.__lastSavedOpenrouterModel;
+      }
+    });
+
+    // Wire refresh button
+    var orRefreshBtn = $('openrouter-refresh-btn');
+    if (orRefreshBtn) orRefreshBtn.onclick = __refreshOpenRouterModels;
   }
 
   function saveAISettings() {
@@ -4052,7 +4134,9 @@
   function testApiKey(provider) {
     var statusEl = $(provider + '-key-status');
     var keyInput = $(provider + '-key');
+    var modelInput = $(provider + '-model');
     var apiKey = keyInput ? keyInput.value.trim() : '';
+    var model = modelInput ? modelInput.value : '';
 
     if (!apiKey || apiKey.length < 10) {
       if (statusEl) { statusEl.textContent = 'Enter an API key first'; statusEl.style.color = '#f59e0b'; }
@@ -4061,10 +4145,13 @@
 
     if (statusEl) { statusEl.textContent = 'Testing...'; statusEl.style.color = '#888'; }
 
-    fetchApi('/api/ai/test', { method: 'POST', body: { provider: provider, apiKey: apiKey } })
+    fetchApi('/api/ai/test', { method: 'POST', body: { provider: provider, apiKey: apiKey, model: model } })
       .then(function (data) {
         if (data.success) {
-          if (statusEl) { statusEl.textContent = 'Key is valid! Response: ' + (data.response || 'OK'); statusEl.style.color = '#10b981'; }
+          if (statusEl) {
+            statusEl.textContent = 'Key valid! Model: ' + (data.model || model || '') + ' — Response: ' + (data.response || 'OK');
+            statusEl.style.color = '#10b981';
+          }
         } else {
           if (statusEl) { statusEl.textContent = 'Invalid: ' + (data.error || 'Unknown error'); statusEl.style.color = '#ef4444'; }
         }
@@ -4073,6 +4160,63 @@
         if (statusEl) { statusEl.textContent = 'Test failed: ' + err.message; statusEl.style.color = '#ef4444'; }
       });
   }
+
+  // ─── Dynamic OpenRouter Model Loading ────────────────────────────────
+  // OpenRouter constantly adds/removes free models, so we fetch the live list
+  // from /api/ai/models (cached server-side for 1h) instead of hardcoding.
+
+  function __loadOpenRouterModels() {
+    return fetchApi('/api/ai/models')
+      .then(function (data) {
+        var orModels = (data && data.models && data.models.openrouter) || [];
+        window.__openrouterModels = orModels;
+        var sel = $('openrouter-model');
+        if (!sel) return;
+        var currentValue = sel.value;
+        sel.innerHTML = '';
+        if (orModels.length === 0) {
+          var o = document.createElement('option');
+          o.value = '';
+          o.textContent = '— No free models available — click Refresh —';
+          sel.appendChild(o);
+          return;
+        }
+        for (var i = 0; i < orModels.length; i++) {
+          var m = orModels[i];
+          var opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.name + (m.tier ? ' — ' + m.tier : '');
+          sel.appendChild(opt);
+        }
+        // Restore previous selection if still available
+        var matched = false;
+        for (var j = 0; j < orModels.length; j++) {
+          if (orModels[j].id === currentValue) { matched = true; break; }
+        }
+        if (currentValue && matched) sel.value = currentValue;
+      })
+      .catch(function (err) {
+        console.error('Failed to load OpenRouter models:', err);
+      });
+  }
+
+  function __refreshOpenRouterModels() {
+    showToast('Refreshing OpenRouter model list...', 'info');
+    fetchApi('/api/ai/openrouter-models/refresh', { method: 'POST' })
+      .then(function (data) {
+        if (data.success) {
+          return __loadOpenRouterModels().then(function () {
+            showToast('Loaded ' + data.count + ' free models', 'success');
+          });
+        } else {
+          showToast('Refresh failed: ' + (data.error || 'Unknown'), 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Network error: ' + err.message, 'error');
+      });
+  }
+  window.__refreshOpenRouterModels = __refreshOpenRouterModels;
 
   function updateAIProviderVisibility() {
     var provider = $('ai-provider') ? $('ai-provider').value : 'openrouter';
@@ -4287,6 +4431,156 @@
     state.refreshTimers = [];
   }
 
+  // ─── Manual URL Import Feature ────────────────────────────────────────
+
+  function __parseManualImportUrls() {
+    var textarea = document.getElementById('manual-import-urls');
+    if (!textarea) return [];
+    var raw = textarea.value || '';
+    var lines = raw.split(/\r?\n/);
+    var urls = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+      // Basic URL sanity check — backend does the real validation
+      if (line.length > 3 && (line.indexOf('.') !== -1 || /^https?:\/\//i.test(line))) {
+        urls.push(line);
+      }
+    }
+    return urls;
+  }
+
+  function __updateManualImportCount() {
+    var urls = __parseManualImportUrls();
+    var countEl = document.getElementById('manual-import-count');
+    if (countEl) {
+      var n = urls.length;
+      countEl.textContent = n + ' valid URL' + (n === 1 ? '' : 's') + ' detected';
+      countEl.style.color = n > 100 ? '#ef4444' : '#888';
+    }
+    var submitBtn = document.getElementById('manual-import-submit');
+    if (submitBtn) {
+      submitBtn.disabled = urls.length === 0 || urls.length > 100;
+    }
+  }
+
+  function __openManualImportModal() {
+    var modal = document.getElementById('manual-import-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    var textarea = document.getElementById('manual-import-urls');
+    if (textarea) {
+      textarea.value = '';
+      textarea.focus();
+    }
+    __updateManualImportCount();
+    var result = document.getElementById('manual-import-result');
+    if (result) {
+      result.classList.add('hidden');
+      result.innerHTML = '';
+    }
+  }
+
+  function __closeManualImportModal() {
+    var modal = document.getElementById('manual-import-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  function __submitManualImport() {
+    var urls = __parseManualImportUrls();
+    if (urls.length === 0) {
+      showToast('Paste at least one URL', 'warning');
+      return;
+    }
+    if (urls.length > 100) {
+      showToast('Maximum 100 URLs per import', 'error');
+      return;
+    }
+
+    var submitBtn = document.getElementById('manual-import-submit');
+    var resultEl = document.getElementById('manual-import-result');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Importing...';
+    }
+
+    fetchApi('/api/drafts/manual-import', { method: 'POST', body: { urls: urls } })
+      .then(function (data) {
+        if (data.success) {
+          if (resultEl) {
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML =
+              '<div class="result-success">' +
+              '<strong>&#10003; ' + data.imported + ' URLs queued for extraction.</strong><br>' +
+              (data.skipped > 0 ? '<small>' + data.skipped + ' skipped (already exist or errors)</small><br>' : '') +
+              (data.invalid > 0 ? '<small>' + data.invalid + ' invalid URLs ignored</small><br>' : '') +
+              '<small>They will appear in the Published list as extraction completes.</small>' +
+              '</div>';
+          }
+          showToast('Imported ' + data.imported + ' URLs &mdash; check Published tab', 'success');
+
+          // Refresh published list so user can see new items coming in
+          if (typeof loadPublished === 'function') {
+            setTimeout(loadPublished, 1000);
+            setTimeout(loadPublished, 5000);
+            setTimeout(loadPublished, 15000);
+          }
+
+          // Clear textarea for next batch
+          var textarea = document.getElementById('manual-import-urls');
+          if (textarea) textarea.value = '';
+          __updateManualImportCount();
+        } else {
+          if (resultEl) {
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = '<div class="result-error">Import failed: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+          }
+          showToast('Import failed: ' + (data.error || 'Unknown'), 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Network error: ' + err.message, 'error');
+        if (resultEl) {
+          resultEl.classList.remove('hidden');
+          resultEl.innerHTML = '<div class="result-error">Network error: ' + escapeHtml(err.message || 'Unknown') + '</div>';
+        }
+      })
+      .then(function () {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Import URLs';
+        }
+      });
+  }
+
+  // Expose modal handlers globally so onclick="" attributes can find them
+  window.__openManualImportModal = __openManualImportModal;
+  window.__closeManualImportModal = __closeManualImportModal;
+  window.__submitManualImport = __submitManualImport;
+  window.__updateManualImportCount = __updateManualImportCount;
+
+  function initManualImport() {
+    // Ctrl/Cmd+Enter inside textarea submits
+    var textarea = document.getElementById('manual-import-urls');
+    if (textarea) {
+      textarea.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          __submitManualImport();
+        }
+      });
+    }
+    // Esc closes modal
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        var modal = document.getElementById('manual-import-modal');
+        if (modal && !modal.classList.contains('hidden')) {
+          __closeManualImportModal();
+        }
+      }
+    });
+  }
+
   // ─── Init ───────────────────────────────────────────────────────────────
 
   function init() {
@@ -4294,6 +4588,7 @@
     initRouter();
     initEditorButtons();
     initWpDiagButtons();
+    initManualImport();
   }
 
   // Wait for DOM

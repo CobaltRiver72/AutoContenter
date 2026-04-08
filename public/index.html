@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HDF AutoPub Dashboard</title>
-  <link rel="stylesheet" href="/css/dashboard.css?v=6">
+  <link rel="stylesheet" href="/css/dashboard.css?v=12">
 </head>
 <body>
 
@@ -346,18 +346,12 @@
               </div>
               <div class="settings-row">
                 <label class="settings-label">Model</label>
-                <select id="openrouter-model" class="setting-select">
-                  <option value="qwen/qwen3.6-plus:free">Qwen 3.6 Plus (Free) &mdash; Best Quality</option>
-                  <option value="stepfun/step-3.5-flash:free">Step 3.5 Flash (Free) &mdash; Fast</option>
-                  <option value="nvidia/nemotron-3-super-120b-a12b:free">Nemotron 3 Super (Free) &mdash; 120B</option>
-                  <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (Free) &mdash; Meta</option>
-                  <option value="openai/gpt-oss-120b:free">GPT-OSS 120B (Free) &mdash; OpenAI OSS</option>
-                  <option value="arcee-ai/trinity-large-preview:free">Trinity Large (Free) &mdash; Creative</option>
-                  <option value="z-ai/glm-4.5-air:free">GLM 4.5 Air (Free) &mdash; Reasoning</option>
-                  <option value="minimax/minimax-m2.5:free">MiniMax M2.5 (Free) &mdash; MiniMax</option>
-                  <option value="qwen/qwen3-coder:free">Qwen3 Coder 480B (Free) &mdash; Code</option>
-                  <option value="qwen/qwen3-next-80b-a3b-instruct:free">Qwen3 Next 80B (Free) &mdash; Fast</option>
-                </select>
+                <div style="display:flex; gap:8px;">
+                  <select id="openrouter-model" class="setting-select" style="flex:1;">
+                    <option value="">Loading free models...</option>
+                  </select>
+                  <button type="button" class="btn btn-sm btn-secondary" id="openrouter-refresh-btn">Refresh</button>
+                </div>
               </div>
               <small style="color:#888; display:block; margin-top:6px;">Free! Get your key at <a href="https://openrouter.ai/settings/keys" target="_blank" style="color:#f59e0b;">openrouter.ai/settings/keys</a></small>
             </div>
@@ -588,6 +582,43 @@
   <!-- Toast container -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="/js/dashboard.js?v=7"></script>
+  <!-- Manual URL Import Modal -->
+  <div id="manual-import-modal" class="manual-import-modal hidden" role="dialog" aria-labelledby="manual-import-title">
+    <div class="manual-import-backdrop" onclick="window.__closeManualImportModal()"></div>
+    <div class="manual-import-content">
+      <div class="manual-import-header">
+        <h2 id="manual-import-title">Import URLs Manually</h2>
+        <button type="button" class="manual-import-close" onclick="window.__closeManualImportModal()" aria-label="Close">&times;</button>
+      </div>
+      <div class="manual-import-body">
+        <p class="manual-import-description">
+          Paste article URLs below, one per line. Each URL will be extracted using the same methods
+          as the auto pipeline (body content, title, excerpt, featured image), then added to your
+          Published list. AI rewriting is skipped &mdash; the original content is preserved as-is.
+          These imports stay local and are NOT pushed to WordPress.
+        </p>
+        <label for="manual-import-urls" style="display:block;margin-bottom:6px;font-size:13px;color:#aaa;">URLs (one per line):</label>
+        <textarea
+          id="manual-import-urls"
+          rows="12"
+          placeholder="https://example.com/article-1&#10;https://example.com/article-2&#10;https://another-site.com/news"
+          oninput="window.__updateManualImportCount()"
+        ></textarea>
+        <div class="manual-import-info">
+          <span id="manual-import-count">0 valid URLs detected</span>
+          <span class="manual-import-hint">Maximum 100 URLs per import. Ctrl+Enter to submit.</span>
+        </div>
+        <div id="manual-import-result" class="manual-import-result hidden"></div>
+      </div>
+      <div class="manual-import-footer">
+        <button type="button" class="btn btn-secondary" onclick="window.__closeManualImportModal()">Cancel</button>
+        <button type="button" id="manual-import-submit" class="btn btn-primary" onclick="window.__submitManualImport()">
+          Import URLs
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/dashboard.js?v=12"></script>
 </body>
 </html>

@@ -658,16 +658,50 @@ function createApiRouter(deps) {
       if (!body.provider || !body.apiKey) {
         return res.status(400).json({ success: false, error: 'Provider and API key required' });
       }
-      var result = await rewriter.testConnection(body.provider, body.apiKey);
+      // Pass body.model so we test the model the user actually selected
+      var result = await rewriter.testConnection(body.provider, body.apiKey, body.model);
       res.json(result);
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  router.get('/ai/models', function (req, res) {
-    var AI_MODELS = require('../modules/rewriter').AI_MODELS;
-    res.json({ success: true, models: AI_MODELS });
+  router.get('/ai/models', async function (req, res) {
+    try {
+      var rewriterModule = require('../modules/rewriter');
+      var AI_MODELS = rewriterModule.AI_MODELS;
+      var fetchOpenRouterFreeModels = rewriterModule.fetchOpenRouterFreeModels;
+
+      // Always return Anthropic and OpenAI from static list
+      // Fetch OpenRouter dynamically (cached 1h)
+      var orModels = [];
+      try {
+        orModels = await fetchOpenRouterFreeModels(false);
+      } catch (e) {
+        logger.warn('api', 'OpenRouter model fetch failed: ' + e.message);
+      }
+
+      var combined = {
+        anthropic: AI_MODELS.anthropic || [],
+        openai: AI_MODELS.openai || [],
+        openrouter: orModels,
+      };
+
+      res.json({ success: true, models: combined });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Force-refresh OpenRouter model list (bypasses 1h cache)
+  router.post('/ai/openrouter-models/refresh', async function (req, res) {
+    try {
+      var fetchOpenRouterFreeModels = require('../modules/rewriter').fetchOpenRouterFreeModels;
+      var models = await fetchOpenRouterFreeModels(true);
+      res.json({ success: true, count: models.length, models: models });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // ─── POST /api/clusters/:id/publish ───────────────────────────────────────
@@ -1747,6 +1781,118 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── Manual URL Import ────────────────────────────────────────────────
+  // User pastes URLs one per line. We create draft records with mode='manual_import'
+  // and the existing extraction loop picks them up automatically. After extraction,
+  // they're marked as status='published' (local only — no WordPress push).
+  router.post('/drafts/manual-import', async function (req, res) {
+    try {
+      var body = req.body || {};
+      var rawUrls = body.urls;
+
+      if (!Array.isArray(rawUrls) || rawUrls.length === 0) {
+        return res.status(400).json({ success: false, error: 'urls array required' });
+      }
+
+      // Cap at 100 URLs per request to avoid runaway imports
+      if (rawUrls.length > 100) {
+        return res.status(400).json({ success: false, error: 'Maximum 100 URLs per import request' });
+      }
+
+      // Normalize + validate URLs
+      // Per RFC 7230, browsers and servers commonly cap URLs around 2048 chars.
+      // We reject anything longer to avoid pathological inputs and prevent
+      // accidental rejection later by the extractor / WordPress.
+      var MAX_URL_LENGTH = 2048;
+      var validUrls = [];
+      var invalidUrls = [];
+      for (var i = 0; i < rawUrls.length; i++) {
+        // I6: only accept string entries — silently coercing arbitrary types
+        // (numbers, objects, null) hides client bugs and may produce nonsense URLs.
+        if (typeof rawUrls[i] !== 'string') {
+          invalidUrls.push(rawUrls[i]);
+          continue;
+        }
+        var u = rawUrls[i].trim();
+        if (!u) continue;
+
+        if (u.length > MAX_URL_LENGTH) {
+          invalidUrls.push(rawUrls[i]);
+          continue;
+        }
+
+        // Must start with http:// or https://
+        if (!/^https?:\/\//i.test(u)) {
+          // Try adding https://
+          u = 'https://' + u;
+        }
+
+        try {
+          var parsed = new URL(u);
+          if (!parsed.hostname) throw new Error('no hostname');
+          // Re-check length after normalization (URL constructor may percent-encode)
+          if (parsed.href.length > MAX_URL_LENGTH) {
+            invalidUrls.push(rawUrls[i]);
+            continue;
+          }
+          validUrls.push({ url: parsed.href, domain: parsed.hostname.replace(/^www\./, '') });
+        } catch (e) {
+          invalidUrls.push(rawUrls[i]);
+        }
+      }
+
+      if (validUrls.length === 0) {
+        return res.status(400).json({ success: false, error: 'No valid URLs found', invalid: invalidUrls });
+      }
+
+      // Insert drafts (skip duplicates — UNIQUE constraint on source_url will throw)
+      var insertStmt = db.prepare(
+        "INSERT INTO drafts (source_url, source_domain, source_title, source_content_markdown, " +
+        "mode, status, extraction_status, created_at, updated_at) " +
+        "VALUES (?, ?, ?, ?, 'manual_import', 'fetching', 'pending', datetime('now'), datetime('now'))"
+      );
+
+      var imported = [];
+      var skipped = [];
+
+      for (var j = 0; j < validUrls.length; j++) {
+        var v = validUrls[j];
+        try {
+          var placeholderTitle = 'Manual Import: ' + v.domain;
+          var info = insertStmt.run(v.url, v.domain, placeholderTitle, '');
+          imported.push({ id: info.lastInsertRowid, url: v.url, domain: v.domain });
+        } catch (dbErr) {
+          // Most likely UNIQUE constraint violation (URL already exists)
+          if (String(dbErr.message).indexOf('UNIQUE') !== -1) {
+            skipped.push({ url: v.url, reason: 'already exists' });
+          } else {
+            skipped.push({ url: v.url, reason: dbErr.message });
+          }
+        }
+      }
+
+      logger.info('api', 'Manual import: ' + imported.length + ' queued, ' +
+        skipped.length + ' skipped, ' + invalidUrls.length + ' invalid');
+
+      res.json({
+        success: true,
+        imported: imported.length,
+        skipped: skipped.length,
+        invalid: invalidUrls.length,
+        details: {
+          imported: imported,
+          skipped: skipped,
+          invalid: invalidUrls,
+        },
+        message: imported.length + ' URLs queued for extraction. They will appear in the Published list as they finish processing.',
+      });
+
+    } catch (err) {
+      logger.error('api', 'Manual import failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // ─── POST /api/drafts/batch-delete ──────────────────────────────────────
   //
   // Deletes specific drafts by ID array.
@@ -1992,7 +2138,7 @@ function createApiRouter(deps) {
         stats: {
           clustersQueued: result.queued,
           clustersFailed: result.failed,
-          errors: result.errors.slice(0, 5)
+          errors: (result.errors || []).slice(0, 5)
         }
       });
     } catch (err) {
