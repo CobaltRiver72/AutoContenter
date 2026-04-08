@@ -85,13 +85,54 @@ var BROWSER_HEADERS = {
   'Referer': 'https://www.google.com/',
 };
 
-function fetchHtml(url) {
-  return axios.get(url, {
-    timeout: 15000,
-    maxContentLength: 5 * 1024 * 1024,
-    headers: BROWSER_HEADERS,
-    maxRedirects: 5,
-  }).then(function (res) { return res.data; });
+async function fetchHtml(url) {
+  var attempts = 0;
+  var maxAttempts = 2;
+  var lastErr = null;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      var res = await axios.get(url, {
+        timeout: attempts === 1 ? 15000 : 25000,
+        maxContentLength: 5 * 1024 * 1024,
+        headers: BROWSER_HEADERS,
+        maxRedirects: 5,
+        validateStatus: function (status) { return status < 400; },
+      });
+
+      var html = res.data;
+      if (!html || typeof html !== 'string') return null;
+
+      // Handle meta-refresh redirects (some sites use these)
+      var metaMatch = html.match(/<meta[^>]*http-equiv=["']refresh["'][^>]*content=["']\d+;\s*url=([^"']+)["']/i);
+      if (metaMatch && metaMatch[1] && html.length < 5000) {
+        var redirectUrl = metaMatch[1];
+        if (redirectUrl.startsWith('/')) {
+          var urlObj = new URL(url);
+          redirectUrl = urlObj.origin + redirectUrl;
+        }
+        var redirectRes = await axios.get(redirectUrl, {
+          timeout: 15000,
+          maxContentLength: 5 * 1024 * 1024,
+          headers: BROWSER_HEADERS,
+          maxRedirects: 5,
+        });
+        if (redirectRes.data && typeof redirectRes.data === 'string') {
+          return redirectRes.data;
+        }
+      }
+
+      return html;
+    } catch (err) {
+      lastErr = err;
+      if (attempts < maxAttempts && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || err.code === 'ECONNRESET')) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr || new Error('fetchHtml failed after ' + maxAttempts + ' attempts');
 }
 
 async function fetchFromCache(url) {
@@ -119,10 +160,54 @@ function parseWithReadability(rawHtml, sourceUrl) {
   try {
     var reader = new Readability(dom.window.document, { charThreshold: 100 });
     var result = reader.parse();
-    return result;
+
+    if (result && result.textContent && result.textContent.length > 100) {
+      return result;
+    }
+
+    // Readability failed — try manual extraction from article/main/body <p> tags
+    var doc = dom.window.document;
+    var containers = doc.querySelectorAll('article, [role="main"], main, .article-body, .story-body, .post-content, .entry-content, .article-content');
+    var paragraphs = [];
+
+    if (containers.length > 0) {
+      for (var c = 0; c < containers.length; c++) {
+        var ps = containers[c].querySelectorAll('p');
+        for (var p = 0; p < ps.length; p++) {
+          var text = ps[p].textContent.trim();
+          if (text.length > 30) paragraphs.push(text);
+        }
+      }
+    }
+
+    // If no article container found, try all <p> tags in body
+    if (paragraphs.length < 3) {
+      paragraphs = [];
+      var allPs = doc.querySelectorAll('body p');
+      for (var a = 0; a < allPs.length; a++) {
+        var pText = allPs[a].textContent.trim();
+        if (pText.length > 40) paragraphs.push(pText);
+      }
+    }
+
+    if (paragraphs.length >= 2) {
+      var combinedText = paragraphs.join('\n\n');
+      if (combinedText.length > 100) {
+        var titleEl = doc.querySelector('h1') || doc.querySelector('title');
+        return {
+          title: titleEl ? titleEl.textContent.trim() : null,
+          textContent: combinedText,
+          content: combinedText,
+          excerpt: paragraphs[0].substring(0, 200),
+          byline: null,
+        };
+      }
+    }
+
+    return null;
   } finally {
     if (dom && dom.window) dom.window.close();
-    dom = null;  // Allow GC to collect immediately
+    dom = null;
   }
 }
 
@@ -316,6 +401,8 @@ async function extractDraftContent(draftId, deps) {
         byline = article.byline;
         extractionMethod = 'direct';
         logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 1 success — ' + content.length + ' chars' + (featuredImage ? ' + image' : ''));
+      } else {
+        logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 1 — HTML fetched (' + rawHtml.length + ' chars) but Readability returned ' + (article ? (article.textContent || '').length + ' chars (too short)' : 'null'));
       }
     }
   } catch (err) {
@@ -390,22 +477,44 @@ async function extractDraftContent(draftId, deps) {
     );
     updateDomainStats(db, draft.source_domain, true, extractionMethod);
   } else {
-    var extractErr = 'All extraction methods failed. Site may require JavaScript rendering.';
-    db.prepare(`
-      UPDATE drafts SET
-        extracted_content = COALESCE(source_content_markdown, source_title),
-        extraction_status = 'failed',
-        extraction_method = NULL,
-        is_partial = 0,
-        extraction_error = ?,
-        error_message = ?,
-        retry_count = retry_count + 1,
-        last_error_at = datetime('now'),
-        failed_permanent = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 1 ELSE 0 END,
-        status = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 'failed' ELSE 'draft' END,
-        updated_at = datetime('now')
-      WHERE id = ?
-    `).run(extractErr, extractErr, draftId);
+    var extractErr = 'All extraction methods failed for ' + draft.source_domain + '. Site may require JavaScript rendering or has anti-bot protection.';
+
+    // Don't save useless JSON as extracted content — use title only
+    var fallbackContent = null;
+    var rawMd = draft.source_content_markdown;
+    if (rawMd && rawMd.length > 100) {
+      try {
+        var parsedMd = JSON.parse(rawMd);
+        if (parsedMd.chunks && parsedMd.chunks.length > 0) {
+          fallbackContent = rawMd;
+        }
+      } catch (e) {
+        // Not JSON — it's raw text, use it if substantial
+        if (rawMd.length > 200) {
+          fallbackContent = rawMd;
+        }
+      }
+    }
+
+    if (!fallbackContent) {
+      fallbackContent = draft.source_title || 'No content extracted';
+    }
+
+    db.prepare(
+      "UPDATE drafts SET " +
+      "extracted_content = ?, " +
+      "extraction_status = 'failed', " +
+      "extraction_method = NULL, " +
+      "is_partial = 0, " +
+      "extraction_error = ?, " +
+      "error_message = ?, " +
+      "retry_count = retry_count + 1, " +
+      "last_error_at = datetime('now'), " +
+      "failed_permanent = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 1 ELSE 0 END, " +
+      "status = CASE WHEN retry_count + 1 >= COALESCE(max_retries, 3) THEN 'failed' ELSE 'fetching' END, " +
+      "updated_at = datetime('now') " +
+      "WHERE id = ?"
+    ).run(fallbackContent, extractErr, extractErr, draftId);
     updateDomainStats(db, draft.source_domain, false, null);
 
     logger.warn('draft-helpers', 'Draft ' + draftId + ': All extraction layers failed for ' + draft.source_domain);
