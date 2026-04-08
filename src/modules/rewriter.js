@@ -19,18 +19,8 @@ var AI_MODELS = {
     { id: 'o3-mini', name: 'O3 Mini', tier: 'Reasoning Fast', type: 'reasoning' },
     { id: 'o4-mini', name: 'O4 Mini', tier: 'Latest Reasoning', type: 'reasoning' },
   ],
-  openrouter: [
-    { id: 'qwen/qwen3.6-plus:free', name: 'Qwen 3.6 Plus (Free)', tier: 'Free - Best Quality', type: 'standard' },
-    { id: 'stepfun/step-3.5-flash:free', name: 'Step 3.5 Flash (Free)', tier: 'Free - Fast', type: 'standard' },
-    { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super (Free)', tier: 'Free - 120B', type: 'standard' },
-    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (Free)', tier: 'Free - Meta', type: 'standard' },
-    { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B (Free)', tier: 'Free - OpenAI OSS', type: 'standard' },
-    { id: 'arcee-ai/trinity-large-preview:free', name: 'Trinity Large (Free)', tier: 'Free - Creative', type: 'standard' },
-    { id: 'z-ai/glm-4.5-air:free', name: 'GLM 4.5 Air (Free)', tier: 'Free - Reasoning', type: 'standard' },
-    { id: 'minimax/minimax-m2.5:free', name: 'MiniMax M2.5 (Free)', tier: 'Free - MiniMax', type: 'standard' },
-    { id: 'qwen/qwen3-coder:free', name: 'Qwen3 Coder 480B (Free)', tier: 'Free - Code', type: 'standard' },
-    { id: 'qwen/qwen3-next-80b-a3b-instruct:free', name: 'Qwen3 Next 80B (Free)', tier: 'Free - Fast', type: 'standard' },
-  ],
+  // OpenRouter list is fetched dynamically — see fetchOpenRouterFreeModels()
+  openrouter: [],
 };
 
 function countWords(html) {
@@ -250,7 +240,7 @@ class ArticleRewriter {
       openaiKey:        this._getSetting('OPENAI_API_KEY')       || process.env.OPENAI_API_KEY       || '',
       openaiModel:      this._getSetting('OPENAI_MODEL')         || process.env.OPENAI_MODEL         || 'gpt-4o',
       openrouterKey:    this._getSetting('OPENROUTER_API_KEY')   || process.env.OPENROUTER_API_KEY   || '',
-      openrouterModel:  this._getSetting('OPENROUTER_MODEL')     || process.env.OPENROUTER_MODEL     || 'qwen/qwen3.6-plus:free',
+      openrouterModel:  this._getSetting('OPENROUTER_MODEL')     || process.env.OPENROUTER_MODEL     || 'meta-llama/llama-3.3-70b-instruct:free',
       enableFallback:   (this._getSetting('ENABLE_FALLBACK')     || process.env.ENABLE_FALLBACK     || 'true') === 'true',
       maxTokens:        parseInt(this._getSetting('MAX_TOKENS')  || process.env.MAX_TOKENS           || '4096', 10),
       temperature:      parseFloat(this._getSetting('TEMPERATURE') || process.env.TEMPERATURE        || '0.7'),
@@ -259,7 +249,13 @@ class ArticleRewriter {
     // Validate model IDs against known models — fix stale DB values
     this._cfg.anthropicModel = this._validateModelId('anthropic', this._cfg.anthropicModel, 'claude-haiku-4-5-20251001');
     this._cfg.openaiModel = this._validateModelId('openai', this._cfg.openaiModel, 'gpt-4o');
-    this._cfg.openrouterModel = this._validateModelId('openrouter', this._cfg.openrouterModel, 'qwen/qwen3.6-plus:free');
+    // OpenRouter models are fetched dynamically from their API,
+    // so we cannot validate against AI_MODELS.openrouter (which is empty by design).
+    // Trust whatever the user picked — OpenRouter API will return a clear error
+    // if the model ID is invalid.
+    if (!this._cfg.openrouterModel || typeof this._cfg.openrouterModel !== 'string') {
+      this._cfg.openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free';
+    }
   }
 
   _validateModelId(provider, currentId, defaultId) {
@@ -807,37 +803,57 @@ class ArticleRewriter {
 
   // ─── Test connection ────────────────────────────────────────────────────
 
-  async testConnection(provider, apiKey) {
+  async testConnection(provider, apiKey, modelOverride) {
     try {
       if (provider === 'anthropic') {
         var Anthropic = require('@anthropic-ai/sdk');
-        var client = new Anthropic({ apiKey: apiKey.trim() });
-        var res = await client.messages.create({
-          model: 'claude-haiku-4-5-20251001',
+        var aClient = new Anthropic({ apiKey: apiKey.trim() });
+        var aModel = modelOverride || 'claude-haiku-4-5-20251001';
+        var aRes = await aClient.messages.create({
+          model: aModel,
           max_tokens: 20,
           messages: [{ role: 'user', content: 'Say "OK" and nothing else.' }],
         });
-        return { success: true, response: res.content && res.content[0] ? res.content[0].text : '' };
+        return {
+          success: true,
+          model: aModel,
+          response: aRes.content && aRes.content[0] ? aRes.content[0].text : '',
+        };
+
       } else if (provider === 'openrouter') {
         var orClient = this._openRouterClient(apiKey);
+        // Use user's selected model if provided, else fall back to a known-stable free model
+        var orModel = modelOverride || this._cfg.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
         var orRes = await orClient.chat.completions.create({
-          model: 'qwen/qwen3.6-plus:free',
+          model: orModel,
           max_tokens: 20,
           messages: [{ role: 'user', content: 'Say "OK" and nothing else.' }],
         });
-        return { success: true, response: orRes.choices && orRes.choices[0] ? orRes.choices[0].message.content : '' };
+        return {
+          success: true,
+          model: orModel,
+          response: orRes.choices && orRes.choices[0] ? orRes.choices[0].message.content : '',
+        };
+
       } else {
         var OpenAI = require('openai');
         var oaiClient = new OpenAI({ apiKey: apiKey.trim() });
+        var oaiModel = modelOverride || 'gpt-4o-mini';
         var oaiRes = await oaiClient.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: oaiModel,
           max_tokens: 20,
           messages: [{ role: 'user', content: 'Say "OK" and nothing else.' }],
         });
-        return { success: true, response: oaiRes.choices && oaiRes.choices[0] ? oaiRes.choices[0].message.content : '' };
+        return {
+          success: true,
+          model: oaiModel,
+          response: oaiRes.choices && oaiRes.choices[0] ? oaiRes.choices[0].message.content : '',
+        };
       }
     } catch (err) {
-      return { success: false, error: err.message };
+      // OpenRouter returns useful error structure — surface model name in message
+      var msg = err && err.message ? err.message : String(err);
+      return { success: false, error: msg };
     }
   }
 
@@ -874,4 +890,85 @@ class ArticleRewriter {
   }
 }
 
-module.exports = { ArticleRewriter, AI_MODELS };
+// ─── Dynamic OpenRouter Free Model Fetcher ─────────────────────────────
+// Fetches the real, currently-available list of free models from OpenRouter's
+// public /models endpoint. Cached for 1 hour to avoid hammering their API.
+
+var _openrouterModelCache = { models: null, fetchedAt: 0 };
+var OPENROUTER_CACHE_MS = 60 * 60 * 1000; // 1 hour
+
+async function fetchOpenRouterFreeModels(forceRefresh) {
+  var now = Date.now();
+  if (!forceRefresh && _openrouterModelCache.models && (now - _openrouterModelCache.fetchedAt) < OPENROUTER_CACHE_MS) {
+    return _openrouterModelCache.models;
+  }
+
+  try {
+    // Use built-in fetch (Node 18+). Fallback to axios if not available.
+    var response;
+    if (typeof fetch === 'function') {
+      var res = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!res.ok) throw new Error('OpenRouter /models returned HTTP ' + res.status);
+      response = await res.json();
+    } else {
+      var axios = require('axios');
+      var axRes = await axios.get('https://openrouter.ai/api/v1/models', { timeout: 15000 });
+      response = axRes.data;
+    }
+
+    var data = (response && response.data) ? response.data : [];
+
+    // Filter to free models only.
+    // OpenRouter marks free models with `:free` suffix in id AND/OR pricing.prompt === "0"
+    var freeModels = data.filter(function (m) {
+      if (!m || !m.id) return false;
+      var idIsFree = m.id.indexOf(':free') !== -1;
+      var priceIsZero = m.pricing && (m.pricing.prompt === '0' || m.pricing.prompt === 0);
+      return idIsFree || priceIsZero;
+    });
+
+    // Map to our shape, sort by context length descending (bigger = better default sort)
+    var mapped = freeModels.map(function (m) {
+      var ctx = m.context_length || 0;
+      var ctxLabel = ctx >= 1000000 ? Math.round(ctx / 1000000) + 'M ctx'
+                  : ctx >= 1000 ? Math.round(ctx / 1000) + 'k ctx'
+                  : '';
+      var name = m.name || m.id;
+      // Strip provider prefix from name for cleaner display
+      var displayName = name.replace(/^[^:]+:\s*/, '');
+      return {
+        id: m.id,
+        name: displayName + (ctxLabel ? ' (' + ctxLabel + ')' : ''),
+        tier: 'Free',
+        type: 'standard',
+        contextLength: ctx,
+      };
+    });
+
+    // Sort: largest context first
+    mapped.sort(function (a, b) { return (b.contextLength || 0) - (a.contextLength || 0); });
+
+    // Cache and return
+    _openrouterModelCache.models = mapped;
+    _openrouterModelCache.fetchedAt = now;
+    return mapped;
+  } catch (err) {
+    // On failure, return cached list (even if stale) or a SAFE fallback of well-known free models
+    if (_openrouterModelCache.models && _openrouterModelCache.models.length > 0) {
+      return _openrouterModelCache.models;
+    }
+    // Last-resort fallback — these are widely-known stable free model IDs.
+    // If they're also gone, the user will see "no models available" and can refresh.
+    return [
+      { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B Instruct', tier: 'Free', type: 'standard', contextLength: 131072 },
+      { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Experimental', tier: 'Free', type: 'standard', contextLength: 1048576 },
+      { id: 'deepseek/deepseek-chat:free', name: 'DeepSeek V3', tier: 'Free', type: 'standard', contextLength: 65536 },
+      { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1', tier: 'Free', type: 'reasoning', contextLength: 65536 },
+      { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'Qwen 2.5 72B Instruct', tier: 'Free', type: 'standard', contextLength: 32768 },
+    ];
+  }
+}
+
+module.exports = { ArticleRewriter, AI_MODELS, fetchOpenRouterFreeModels };
