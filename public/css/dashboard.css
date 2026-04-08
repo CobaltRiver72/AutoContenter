@@ -2556,6 +2556,15 @@ select:focus {
   background: rgba(255,255,255,0.3);
 }
 
+.action-btn-image {
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+.action-btn-image:hover {
+  background: #f59e0b;
+  color: #000;
+}
+
 /* ─── Delete Buttons ──────────────────────────────────────────────── */
 
 .action-btn-delete {

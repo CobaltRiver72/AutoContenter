@@ -2230,6 +2230,10 @@
             '<span class="action-btn-text">Rewrite All Extracted</span>' +
             (readyForRewriteCount > 0 ? '<span class="action-btn-badge action-btn-badge-purple">' + readyForRewriteCount + '</span>' : '') +
           '</button>' +
+          '<button class="action-btn action-btn-image" id="batchFetchImagesBtn">' +
+            '<span class="action-btn-icon">&#128247;</span>' +
+            '<span class="action-btn-text">Fetch Images</span>' +
+          '</button>' +
         '</div>' +
       '</div>';
 
@@ -2433,6 +2437,33 @@
           btn.classList.remove('action-btn-loading');
           btn.disabled = false;
         });
+      });
+    }
+
+    // ─── Fetch Images button handler ────────────────────────────────
+    var fetchImagesBtn = container.querySelector('#batchFetchImagesBtn');
+    if (fetchImagesBtn) {
+      fetchImagesBtn.addEventListener('click', function () {
+        if (!confirm('Fetch missing featured images for all extracted articles?')) return;
+        var btn = this;
+        btn.disabled = true;
+        btn.querySelector('.action-btn-text').textContent = 'Fetching...';
+
+        fetchApi('/api/drafts/batch-fetch-images', { method: 'POST' })
+          .then(function (data) {
+            if (data.success) {
+              showToast(data.message, 'success');
+            } else {
+              showToast('Image fetch failed: ' + (data.error || 'Unknown'), 'error');
+            }
+            btn.disabled = false;
+            btn.querySelector('.action-btn-text').textContent = 'Fetch Images';
+          })
+          .catch(function (err) {
+            showToast('Image fetch error: ' + err.message, 'error');
+            btn.disabled = false;
+            btn.querySelector('.action-btn-text').textContent = 'Fetch Images';
+          });
       });
     }
 

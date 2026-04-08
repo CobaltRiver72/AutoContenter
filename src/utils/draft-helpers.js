@@ -44,7 +44,13 @@ function extractFeaturedImage(document, sourceUrl) {
   }
 
   // Priority 4: First large image in article body
-  var articleImages = document.querySelectorAll('article img, .article-body img, .story-body img, [role="main"] img, .post-content img');
+  var articleImages = document.querySelectorAll(
+    'article img, .article-body img, .story-body img, [role="main"] img, .post-content img, ' +
+    '.entry-content img, .post-body img, .td-post-content img, .article-content img, ' +
+    '.content-area img, .main-content img, #article-body img, .story-content img, ' +
+    '.news-content img, .article_content img, .artText img, .story_text img, ' +
+    'figure img, picture img, .wp-block-image img'
+  );
   for (var i = 0; i < articleImages.length; i++) {
     var img = articleImages[i];
     var src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
@@ -61,6 +67,21 @@ function extractFeaturedImage(document, sourceUrl) {
   if (metaImage) {
     var content = metaImage.getAttribute('content') || metaImage.getAttribute('href');
     if (content) return resolveUrl(content, sourceUrl);
+  }
+
+  // Priority 6: Any large image anywhere on the page (last resort)
+  var allImages = document.querySelectorAll('img[src]');
+  for (var j = 0; j < allImages.length; j++) {
+    var anyImg = allImages[j];
+    var anySrc = anyImg.getAttribute('src') || anyImg.getAttribute('data-src') || anyImg.getAttribute('data-lazy-src');
+    if (!anySrc) continue;
+    var anyWidth = parseInt(anyImg.getAttribute('width') || '0', 10);
+    var anyHeight = parseInt(anyImg.getAttribute('height') || '0', 10);
+    if (anyWidth > 0 && anyWidth < 200) continue;
+    if (anyHeight > 0 && anyHeight < 150) continue;
+    if (anySrc.match(/logo|icon|avatar|ads|pixel|track|badge|spinner|loading|spacer|blank|1x1/i)) continue;
+    if (anySrc.match(/\.gif$/i) || anySrc.match(/\.svg$/i)) continue;
+    return resolveUrl(anySrc, sourceUrl);
   }
 
   return null;
@@ -400,6 +421,17 @@ async function extractDraftContent(draftId, deps) {
         excerpt = article.excerpt;
         byline = article.byline;
         extractionMethod = 'direct';
+
+        // If no image found from raw HTML, try extracting from Readability's parsed content
+        if (!featuredImage && article.content) {
+          try {
+            featuredImage = extractImageFromHtml(article.content, draft.source_url);
+            if (featuredImage) {
+              logger.info('draft-helpers', 'Draft ' + draftId + ': Image found from Readability content');
+            }
+          } catch (imgErr) { /* ignore */ }
+        }
+
         logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 1 success — ' + content.length + ' chars' + (featuredImage ? ' + image' : ''));
       } else {
         logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 1 — HTML fetched (' + rawHtml.length + ' chars) but Readability returned ' + (article ? (article.textContent || '').length + ' chars (too short)' : 'null'));
@@ -416,8 +448,11 @@ async function extractDraftContent(draftId, deps) {
       var cachedHtml = await fetchFromCache(draft.source_url);
 
       if (cachedHtml) {
-        if (!featuredImage) {
-          featuredImage = extractImageFromHtml(cachedHtml, draft.source_url);
+        // Always try image extraction from cache — may find better/higher-res image
+        var cachedImage = extractImageFromHtml(cachedHtml, draft.source_url);
+        if (cachedImage && !featuredImage) {
+          featuredImage = cachedImage;
+          logger.info('draft-helpers', 'Draft ' + draftId + ': Image found from cache');
         }
 
         var cachedArticle = parseWithReadability(cachedHtml, draft.source_url);
@@ -427,6 +462,16 @@ async function extractDraftContent(draftId, deps) {
           excerpt = cachedArticle.excerpt;
           byline = cachedArticle.byline;
           extractionMethod = 'cache';
+
+          // Try image from cached Readability content if still missing
+          if (!featuredImage && cachedArticle.content) {
+            try {
+              featuredImage = extractImageFromHtml(cachedArticle.content, draft.source_url);
+              if (featuredImage) {
+                logger.info('draft-helpers', 'Draft ' + draftId + ': Image found from cached Readability content');
+              }
+            } catch (imgErr) { /* ignore */ }
+          }
           logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 2 success — ' + content.length + ' chars');
         }
       }
@@ -445,6 +490,33 @@ async function extractDraftContent(draftId, deps) {
       extractionMethod = 'firehose';
       isPartial = 1;
       logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 — ' + firehoseResult.charCount + ' chars (partial)');
+    }
+  }
+
+  // ── IMAGE-ONLY FETCH: If content extracted but no image, try to grab just the image ──
+  if (content && !featuredImage) {
+    try {
+      logger.info('draft-helpers', 'Draft ' + draftId + ': Content found but no image — attempting image-only fetch');
+      var imgHtml = null;
+      try {
+        var imgRes = await axios.get(draft.source_url, {
+          timeout: 8000,
+          maxContentLength: 50 * 1024,
+          headers: BROWSER_HEADERS,
+          maxRedirects: 3,
+          validateStatus: function (s) { return s < 400; },
+        });
+        imgHtml = typeof imgRes.data === 'string' ? imgRes.data : null;
+      } catch (e) { /* ignore — we already have content */ }
+
+      if (imgHtml) {
+        featuredImage = extractImageFromHtml(imgHtml, draft.source_url);
+        if (featuredImage) {
+          logger.info('draft-helpers', 'Draft ' + draftId + ': Image-only fetch success — ' + featuredImage.substring(0, 80));
+        }
+      }
+    } catch (imgErr) {
+      logger.debug('draft-helpers', 'Draft ' + draftId + ': Image-only fetch failed — ' + imgErr.message);
     }
   }
 
@@ -643,6 +715,7 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
 
 module.exports = {
   extractDraftContent: extractDraftContent,
+  extractImageFromHtml: extractImageFromHtml,
   rewriteDraftContent: rewriteDraftContent,
   validateRewriteOutput: validateRewriteOutput,
   updateDomainStats: updateDomainStats,

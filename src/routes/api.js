@@ -1348,7 +1348,7 @@ function createApiRouter(deps) {
 
   // ─── Draft Routes (Manual Selection + Editor) ─────────────────────────
 
-  var { extractDraftContent, rewriteDraftContent } = require('../utils/draft-helpers');
+  var { extractDraftContent, rewriteDraftContent, extractImageFromHtml } = require('../utils/draft-helpers');
   var draftDeps = { db: db, logger: logger, extractor: extractor, rewriter: rewriter };
 
   // POST /api/drafts/check-urls — Check which URLs already exist as drafts
@@ -1636,6 +1636,86 @@ function createApiRouter(deps) {
       return res.json({ success: true });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/drafts/batch-fetch-images ──────────────────────────────
+  //
+  // Fetches featured images for all extracted articles that are missing images.
+  // Runs async — returns immediately, processes in background.
+  //
+  router.post('/drafts/batch-fetch-images', function (req, res) {
+    try {
+      var missingImages = db.prepare(
+        "SELECT id, source_url, source_domain FROM drafts " +
+        "WHERE (featured_image IS NULL OR featured_image = '') " +
+        "AND extraction_status IN ('success', 'cache', 'fallback') " +
+        "AND status != 'failed' " +
+        "ORDER BY created_at DESC " +
+        "LIMIT 500"
+      ).all();
+
+      if (missingImages.length === 0) {
+        return res.json({ success: true, message: 'All articles already have images', count: 0 });
+      }
+
+      logger.info('api', 'Batch image fetch: starting for ' + missingImages.length + ' articles');
+
+      var axios = require('axios');
+
+      (async function () {
+        var found = 0;
+        var failed = 0;
+
+        for (var i = 0; i < missingImages.length; i++) {
+          var draft = missingImages[i];
+          try {
+            var imgRes = await axios.get(draft.source_url, {
+              timeout: 8000,
+              maxContentLength: 50 * 1024,
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml',
+                'Referer': 'https://www.google.com/'
+              },
+              maxRedirects: 3,
+              validateStatus: function (s) { return s < 400; },
+            });
+
+            if (imgRes.data && typeof imgRes.data === 'string') {
+              var imageUrl = extractImageFromHtml(imgRes.data, draft.source_url);
+
+              if (imageUrl) {
+                db.prepare("UPDATE drafts SET featured_image = ?, updated_at = datetime('now') WHERE id = ?")
+                  .run(imageUrl, draft.id);
+                found++;
+                logger.info('api', 'Batch image: found image for #' + draft.id + ' (' + draft.source_domain + ')');
+              } else {
+                failed++;
+              }
+            }
+          } catch (err) {
+            failed++;
+          }
+
+          if (i < missingImages.length - 1) {
+            await new Promise(function (resolve) { setTimeout(resolve, 300); });
+          }
+        }
+
+        logger.info('api', 'Batch image fetch complete: ' + found + ' found, ' + failed + ' failed, ' + missingImages.length + ' total');
+      })().catch(function (err) {
+        logger.error('api', 'Batch image fetch error: ' + err.message);
+      });
+
+      res.json({
+        success: true,
+        message: 'Image fetch started for ' + missingImages.length + ' articles (processing in background)',
+        count: missingImages.length
+      });
+    } catch (err) {
+      logger.error('api', 'Batch image fetch start error: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
