@@ -24,16 +24,10 @@ class Pipeline {
     this.extractor = extractor;
 
     // Worker config
-    this.EXTRACTION_CONCURRENCY = 5;   // Tuned for 4GB RAM — JSDOM uses 50-100MB per parse
-    this.EXTRACTION_POLL_MS = 2000;
+    this.EXTRACTION_POLL_MS = 500;      // Check for work every 500ms
     this.REWRITE_CONCURRENCY = 3;
     this.REWRITE_POLL_MS = 5000;
     this.PUBLISH_POLL_MS = 30000;
-
-    // ─── Memory safety (for 4GB server) ─────────────────────────────────
-    this.MEMORY_LIMIT_MB = 3200;            // Pause extraction if RSS exceeds this
-    this.RAMP_UP_INITIAL = 2;               // Start with only 2 concurrent on cold start
-    this.RAMP_UP_INTERVAL_MS = 30000;       // Add 1 more worker every 30 seconds
 
     // Track active workers
     this._extractionRunning = false;
@@ -42,10 +36,6 @@ class Pipeline {
 
     // Publish rate limiting (in-memory, same as old scheduler)
     this.publishHistory = [];
-
-    // Ramp-up state
-    this._currentMaxExtractions = this.RAMP_UP_INITIAL;
-    this._rampUpTimer = null;
 
     // Interval handles
     this._extractionTimer = null;
@@ -146,76 +136,73 @@ class Pipeline {
   // ─── EXTRACTION WORKER LOOP ──────────────────────────────────────────
 
   async _extractionLoop() {
+    // Simple sequential queue: pick one, extract, repeat
+    // No backpressure, no concurrency, no Promise.all
     if (this._extractionRunning) return;
     this._extractionRunning = true;
 
     try {
-      // Memory guard
-      if (!this._checkMemory()) {
-        this._extractionRunning = false;
-        var self = this;
-        setTimeout(function () {
-          self._extractionLoop().catch(function (err) {
-            self.logger.error(MODULE, 'Extraction error after memory pause: ' + err.message);
-          });
-        }, 30000);
-        return;
-      }
-      // Backpressure: pause extraction if too many drafts waiting for rewrite
-      var draftBacklog = this.db.prepare(
-        "SELECT COUNT(*) as count FROM drafts WHERE mode = 'auto' AND status = 'draft' AND cluster_role = 'primary'"
+      // Find ONE draft that needs extraction
+      var draft = this.db.prepare(
+        "SELECT * FROM drafts WHERE status = 'fetching' AND mode = 'auto' " +
+        "AND (locked_by IS NULL OR lease_expires_at < datetime('now')) " +
+        "AND (next_run_at IS NULL OR next_run_at <= datetime('now')) " +
+        "ORDER BY cluster_role = 'primary' DESC, created_at ASC " +
+        "LIMIT 1"
       ).get();
-      if (draftBacklog && draftBacklog.count > 500) {
-        this.logger.debug(MODULE, 'Backpressure: ' + draftBacklog.count + ' drafts waiting for rewrite — pausing extraction');
-        return;
-      }
 
-      // Claim a batch of fetching drafts (use ramp-up limited count)
-      var jobs = this.claimJobs('fetching', 'extractor', this._currentMaxExtractions);
+      if (!draft) return;
 
-      if (jobs.length === 0) return;
+      // Lock this one draft
+      var lockResult = this.db.prepare(
+        "UPDATE drafts SET locked_by = 'extractor', locked_at = datetime('now'), " +
+        "lease_expires_at = datetime('now', '+3 minutes') " +
+        "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
+      ).run(draft.id);
 
-      this.logger.info(MODULE, 'Extraction: claimed ' + jobs.length + ' jobs');
-      this.stats.extractionsStarted += jobs.length;
+      if (lockResult.changes === 0) return;
 
-      var self = this;
+      this.stats.extractionsStarted++;
+      this.logger.info(MODULE, 'Extracting #' + draft.id + ' (' + draft.source_domain + ')...');
+
       var draftDeps = { db: this.db, logger: this.logger, extractor: this.extractor, rewriter: this.rewriter };
 
-      // Run ALL claimed jobs in parallel (they're all network I/O)
-      var promises = jobs.map(function (draft) {
-        return extractDraftContent(draft.id, draftDeps)
-          .then(function () {
-            // Release lock (extractDraftContent already updates status to 'draft')
-            self.releaseJob(draft.id);
-            self.stats.extractionsCompleted++;
+      try {
+        await extractDraftContent(draft.id, draftDeps);
 
-            var updated = self.db.prepare('SELECT extraction_status, extracted_content FROM drafts WHERE id = ?').get(draft.id);
-            if (updated) {
-              self.logger.info(MODULE, 'Extracted #' + draft.id + ' (' + draft.source_domain + ') -> ' +
-                updated.extraction_status + ' (' + (updated.extracted_content || '').length + ' chars)');
-            }
-          })
-          .catch(function (err) {
-            self.logger.warn(MODULE, 'Extraction #' + draft.id + ' failed: ' + err.message);
-            self.stats.extractionsFailed++;
-            // Reset extraction_status so it doesn't stay stuck in 'extracting'
-            try {
-              self.db.prepare(
-                "UPDATE drafts SET extraction_status = 'failed', " +
-                "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
-                "updated_at = datetime('now') WHERE id = ? AND extraction_status = 'extracting'"
-              ).run(draft.id);
-            } catch (dbErr) {
-              self.logger.error(MODULE, 'Failed to reset extraction_status for #' + draft.id + ': ' + dbErr.message);
-            }
-            self._failOrRetry(draft, 'fetching', err.message);
-          });
-      });
+        // Release lock
+        this.db.prepare(
+          "UPDATE drafts SET locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+          "updated_at = datetime('now') WHERE id = ?"
+        ).run(draft.id);
 
-      await Promise.all(promises);
+        this.stats.extractionsCompleted++;
 
-    } catch (err) {
-      this.logger.error(MODULE, 'Extraction loop error: ' + err.message);
+        var updated = this.db.prepare('SELECT extraction_status, extracted_content FROM drafts WHERE id = ?').get(draft.id);
+        if (updated) {
+          this.logger.info(MODULE, 'Extracted #' + draft.id + ' -> ' +
+            updated.extraction_status + ' (' + (updated.extracted_content || '').length + ' chars)');
+        }
+      } catch (err) {
+        this.logger.warn(MODULE, 'Extraction #' + draft.id + ' error: ' + err.message);
+        this.stats.extractionsFailed++;
+
+        try {
+          this.db.prepare(
+            "UPDATE drafts SET extraction_status = 'failed', " +
+            "error_message = ?, " +
+            "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+            "updated_at = datetime('now') WHERE id = ?"
+          ).run((err.message || 'Unknown error').substring(0, 500), draft.id);
+        } catch (dbErr) {
+          this.logger.error(MODULE, 'DB update failed for #' + draft.id + ': ' + dbErr.message);
+        }
+
+        this._failOrRetry(draft, 'fetching', err.message);
+      }
+
+    } catch (loopErr) {
+      this.logger.error(MODULE, 'Extraction queue error: ' + loopErr.message);
     } finally {
       this._extractionRunning = false;
     }
@@ -701,8 +688,7 @@ class Pipeline {
       this.logger.warn(MODULE, 'Could not recover stuck drafts (columns may not exist yet): ' + e.message);
     }
 
-    this.logger.info(MODULE, 'Pipeline V2 initialized (extract:' + this.EXTRACTION_CONCURRENCY +
-      ' rewrite:' + this.REWRITE_CONCURRENCY + ' publish:rate-limited)');
+    this.logger.info(MODULE, 'Pipeline V2 initialized (extract:sequential rewrite:manual publish:rate-limited)');
   }
 
   start() {
@@ -710,18 +696,8 @@ class Pipeline {
 
     this.logger.info(MODULE, 'Starting Pipeline V2 workers...');
 
-    // ─── Gradual ramp-up: prevents cold-start memory spike ──────────
-    this._currentMaxExtractions = this.RAMP_UP_INITIAL;
-    this.logger.info(MODULE, 'Starting with ' + this.RAMP_UP_INITIAL + ' concurrent extractions, ramping to ' + this.EXTRACTION_CONCURRENCY);
-    this._rampUpTimer = setInterval(function () {
-      if (self._currentMaxExtractions < self.EXTRACTION_CONCURRENCY) {
-        self._currentMaxExtractions += 1;
-        self.logger.info(MODULE, 'Ramp-up: extractions now ' + self._currentMaxExtractions + '/' + self.EXTRACTION_CONCURRENCY);
-      } else {
-        clearInterval(self._rampUpTimer);
-        self._rampUpTimer = null;
-      }
-    }, this.RAMP_UP_INTERVAL_MS);
+    // Sequential extraction — no ramp-up needed
+    this.logger.info(MODULE, 'Sequential extraction queue — 1 article at a time, ~1-2 per second');
 
     // Extraction loop — fast, high concurrency
     this._extractionTimer = setInterval(function () {
@@ -747,11 +723,10 @@ class Pipeline {
       });
     }, this.PUBLISH_POLL_MS);
 
-    this.logger.info(MODULE, 'All 3 worker loops started');
+    this.logger.info(MODULE, 'All worker loops started (extraction: sequential queue, rewrite: manual, publish: auto)');
   }
 
   stop() {
-    if (this._rampUpTimer) { clearInterval(this._rampUpTimer); this._rampUpTimer = null; }
     if (this._extractionTimer) { clearInterval(this._extractionTimer); this._extractionTimer = null; }
     if (this._rewriteTimer) { clearInterval(this._rewriteTimer); this._rewriteTimer = null; }
     if (this._publishTimer) { clearInterval(this._publishTimer); this._publishTimer = null; }
