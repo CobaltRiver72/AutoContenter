@@ -493,30 +493,55 @@ async function extractDraftContent(draftId, deps) {
     }
   }
 
-  // ── IMAGE-ONLY FETCH: If content extracted but no image, try to grab just the image ──
-  if (content && !featuredImage) {
+  // ── AUTO IMAGE FETCH: Always attempt to get featured image if missing ──
+  if (!featuredImage) {
     try {
-      logger.info('draft-helpers', 'Draft ' + draftId + ': Content found but no image — attempting image-only fetch');
+      logger.info('draft-helpers', 'Draft ' + draftId + ': No image found — attempting dedicated image fetch from ' + draft.source_domain);
+
       var imgHtml = null;
       try {
         var imgRes = await axios.get(draft.source_url, {
-          timeout: 8000,
-          maxContentLength: 50 * 1024,
+          timeout: 10000,
+          maxContentLength: 100 * 1024,
           headers: BROWSER_HEADERS,
           maxRedirects: 3,
           validateStatus: function (s) { return s < 400; },
         });
         imgHtml = typeof imgRes.data === 'string' ? imgRes.data : null;
-      } catch (e) { /* ignore — we already have content */ }
+      } catch (fetchErr) {
+        logger.debug('draft-helpers', 'Draft ' + draftId + ': Direct image fetch failed, trying Google Cache');
+      }
 
       if (imgHtml) {
         featuredImage = extractImageFromHtml(imgHtml, draft.source_url);
         if (featuredImage) {
-          logger.info('draft-helpers', 'Draft ' + draftId + ': Image-only fetch success — ' + featuredImage.substring(0, 80));
+          logger.info('draft-helpers', 'Draft ' + draftId + ': Image found via dedicated fetch — ' + featuredImage.substring(0, 100));
+        }
+      }
+
+      // If still no image, try Google Cache as last resort
+      if (!featuredImage && draft.source_url) {
+        try {
+          var googleCacheMetaUrl = 'https://webcache.googleusercontent.com/search?q=cache:' + encodeURIComponent(draft.source_url);
+          var cacheRes = await axios.get(googleCacheMetaUrl, {
+            timeout: 8000,
+            maxContentLength: 100 * 1024,
+            headers: BROWSER_HEADERS,
+            maxRedirects: 3,
+            validateStatus: function (s) { return s < 400; },
+          });
+          if (cacheRes.data && typeof cacheRes.data === 'string') {
+            featuredImage = extractImageFromHtml(cacheRes.data, draft.source_url);
+            if (featuredImage) {
+              logger.info('draft-helpers', 'Draft ' + draftId + ': Image found via Google Cache — ' + featuredImage.substring(0, 100));
+            }
+          }
+        } catch (cacheErr) {
+          // Non-critical — many articles won't be in Google Cache
         }
       }
     } catch (imgErr) {
-      logger.debug('draft-helpers', 'Draft ' + draftId + ': Image-only fetch failed — ' + imgErr.message);
+      logger.debug('draft-helpers', 'Draft ' + draftId + ': Dedicated image fetch error — ' + imgErr.message);
     }
   }
 
