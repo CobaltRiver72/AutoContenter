@@ -148,6 +148,24 @@ class ArticleBuffer {
       }
 
       var articles = this._stmts.recentForSimilarity.all('-' + h, maxArticles);
+
+      // Language filter — only consider candidates in the same language as
+      // the new article. Articles with NULL language (legacy rows inserted
+      // before language detection landed) are kept so they can still cluster.
+      if (newArticle && newArticle.language) {
+        var beforeCount = articles.length;
+        var targetLang = newArticle.language;
+        articles = articles.filter(function (a) {
+          return !a.language || a.language === targetLang;
+        });
+        if (articles.length < beforeCount) {
+          this.logger.debug(MODULE,
+            'Language filter: kept ' + articles.length + '/' + beforeCount +
+            ' articles (language=' + targetLang + ')'
+          );
+        }
+      }
+
       this.logger.debug(MODULE, 'Buffer for similarity: ' + articles.length + ' articles (max ' + maxArticles + ', window ' + h + 'h)');
       return articles;
     } catch (err) {

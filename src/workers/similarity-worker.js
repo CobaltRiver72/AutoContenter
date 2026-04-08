@@ -47,6 +47,11 @@ function computeMatches(payload) {
     if (bufferArticles[i].id === newArticle.id) continue;
     if (bufferArticles[i].url === newArticle.url) continue;
 
+    // Cross-language guard — mirror of the main-thread skip in similarity.js
+    var langA = newArticle.language;
+    var langB = bufferArticles[i].language;
+    if (langA && langB && langA !== langB) continue;
+
     var isSameDomain = bufferArticles[i].domain === newArticle.domain;
     if (isSameDomain && !allowSameDomain) continue;
 

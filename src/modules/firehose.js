@@ -24,10 +24,19 @@ class FirehoseListener extends EventEmitter {
     this._connected = false;
     this._lastEventId = null;
     this._articlesReceived = 0;
+    this._articlesDroppedByLang = 0;
     this._lastArticleAt = null;
     this._reconnectTimer = null;
     this._lastConnectAttempt = 0;
     this._stopped = false;
+
+    // Language gate — only accept these ISO codes from the firehose stream.
+    // Override via ALLOWED_LANGUAGES=en,hi,bn in env. Hindi and English only by default.
+    var rawLangs = (config && config.ALLOWED_LANGUAGES) || 'en,hi';
+    this._allowedLangs = String(rawLangs)
+      .split(',')
+      .map(function (l) { return l.trim().toLowerCase(); })
+      .filter(Boolean);
     // Module independence
     this.enabled = false;
     this.status = 'disabled';
@@ -234,10 +243,39 @@ class FirehoseListener extends EventEmitter {
         : typeof doc.diff === 'string' ? doc.diff
         : (doc.markdown || doc.diff) ? JSON.stringify(doc.markdown || doc.diff)
         : '',
-      language: doc.language || null,
+      language: doc.language ? String(doc.language).toLowerCase() : null,
       page_category: doc.page_category || null,
       page_types: doc.page_types || null,
     };
+
+    // ─── Language Gate ─────────────────────────────────────────────────────
+    // Drop articles whose declared language isn't in the allow-list. For
+    // articles with no language metadata, sniff Devanagari Unicode range
+    // (U+0900..U+097F) in title + first 500 chars of content. Three or
+    // more Devanagari chars in a row → Hindi; otherwise default to English.
+    if (article.language && this._allowedLangs.indexOf(article.language) === -1) {
+      this._articlesDroppedByLang++;
+      this.logger.debug(MODULE,
+        '[lang-filter] Dropped ' + article.language + ' article: "' + (article.title || article.url) + '"'
+      );
+      return; // Drop — do not emit
+    }
+
+    if (!article.language) {
+      var checkText = (article.title || '') + ' ' + String(article.content_markdown || '').substring(0, 500);
+      if (/[\u0900-\u097F]{3,}/.test(checkText)) {
+        article.language = 'hi';
+      } else {
+        article.language = 'en';
+      }
+      // Re-check against the allow-list in case the operator excluded en/hi.
+      if (this._allowedLangs.indexOf(article.language) === -1) {
+        this._articlesDroppedByLang++;
+        return;
+      }
+      this.logger.debug(MODULE, '[lang-detect] Assigned language=' + article.language + ' to "' + (article.title || article.url) + '"');
+    }
+    // ─── End Language Gate ─────────────────────────────────────────────────
 
     this._articlesReceived++;
     this._lastArticleAt = new Date().toISOString();
@@ -301,6 +339,7 @@ class FirehoseListener extends EventEmitter {
       }
       this.enabled = true;
       this.status = 'connecting';
+      this.logger.info(MODULE, 'Language gate active: allowing [' + this._allowedLangs.join(',') + ']');
       this.connect();
     } catch (err) {
       this.status = 'error';
@@ -322,6 +361,8 @@ class FirehoseListener extends EventEmitter {
       lastActivity: this._lastArticleAt,
       stats: {
         articlesReceived: this._articlesReceived,
+        articlesDroppedByLang: this._articlesDroppedByLang,
+        allowedLangs: this._allowedLangs,
         lastEventId: this._lastEventId,
         connected: this._connected,
       }
@@ -347,6 +388,8 @@ class FirehoseListener extends EventEmitter {
       connected: this._connected,
       lastEventId: this._lastEventId || this.getLastEventId(),
       articlesReceived: this._articlesReceived,
+      articlesDroppedByLang: this._articlesDroppedByLang,
+      allowedLangs: this._allowedLangs,
       lastArticleAt: this._lastArticleAt,
       stopped: this._stopped,
     };

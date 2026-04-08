@@ -170,7 +170,14 @@ function runMigrations() {
       db.exec('ALTER TABLE articles ADD COLUMN language TEXT DEFAULT NULL');
     } catch (e) { /* already exists */ }
 
+    // Language column on clusters — used to keep en/hi clusters segregated
+    try {
+      db.exec('ALTER TABLE clusters ADD COLUMN language TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
     db.exec('CREATE INDEX IF NOT EXISTS idx_articles_title ON articles(title)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_articles_language ON articles(language)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_clusters_language ON clusters(language)');
 
     // Add new columns to published table if they don't exist
     try {

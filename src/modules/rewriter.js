@@ -32,6 +32,41 @@ function countWords(html) {
 
 function buildPrompt(article, cluster, settings) {
   var s = settings || {};
+
+  // ─── Determine Target Language ──────────────────────────────────────────
+  // Priority: 1) explicit settings.language  2) primary article language
+  // 3) cluster.language  4) first cluster article with language set
+  // 5) Devanagari script detection on primary content  6) default 'en'.
+  // The old fallback case ("English with Hindi terms") could turn a Punjabi
+  // source article into a half-Hindi, half-English mess — drop ambiguity.
+  var targetLang = (s.language === 'hi' || s.language === 'en') ? s.language : null;
+
+  if (!targetLang && article && article.language) {
+    targetLang = article.language;
+  }
+
+  if (!targetLang && cluster && cluster.language) {
+    targetLang = cluster.language;
+  }
+
+  if (!targetLang) {
+    var sniffArticles = (cluster && cluster.articles && Array.isArray(cluster.articles))
+      ? cluster.articles : [article];
+    for (var li = 0; li < sniffArticles.length; li++) {
+      if (sniffArticles[li] && sniffArticles[li].language) {
+        targetLang = sniffArticles[li].language;
+        break;
+      }
+    }
+  }
+
+  if (!targetLang) {
+    var detectSrc = ((article && article.title) || '') + ' ' +
+      (((article && (article.extracted_content || article.content_markdown)) || '').substring(0, 1000));
+    targetLang = /[\u0900-\u097F]{3,}/.test(detectSrc) ? 'hi' : 'en';
+  }
+  // ─── End Language Detection ─────────────────────────────────────────────
+
   var trendingContext = '';
   if (cluster && cluster.trends_boosted) {
     trendingContext =
@@ -72,11 +107,9 @@ function buildPrompt(article, cluster, settings) {
   ((s.targetKeyword && s.targetKeyword.trim())
     ? '5. TARGET KEYWORD: The user has specified this target keyword: "' + s.targetKeyword.trim() + '". Use this EXACT keyword as the primary keyword. Optimize the title, meta description, slug, and content around this keyword. Place it naturally in the H1, first paragraph, at least 2 H2 subheadings, and the conclusion.\n\n'
     : '5. TARGET KEYWORD: Identify the best long-tail keyword to target (e.g., "OnePlus Nord 6 price in India April 2026"). Prefer date/event-specific keywords with low competition.\n\n') +
-  (s.language === 'hi'
-    ? 'LANGUAGE: Write the ENTIRE article in Hindi (Devanagari script). All headings, paragraphs, FAQ questions and answers must be in Hindi. Only keep proper nouns, brand names, and technical terms in English where Hindi readers would expect them.\n\n'
-    : s.language === 'en'
-    ? 'LANGUAGE: Write the article in English only. Do NOT include Hindi translations or Devanagari text.\n\n'
-    : 'LANGUAGE: Write in English but naturally include Hindi terms in parentheses where relevant for Indian readers. For FAQ questions, include a Hindi translation in parentheses where appropriate. Use ₹ for Indian prices, IST for times.\n\n') +
+  (targetLang === 'hi'
+    ? 'LANGUAGE: Write the ENTIRE article in Hindi (Devanagari script). All headings, paragraphs, FAQ questions and answers must be in Hindi. Only keep proper nouns, brand names, and technical terms in English where Hindi readers would expect them. Do NOT mix English sentences into the article body.\n\n'
+    : 'LANGUAGE: Write the ENTIRE article in English only. Do NOT include Hindi translations, Devanagari text, or Hindi sentences anywhere in the body, headings, or FAQ. Proper nouns and Indian-specific terms (₹, IST, city names) are fine.\n\n') +
   'CONTENT STRUCTURE (800-1200 words):\n' +
   '1. Opening paragraph: Lead with the most newsworthy fact (who, what, when, where, why). Hook the reader in the first sentence. Include the target keyword naturally.\n' +
   '2. Key Details section (H2): Expand on the core facts with data, quotes, and context.\n' +

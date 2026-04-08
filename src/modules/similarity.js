@@ -171,6 +171,13 @@ class SimilarityEngine {
         if (bufferArticles[i].id === newArticle.id) continue;
         if (bufferArticles[i].url === newArticle.url) continue;
 
+        // Cross-language guard — TF-IDF can otherwise find spurious matches
+        // between Hindi and English articles whose topic words happen to
+        // share Latin tokens (proper nouns, brand names, etc.)
+        const langA = newArticle.language;
+        const langB = bufferArticles[i].language;
+        if (langA && langB && langA !== langB) continue;
+
         const isSameDomain = bufferArticles[i].domain === newArticle.domain;
 
         // Skip same-domain if not allowed
@@ -217,12 +224,14 @@ class SimilarityEngine {
             domain: newArticle.domain,
             title: newArticle.title,
             fingerprint: newArticle.fingerprint,
+            language: newArticle.language || null,
           },
           bufferArticles: bufferArticles.map(function(a) {
             return {
               id: a.id, url: a.url, domain: a.domain, title: a.title,
               fingerprint: a.fingerprint, cluster_id: a.cluster_id,
               authority_tier: a.authority_tier,
+              language: a.language || null,
             };
           }),
           threshold: this.config.SIMILARITY_THRESHOLD || 0.20,
@@ -267,6 +276,27 @@ class SimilarityEngine {
         if (match.article.cluster_id) {
           existingClusterId = match.article.cluster_id;
           break;
+        }
+      }
+
+      // Language guard — refuse to join an existing cluster of a different
+      // language. Without this a Hindi article whose fingerprint happened to
+      // match an English cluster (e.g., shared brand names) would get mixed
+      // in and corrupt the rewriter output.
+      if (existingClusterId) {
+        const existingCluster = this.getCluster(existingClusterId);
+        if (
+          existingCluster &&
+          existingCluster.language &&
+          newArticle.language &&
+          existingCluster.language !== newArticle.language
+        ) {
+          this.logger.info(MODULE,
+            'Language mismatch: article lang=' + newArticle.language +
+            ' vs cluster ' + existingClusterId + ' lang=' + existingCluster.language +
+            '. Creating new cluster.'
+          );
+          existingClusterId = null;
         }
       }
 
@@ -410,12 +440,17 @@ class SimilarityEngine {
 
     if (!this._stmts.insertCluster) {
       this._stmts.insertCluster = this.db.prepare(`
-        INSERT INTO clusters (topic, article_count, avg_similarity, primary_article_id, trends_boosted, trend_topic, priority, status, detected_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'detected', datetime('now'))
+        INSERT INTO clusters (topic, article_count, avg_similarity, primary_article_id, trends_boosted, trend_topic, priority, language, status, detected_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'detected', datetime('now'))
       `);
     }
 
     const articleCount = 1 + matches.length; // new article + matched articles
+
+    // Cluster language: prefer the primary article's language, fall back to
+    // the new article's language. After the cross-lang skip in findMatches
+    // these should always agree, but the fallback keeps NULL out of the row.
+    const clusterLang = primaryArticle.language || newArticle.language || null;
 
     const result = this._stmts.insertCluster.run(
       topic,
@@ -424,7 +459,8 @@ class SimilarityEngine {
       primaryArticle.id || newArticle.id,
       trendsBoosted,
       trendTopic,
-      priority
+      priority,
+      clusterLang
     );
 
     const clusterId = typeof result.lastInsertRowid === 'bigint'
