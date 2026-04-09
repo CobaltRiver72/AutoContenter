@@ -3575,6 +3575,7 @@
         } else {
           $('ai-output-content').innerHTML = '<p class="placeholder-text">No AI output yet. Go to Settings tab and click "Rewrite with AI".</p>';
           $('html-code-editor').value = '';
+          updatePreviewIframe('');
         }
 
         // Versions bar
@@ -3710,7 +3711,6 @@
   }
 
   function updatePreviewIframe(html) {
-    if (!html) return;
     var iframe = $('preview-iframe');
     if (!iframe) return;
     var doc = iframe.contentDocument || iframe.contentWindow.document;
