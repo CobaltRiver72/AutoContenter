@@ -625,6 +625,14 @@ class ArticleRewriter {
       lastRewriteAt: null,
       totalTokens: 0,
     };
+
+    // Per-provider concurrency lock — serializes calls to each provider
+    // to avoid self-inflicted 429s on free-tier rate limits.
+    this._providerLocks = {
+      anthropic: Promise.resolve(),
+      openai: Promise.resolve(),
+      openrouter: Promise.resolve(),
+    };
   }
 
   async init() {
@@ -934,9 +942,14 @@ class ArticleRewriter {
 
       if (!enableFallback) throw primaryErr;
 
-      // 3-provider fallback chain
-      var allProviders = ['openrouter', 'anthropic', 'openai'];
-      var fallbackProviders = allProviders.filter(function (p) { return p !== provider; });
+      // Fallback chain: only cascade to MORE reliable providers than
+      // the one that just failed. Reliability order: anthropic > openai > openrouter.
+      var fallbackChain = {
+        openrouter: ['anthropic', 'openai'], // openrouter failed → try paid providers
+        openai: ['anthropic'],                // openai failed → only anthropic is more reliable
+        anthropic: ['openai'],                // anthropic failed → openai is next-most-reliable
+      };
+      var fallbackProviders = fallbackChain[provider] || [];
       var lastError = primaryErr;
 
       for (var fi = 0; fi < fallbackProviders.length; fi++) {
@@ -987,77 +1000,96 @@ class ArticleRewriter {
     return this._callOpenAIStructured(apiKey, model, prompt);
   }
 
-  async _callAnthropicStructured(apiKey, model, prompt) {
-    var Anthropic;
-    try { Anthropic = require('@anthropic-ai/sdk'); }
-    catch (e) { throw new Error('Anthropic SDK not installed. Run: npm install @anthropic-ai/sdk'); }
-
-    var maxTokens = this._cfg.maxTokens || 4096;
-    var temperature = this._cfg.temperature;
-    if (temperature === undefined || temperature === null) temperature = 0.7;
-
-    var client = new Anthropic({ apiKey: apiKey.trim() });
-
-    var response = await client.messages.create({
-      model: model,
-      max_tokens: maxTokens,
-      temperature: temperature,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    var rawText = response.content && response.content[0] ? response.content[0].text : '';
-    if (!rawText || rawText.length < 50) {
-      throw new Error('Anthropic returned empty or too-short response');
-    }
-
-    var parsed = parseModelOutput(rawText);
-    var tokensUsed = (response.usage ? (response.usage.input_tokens || 0) + (response.usage.output_tokens || 0) : 0);
-    return buildRewriteResult(parsed, tokensUsed);
+  _acquireProviderLock(provider) {
+    var self = this;
+    var prev = self._providerLocks[provider] || Promise.resolve();
+    var release;
+    var next = new Promise(function (resolve) { release = resolve; });
+    self._providerLocks[provider] = prev.then(function () { return next; });
+    return prev.then(function () { return release; });
   }
 
-  async _callOpenAIStructured(apiKey, model, prompt) {
-    var OpenAI;
-    try { OpenAI = require('openai'); }
-    catch (e) { throw new Error('OpenAI SDK not installed. Run: npm install openai'); }
+  async _callAnthropicStructured(apiKey, model, prompt) {
+    var release = await this._acquireProviderLock('anthropic');
+    try {
+      var Anthropic;
+      try { Anthropic = require('@anthropic-ai/sdk'); }
+      catch (e) { throw new Error('Anthropic SDK not installed. Run: npm install @anthropic-ai/sdk'); }
 
-    var maxTokens = this._cfg.maxTokens || 4096;
-    var temperature = this._cfg.temperature;
-    if (temperature === undefined || temperature === null) temperature = 0.7;
+      var maxTokens = this._cfg.maxTokens || 4096;
+      var temperature = this._cfg.temperature;
+      if (temperature === undefined || temperature === null) temperature = 0.7;
 
-    var isOModel = model.startsWith('o3') || model.startsWith('o4');
-    var client = new OpenAI({ apiKey: apiKey.trim() });
+      var client = new Anthropic({ apiKey: apiKey.trim() });
 
-    var response;
-    if (isOModel) {
-      response = await client.chat.completions.create({
-        model: model,
-        max_completion_tokens: maxTokens,
-        messages: [
-          { role: 'developer', content: 'You are a professional news journalist. Always respond in valid JSON.' },
-          { role: 'user', content: prompt },
-        ],
-      });
-    } else {
-      response = await client.chat.completions.create({
+      var response = await client.messages.create({
         model: model,
         max_tokens: maxTokens,
         temperature: temperature,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON.' },
-          { role: 'user', content: prompt },
-        ],
+        messages: [{ role: 'user', content: prompt }],
       });
-    }
 
-    var rawText = response.choices && response.choices[0] ? response.choices[0].message.content : '';
-    if (!rawText || rawText.length < 50) {
-      throw new Error('OpenAI returned empty or too-short response');
-    }
+      var rawText = response.content && response.content[0] ? response.content[0].text : '';
+      if (!rawText || rawText.length < 50) {
+        throw new Error('Anthropic returned empty or too-short response');
+      }
 
-    var parsed = parseModelOutput(rawText);
-    var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
-    return buildRewriteResult(parsed, tokensUsed);
+      var parsed = parseModelOutput(rawText);
+      var tokensUsed = (response.usage ? (response.usage.input_tokens || 0) + (response.usage.output_tokens || 0) : 0);
+      return buildRewriteResult(parsed, tokensUsed);
+    } finally {
+      release();
+    }
+  }
+
+  async _callOpenAIStructured(apiKey, model, prompt) {
+    var release = await this._acquireProviderLock('openai');
+    try {
+      var OpenAI;
+      try { OpenAI = require('openai'); }
+      catch (e) { throw new Error('OpenAI SDK not installed. Run: npm install openai'); }
+
+      var maxTokens = this._cfg.maxTokens || 4096;
+      var temperature = this._cfg.temperature;
+      if (temperature === undefined || temperature === null) temperature = 0.7;
+
+      var isOModel = model.startsWith('o3') || model.startsWith('o4');
+      var client = new OpenAI({ apiKey: apiKey.trim() });
+
+      var response;
+      if (isOModel) {
+        response = await client.chat.completions.create({
+          model: model,
+          max_completion_tokens: maxTokens,
+          messages: [
+            { role: 'developer', content: 'You are a professional news journalist. Always respond in valid JSON.' },
+            { role: 'user', content: prompt },
+          ],
+        });
+      } else {
+        response = await client.chat.completions.create({
+          model: model,
+          max_tokens: maxTokens,
+          temperature: temperature,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON.' },
+            { role: 'user', content: prompt },
+          ],
+        });
+      }
+
+      var rawText = response.choices && response.choices[0] ? response.choices[0].message.content : '';
+      if (!rawText || rawText.length < 50) {
+        throw new Error('OpenAI returned empty or too-short response');
+      }
+
+      var parsed = parseModelOutput(rawText);
+      var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
+      return buildRewriteResult(parsed, tokensUsed);
+    } finally {
+      release();
+    }
   }
 
   // ─── OpenRouter calls (uses OpenAI SDK with custom baseURL) ──────────
@@ -1075,71 +1107,76 @@ class ArticleRewriter {
   }
 
   async _callOpenRouterStructured(apiKey, model, prompt) {
-    // OpenRouter reasoning models (DeepSeek-R1, Nemotron, Minimax M2, Qwen QwQ)
-    // spend 1,500–4,000 tokens on internal <think> before producing JSON.
-    // Ensure at least 8192 tokens so both phases fit.
-    var configuredMaxTokens = this._cfg.maxTokens || 4096;
-    var maxTokens = Math.max(configuredMaxTokens, 8192);
-    var temperature = this._cfg.temperature;
-    if (temperature === undefined || temperature === null) temperature = 0.7;
+    var release = await this._acquireProviderLock('openrouter');
+    try {
+      // OpenRouter reasoning models (DeepSeek-R1, Nemotron, Minimax M2, Qwen QwQ)
+      // spend 1,500–4,000 tokens on internal <think> before producing JSON.
+      // Ensure at least 8192 tokens so both phases fit.
+      var configuredMaxTokens = this._cfg.maxTokens || 4096;
+      var maxTokens = Math.max(configuredMaxTokens, 8192);
+      var temperature = this._cfg.temperature;
+      if (temperature === undefined || temperature === null) temperature = 0.7;
 
-    var client = this._openRouterClient(apiKey);
+      var client = this._openRouterClient(apiKey);
 
-    // Build request with JSON mode (matches _callOpenAIStructured behaviour)
-    var requestBody = {
-      model: model,
-      max_tokens: maxTokens,
-      temperature: temperature,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON only — no prose, no markdown fences, no <think> blocks.' },
-        { role: 'user', content: prompt },
-      ],
-    };
+      // Build request with JSON mode (matches _callOpenAIStructured behaviour)
+      var requestBody = {
+        model: model,
+        max_tokens: maxTokens,
+        temperature: temperature,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON only — no prose, no markdown fences, no <think> blocks.' },
+          { role: 'user', content: prompt },
+        ],
+      };
 
-    // Retry wrapper for 429 / 5xx with exponential backoff (2s, 4s, 8s)
-    var response = null;
-    var lastErr = null;
-    var maxAttempts = 3;
-    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        response = await client.chat.completions.create(requestBody);
-        lastErr = null;
-        break;
-      } catch (err) {
-        lastErr = err;
-        var status = (err && (err.status || err.statusCode)) || 0;
-        var isRateLimited = status === 429;
-        var isServerError = status >= 500 && status < 600;
-        var isRetryable = isRateLimited || isServerError;
-        if (!isRetryable || attempt === maxAttempts) {
-          throw err;
+      // Retry wrapper for 429 / 5xx with exponential backoff (2s, 4s, 8s)
+      var response = null;
+      var lastErr = null;
+      var maxAttempts = 3;
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          response = await client.chat.completions.create(requestBody);
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          var status = (err && (err.status || err.statusCode)) || 0;
+          var isRateLimited = status === 429;
+          var isServerError = status >= 500 && status < 600;
+          var isRetryable = isRateLimited || isServerError;
+          if (!isRetryable || attempt === maxAttempts) {
+            throw err;
+          }
+          var waitMs = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+          console.log('[rewriter] OpenRouter ' + status + ' on attempt ' + attempt + '/' + maxAttempts + ' for ' + model + ' — retrying in ' + (waitMs / 1000) + 's');
+          await new Promise(function (resolve) { return setTimeout(resolve, waitMs); });
         }
-        var waitMs = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
-        console.log('[rewriter] OpenRouter ' + status + ' on attempt ' + attempt + '/' + maxAttempts + ' for ' + model + ' — retrying in ' + (waitMs / 1000) + 's');
-        await new Promise(function (resolve) { return setTimeout(resolve, waitMs); });
       }
-    }
-    if (!response) {
-      throw lastErr || new Error('OpenRouter call failed after ' + maxAttempts + ' attempts');
-    }
+      if (!response) {
+        throw lastErr || new Error('OpenRouter call failed after ' + maxAttempts + ' attempts');
+      }
 
-    // Extract text — reasoning models put output in reasoning_content / reasoning
-    var msg = (response.choices && response.choices[0] && response.choices[0].message) || {};
-    var rawText = msg.content || msg.reasoning_content || msg.reasoning || '';
+      // Extract text — reasoning models put output in reasoning_content / reasoning
+      var msg = (response.choices && response.choices[0] && response.choices[0].message) || {};
+      var rawText = msg.content || msg.reasoning_content || msg.reasoning || '';
 
-    // Strip any <think>...</think> blocks left by reasoning models
-    if (rawText && rawText.indexOf('<think>') !== -1) {
-      rawText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      // Strip any <think>...</think> blocks left by reasoning models
+      if (rawText && rawText.indexOf('<think>') !== -1) {
+        rawText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      }
+
+      if (!rawText || rawText.length < 50) {
+        throw new Error('OpenRouter returned empty or too-short response (model=' + model + ', content_len=' + (msg.content || '').length + ', reasoning_len=' + ((msg.reasoning_content || msg.reasoning || '')).length + ')');
+      }
+
+      var parsed = parseModelOutput(rawText);
+      var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
+      return buildRewriteResult(parsed, tokensUsed);
+    } finally {
+      release();
     }
-
-    if (!rawText || rawText.length < 50) {
-      throw new Error('OpenRouter returned empty or too-short response (model=' + model + ', content_len=' + (msg.content || '').length + ', reasoning_len=' + ((msg.reasoning_content || msg.reasoning || '')).length + ')');
-    }
-
-    var parsed = parseModelOutput(rawText);
-    var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
-    return buildRewriteResult(parsed, tokensUsed);
   }
 
   // ─── Test connection ────────────────────────────────────────────────────
@@ -1195,6 +1232,52 @@ class ArticleRewriter {
       // OpenRouter returns useful error structure — surface model name in message
       var msg = err && err.message ? err.message : String(err);
       return { success: false, error: msg };
+    }
+  }
+
+  async validateRewriteCapability(provider, apiKey, modelOverride) {
+    try {
+      // Minimal rewrite-shaped prompt that proves JSON mode works
+      var testPrompt =
+        'Respond with a JSON object exactly matching this schema:\n' +
+        '{\n' +
+        '  "headline": "string, 10-20 chars",\n' +
+        '  "in_brief": "string, 20-40 chars",\n' +
+        '  "body_markdown": "string, 50-100 chars",\n' +
+        '  "faqs": [{"q": "string", "a": "string"}]\n' +
+        '}\n\n' +
+        'Topic: "Test rewrite capability". Keep all strings short.';
+
+      var tempCfg = {
+        maxTokens: 1024,
+        temperature: 0.3,
+      };
+      // Temporarily override cfg for this call
+      var savedCfg = this._cfg;
+      this._cfg = Object.assign({}, savedCfg || {}, tempCfg);
+
+      var result;
+      try {
+        if (provider === 'anthropic') {
+          result = await this._callAnthropicStructured(apiKey, modelOverride || 'claude-haiku-4-5-20251001', testPrompt);
+        } else if (provider === 'openai') {
+          result = await this._callOpenAIStructured(apiKey, modelOverride || 'gpt-4o-mini', testPrompt);
+        } else if (provider === 'openrouter') {
+          result = await this._callOpenRouterStructured(apiKey, modelOverride || 'meta-llama/llama-3.3-70b-instruct:free', testPrompt);
+        } else {
+          throw new Error('Unknown provider: ' + provider);
+        }
+      } finally {
+        this._cfg = savedCfg;
+      }
+
+      return {
+        success: true,
+        model: modelOverride || '',
+        response: 'Rewrite-shaped JSON returned successfully (' + (result.tokensUsed || 0) + ' tokens)',
+      };
+    } catch (err) {
+      return { success: false, error: err && err.message ? err.message : String(err) };
     }
   }
 

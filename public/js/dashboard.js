@@ -4540,6 +4540,15 @@
     var testOrBtn = $('testOpenrouterBtn');
     if (testOrBtn) testOrBtn.onclick = function () { testApiKey('openrouter'); };
 
+    var valAntBtn = $('anthropic-validate');
+    if (valAntBtn) valAntBtn.onclick = function () { validateRewriteCapability('anthropic'); };
+
+    var valOaiBtn = $('openai-validate');
+    if (valOaiBtn) valOaiBtn.onclick = function () { validateRewriteCapability('openai'); };
+
+    var valOrBtn = $('openrouter-validate');
+    if (valOrBtn) valOrBtn.onclick = function () { validateRewriteCapability('openrouter'); };
+
     // Load OpenRouter models dynamically (cached 1h server-side)
     __loadOpenRouterModels().then(function () {
       // Re-apply saved model selection after dropdown is populated
@@ -4629,6 +4638,36 @@
       })
       .catch(function (err) {
         if (statusEl) { statusEl.textContent = 'Test failed: ' + err.message; statusEl.style.color = '#ef4444'; }
+      });
+  }
+
+  function validateRewriteCapability(provider) {
+    var statusEl = $(provider + '-key-status');
+    var keyInput = $(provider + '-key');
+    var modelInput = $(provider + '-model');
+    var apiKey = keyInput ? keyInput.value.trim() : '';
+    var model = modelInput ? modelInput.value : '';
+
+    if (!apiKey || apiKey.length < 10) {
+      if (statusEl) { statusEl.textContent = 'Enter an API key first'; statusEl.style.color = '#f59e0b'; }
+      return;
+    }
+
+    if (statusEl) { statusEl.textContent = 'Validating rewrite capability...'; statusEl.style.color = '#888'; }
+
+    fetchApi('/api/ai/validate-rewrite', { method: 'POST', body: { provider: provider, apiKey: apiKey, model: model } })
+      .then(function (data) {
+        if (data.success) {
+          if (statusEl) {
+            statusEl.textContent = 'Rewrite capable! ' + (data.response || '');
+            statusEl.style.color = '#10b981';
+          }
+        } else {
+          if (statusEl) { statusEl.textContent = 'Rewrite failed: ' + (data.error || 'Unknown error'); statusEl.style.color = '#ef4444'; }
+        }
+      })
+      .catch(function (err) {
+        if (statusEl) { statusEl.textContent = 'Validate failed: ' + err.message; statusEl.style.color = '#ef4444'; }
       });
   }
 

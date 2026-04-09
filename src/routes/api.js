@@ -714,6 +714,19 @@ function createApiRouter(deps) {
     }
   });
 
+  router.post('/ai/validate-rewrite', async function (req, res) {
+    try {
+      var body = req.body || {};
+      if (!body.provider || !body.apiKey) {
+        return res.status(400).json({ success: false, error: 'Provider and API key required' });
+      }
+      var result = await rewriter.validateRewriteCapability(body.provider, body.apiKey, body.model);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   router.get('/ai/models', async function (req, res) {
     try {
       var rewriterModule = require('../modules/rewriter');
