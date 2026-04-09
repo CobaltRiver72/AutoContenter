@@ -2230,7 +2230,9 @@ function createApiRouter(deps) {
   router.delete('/drafts/batch-failed', function (req, res) {
     try {
       var failedCount = db.prepare(
-        "SELECT COUNT(*) as cnt FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
+        "SELECT COUNT(*) as cnt FROM drafts WHERE extraction_status = 'failed' " +
+        "AND status != 'published' " +
+        "AND (rewritten_html IS NULL OR LENGTH(rewritten_html) < 100)"
       ).get().cnt;
 
       if (failedCount === 0) {
@@ -2243,7 +2245,9 @@ function createApiRouter(deps) {
         ).run();
 
         var result = db.prepare(
-          "DELETE FROM drafts WHERE extraction_status = 'failed' AND status != 'published'"
+          "DELETE FROM drafts WHERE extraction_status = 'failed' " +
+          "AND status != 'published' " +
+          "AND (rewritten_html IS NULL OR LENGTH(rewritten_html) < 100)"
         ).run();
 
         return result.changes;
