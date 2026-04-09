@@ -3850,6 +3850,16 @@
         // OpenRouter populated dynamically from /api/ai/models (cached on window)
         openrouter: [],
       };
+      // Helper: render a list of models into the editor-model <select>
+      var renderEditorModelOptions = function (modelSelect, list) {
+        if (!modelSelect) return;
+        var optHtml = '';
+        for (var m = 0; m < list.length; m++) {
+          optHtml += '<option value="' + list[m].value + '">' + list[m].label + '</option>';
+        }
+        modelSelect.innerHTML = optHtml || '<option value="">No models available</option>';
+      };
+
       editorProviderEl.addEventListener('change', function () {
         var prov = editorProviderEl.value;
         var modelChoice = $('editor-model-choice');
@@ -3859,18 +3869,34 @@
           return;
         }
         if (modelChoice) modelChoice.style.display = '';
-        // For OpenRouter, use cached dynamic list if available
-        if (prov === 'openrouter' && window.__openrouterModels && window.__openrouterModels.length > 0) {
-          AI_MODELS.openrouter = window.__openrouterModels.map(function (m) {
-            return { value: m.id, label: m.name + (m.tier ? ' — ' + m.tier : '') };
-          });
-        }
-        if (modelSelect && AI_MODELS[prov]) {
-          var optHtml = '';
-          for (var m = 0; m < AI_MODELS[prov].length; m++) {
-            optHtml += '<option value="' + AI_MODELS[prov][m].value + '">' + AI_MODELS[prov][m].label + '</option>';
+
+        if (prov === 'openrouter') {
+          // Use cached list if available
+          if (window.__openrouterModels && window.__openrouterModels.length > 0) {
+            AI_MODELS.openrouter = window.__openrouterModels.map(function (m) {
+              return { value: m.id, label: m.name + (m.tier ? ' — ' + m.tier : '') };
+            });
+            renderEditorModelOptions(modelSelect, AI_MODELS.openrouter);
+          } else {
+            // Fetch on demand — show loading state, then populate when ready
+            if (modelSelect) modelSelect.innerHTML = '<option value="">Loading free models…</option>';
+            __loadOpenRouterModels().then(function () {
+              if (window.__openrouterModels && window.__openrouterModels.length > 0) {
+                AI_MODELS.openrouter = window.__openrouterModels.map(function (m) {
+                  return { value: m.id, label: m.name + (m.tier ? ' — ' + m.tier : '') };
+                });
+              }
+              renderEditorModelOptions(modelSelect, AI_MODELS.openrouter);
+            }).catch(function () {
+              renderEditorModelOptions(modelSelect, []);
+            });
           }
-          modelSelect.innerHTML = optHtml || '<option value="">No models available</option>';
+          return;
+        }
+
+        // Anthropic / OpenAI — static lists
+        if (AI_MODELS[prov]) {
+          renderEditorModelOptions(modelSelect, AI_MODELS[prov]);
         }
       });
     }
@@ -5034,6 +5060,9 @@
     initEditorButtons();
     initWpDiagButtons();
     initManualImport();
+    // Pre-fetch OpenRouter models so the editor's model picker works even
+    // before the user visits the Settings page. Cached server-side for 1h.
+    __loadOpenRouterModels();
   }
 
   // Wait for DOM
