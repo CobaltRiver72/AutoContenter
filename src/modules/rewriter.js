@@ -33,39 +33,54 @@ function countWords(html) {
 function buildPrompt(article, cluster, settings) {
   var s = settings || {};
 
-  // ─── Determine Target Language ──────────────────────────────────────────
-  // Priority: 1) explicit settings.language  2) primary article language
-  // 3) cluster.language  4) first cluster article with language set
-  // 5) Devanagari script detection on primary content  6) default 'en'.
-  // The old fallback case ("English with Hindi terms") could turn a Punjabi
-  // source article into a half-Hindi, half-English mess — drop ambiguity.
+  // ─── Determine Output Language ────────────────────────────────────────────────
+  // Rule: if ANY source article in the cluster is English → write in English.
+  //       Only write Hindi if ALL cluster articles are Hindi (or Hindi-detected).
+  // This way a mixed Hindi+English cluster about the same story always outputs English,
+  // and the AI uses all sources (including Hindi ones) as research input.
   var targetLang = (s.language === 'hi' || s.language === 'en') ? s.language : null;
 
-  if (!targetLang && article && article.language) {
-    targetLang = article.language;
-  }
-
-  if (!targetLang && cluster && cluster.language) {
-    targetLang = cluster.language;
-  }
-
   if (!targetLang) {
-    var sniffArticles = (cluster && cluster.articles && Array.isArray(cluster.articles))
-      ? cluster.articles : [article];
-    for (var li = 0; li < sniffArticles.length; li++) {
-      if (sniffArticles[li] && sniffArticles[li].language) {
-        targetLang = sniffArticles[li].language;
-        break;
+    // Collect all articles available for language inspection
+    var allClusterArticles = [];
+    if (cluster && cluster.articles && Array.isArray(cluster.articles) && cluster.articles.length > 0) {
+      allClusterArticles = cluster.articles;
+    } else if (article) {
+      allClusterArticles = [article];
+    }
+
+    var hasEnglish = false;
+    var hasHindi = false;
+
+    for (var li = 0; li < allClusterArticles.length; li++) {
+      var a = allClusterArticles[li];
+      if (!a) continue;
+      var lang = a.language || null;
+
+      // If language is null, detect from content
+      if (!lang) {
+        var detectText = (a.title || '') + ' ' +
+          ((a.extracted_content || a.content_markdown || '').substring(0, 500));
+        lang = /[\u0900-\u097F]{3,}/.test(detectText) ? 'hi' : 'en';
       }
+
+      if (lang === 'en') { hasEnglish = true; }
+      if (lang === 'hi') { hasHindi = true; }
+    }
+
+    // English wins if even one English source exists
+    if (hasEnglish) {
+      targetLang = 'en';
+    } else if (hasHindi) {
+      targetLang = 'hi';
+    } else {
+      // Absolute fallback: detect from primary article
+      var detectSrc = ((article && article.title) || '') + ' ' +
+        (((article && (article.extracted_content || article.content_markdown)) || '').substring(0, 1000));
+      targetLang = /[\u0900-\u097F]{3,}/.test(detectSrc) ? 'hi' : 'en';
     }
   }
-
-  if (!targetLang) {
-    var detectSrc = ((article && article.title) || '') + ' ' +
-      (((article && (article.extracted_content || article.content_markdown)) || '').substring(0, 1000));
-    targetLang = /[\u0900-\u097F]{3,}/.test(detectSrc) ? 'hi' : 'en';
-  }
-  // ─── End Language Detection ─────────────────────────────────────────────
+  // ─── End Output Language Detection ───────────────────────────────────────────
 
   var trendingContext = '';
   if (cluster && cluster.trends_boosted) {
