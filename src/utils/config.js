@@ -43,6 +43,8 @@ var DEFAULTS = {
   INFRANODUS_API_KEY: '',
   INFRANODUS_ENABLED: 'false',
   FORCE_HTTPS: 'false',
+  JINA_API_KEY: '',
+  JINA_ENABLED: 'true',
 };
 
 // Numeric keys that should be parsed as numbers
@@ -63,7 +65,7 @@ var NUMERIC_KEYS = [
 var CSV_KEYS = ['TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES'];
 
 // Boolean keys that should be parsed as booleans
-var BOOLEAN_KEYS = ['TRENDS_ENABLED', 'INFRANODUS_ENABLED', 'ENABLE_FALLBACK', 'FORCE_HTTPS', 'ALLOW_SAME_DOMAIN_CLUSTERS'];
+var BOOLEAN_KEYS = ['TRENDS_ENABLED', 'INFRANODUS_ENABLED', 'ENABLE_FALLBACK', 'FORCE_HTTPS', 'ALLOW_SAME_DOMAIN_CLUSTERS', 'JINA_ENABLED'];
 
 /**
  * Build the config object from environment variables and defaults.

@@ -4,6 +4,8 @@ var axios = require('axios');
 var { JSDOM } = require('jsdom');
 var { Readability } = require('@mozilla/readability');
 var { assertSafeUrl, safeAxiosOptions, isBlockedIp } = require('./safe-http');
+var { fetchViaJina } = require('../modules/extractor-jina');
+var configModule = require('./config');
 var net = require('net');
 
 // ─── Featured Image Extraction ──────────────────────────────────────────
@@ -544,16 +546,45 @@ async function extractDraftContent(draftId, deps) {
     }
   }
 
-  // ── LAYER 3: Build from Firehose data ──
+  // ── LAYER 3: Jina AI Reader fallback ──
   if (!content) {
-    logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 — building from Firehose data');
+    var cfg = configModule.getConfig();
+    var jinaEnabled = cfg.JINA_ENABLED === true || cfg.JINA_ENABLED === 'true';
+
+    if (jinaEnabled) {
+      try {
+        logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 — Jina AI Reader fallback');
+        var jinaResult = await fetchViaJina(draft.source_url, cfg, logger);
+
+        if (jinaResult && jinaResult.content && jinaResult.content.length > 200) {
+          content = jinaResult.content;
+          // Preserve title from Layer 1/2 if we already have one; otherwise use Jina's.
+          if (!title && jinaResult.title) title = jinaResult.title;
+          extractionMethod = 'jina';
+          // Jina returns full extracted content — not partial.
+          isPartial = 0;
+          logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 success — ' + content.length + ' chars (Jina)');
+        } else {
+          logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 — Jina returned no usable content');
+        }
+      } catch (err) {
+        logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 failed — ' + err.message);
+      }
+    } else {
+      logger.debug('draft-helpers', 'Draft ' + draftId + ': Layer 3 skipped — Jina disabled');
+    }
+  }
+
+  // ── LAYER 4: Build from Firehose data ──
+  if (!content) {
+    logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 4 — building from Firehose data');
     var firehoseResult = buildFromFirehoseData(draft);
 
     if (firehoseResult.content && firehoseResult.content.length > 50) {
       content = firehoseResult.content;
       extractionMethod = 'firehose';
       isPartial = 1;
-      logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 3 — ' + firehoseResult.charCount + ' chars (partial)');
+      logger.info('draft-helpers', 'Draft ' + draftId + ': Layer 4 — ' + firehoseResult.charCount + ' chars (partial)');
     }
   }
 
@@ -628,6 +659,15 @@ async function extractDraftContent(draftId, deps) {
 
   // ── SAVE RESULT ──
   if (content) {
+    var savedStatus;
+    if (extractionMethod === 'jina') {
+      savedStatus = 'jina_fallback';
+    } else if (isPartial) {
+      savedStatus = 'fallback';
+    } else {
+      savedStatus = 'success';
+    }
+
     db.prepare(`
       UPDATE drafts SET
         extracted_content = ?,
@@ -648,7 +688,7 @@ async function extractDraftContent(draftId, deps) {
       excerpt,
       byline,
       featuredImage,
-      isPartial ? 'fallback' : 'success',
+      savedStatus,
       extractionMethod,
       isPartial,
       draftId

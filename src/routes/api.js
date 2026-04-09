@@ -119,6 +119,53 @@ function createApiRouter(deps) {
       });
   });
 
+  // ─── POST /api/settings/test-jina ─────────────────────────────────────────
+  // Tests the Jina AI Reader fallback. Accepts an optional `api_key` in body
+  // (so users can validate a fresh key before saving it). Falls back to the
+  // currently saved JINA_API_KEY when no override is provided.
+
+  router.post('/settings/test-jina', function (req, res) {
+    var startedAt = Date.now();
+    var overrideKey = req.body && typeof req.body.api_key === 'string' ? req.body.api_key.trim() : '';
+    var testUrl = (req.body && typeof req.body.url === 'string' && req.body.url.trim()) || 'https://example.com';
+
+    var liveCfg = getConfig();
+    var effectiveKey = overrideKey || liveCfg.JINA_API_KEY || '';
+    var ephemeralCfg = Object.assign({}, liveCfg, { JINA_API_KEY: effectiveKey });
+
+    var { fetchViaJina } = require('../modules/extractor-jina');
+
+    fetchViaJina(testUrl, ephemeralCfg, logger)
+      .then(function (result) {
+        var elapsedMs = Date.now() - startedAt;
+        if (result && result.content) {
+          res.json({
+            success: true,
+            has_key: !!effectiveKey,
+            elapsed_ms: elapsedMs,
+            content_length: result.content.length,
+            title: result.title || null,
+            sample: result.content.substring(0, 200),
+          });
+        } else {
+          res.json({
+            success: false,
+            has_key: !!effectiveKey,
+            elapsed_ms: elapsedMs,
+            error: 'Jina returned no usable content',
+          });
+        }
+      })
+      .catch(function (err) {
+        res.json({
+          success: false,
+          has_key: !!effectiveKey,
+          elapsed_ms: Date.now() - startedAt,
+          error: err && err.message ? err.message : 'Unknown error',
+        });
+      });
+  });
+
   // ─── GET /api/feed ─────────────────────────────────────────────────────────
 
   router.get('/feed', function (req, res) {

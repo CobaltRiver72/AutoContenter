@@ -3908,6 +3908,7 @@
       'Pipeline': ['MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
       'InfraNodus': ['INFRANODUS_ENABLED', 'INFRANODUS_API_KEY'],
+      'Jina AI Reader (Extraction Fallback)': ['JINA_ENABLED', 'JINA_API_KEY'],
       'Source Tiers': ['TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES'],
       'Dashboard': ['PORT'],
     };
@@ -3917,12 +3918,14 @@
       WP_APP_PASSWORD: true,
       DASHBOARD_PASSWORD: true,
       INFRANODUS_API_KEY: true,
+      JINA_API_KEY: true,
     };
 
     var booleanKeys = {
       TRENDS_ENABLED: true,
       INFRANODUS_ENABLED: true,
       ALLOW_SAME_DOMAIN_CLUSTERS: true,
+      JINA_ENABLED: true,
     };
 
     var html = '';
@@ -4040,6 +4043,42 @@
             showToast('InfraNodus test failed: ' + err.message, 'error');
             testInfra.disabled = false;
             testInfra.textContent = 'Test InfraNodus';
+          });
+      };
+    }
+
+    var testJina = $('testJinaBtn');
+    if (testJina) {
+      testJina.onclick = function () {
+        testJina.disabled = true;
+        testJina.textContent = 'Testing...';
+
+        // Pull current key from the form (might be unsaved). Skip masked placeholders.
+        var keyInput = document.querySelector('[data-setting-key="JINA_API_KEY"]');
+        var rawKey = keyInput ? keyInput.value : '';
+        var body = {};
+        if (rawKey && rawKey.indexOf('\u2022') === -1 && rawKey.indexOf('••••') === -1) {
+          body.api_key = rawKey;
+        }
+
+        fetchApi('/api/settings/test-jina', { method: 'POST', body: body })
+          .then(function (data) {
+            if (data.success) {
+              showToast(
+                'Jina OK \u2014 ' + (data.content_length || 0) + ' chars in ' + (data.elapsed_ms || 0) + 'ms' +
+                (data.has_key ? ' (authenticated)' : ' (anonymous tier)'),
+                'success'
+              );
+            } else {
+              showToast('Jina test failed: ' + (data.error || 'unknown'), 'error');
+            }
+            testJina.disabled = false;
+            testJina.textContent = 'Test Jina Reader';
+          })
+          .catch(function (err) {
+            showToast('Jina test failed: ' + err.message, 'error');
+            testJina.disabled = false;
+            testJina.textContent = 'Test Jina Reader';
           });
       };
     }
