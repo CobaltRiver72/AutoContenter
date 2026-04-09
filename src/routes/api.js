@@ -1718,7 +1718,7 @@ function createApiRouter(deps) {
   // MUST be registered before /drafts/:id parametric route.
   router.get('/drafts/failed', function (req, res) {
     try {
-      var pp = parsePagination(req);
+      var pp = parsePageParam(req, 20);
       var rows = db.prepare(
         "SELECT d.id, d.source_url, d.source_domain, d.rewritten_title, d.rewritten_word_count, " +
         "  d.ai_model_used, d.error_message, d.retry_count, d.updated_at, d.mode, d.cluster_id, " +
