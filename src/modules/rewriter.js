@@ -671,7 +671,7 @@ class ArticleRewriter {
   _ensureColumns() {
     var columns = [
       { name: 'ai_provider', type: 'TEXT DEFAULT NULL' },
-      { name: 'ai_model', type: 'TEXT DEFAULT NULL' },
+      { name: 'ai_model_used', type: 'TEXT DEFAULT NULL' },
       { name: 'ai_tokens_used', type: 'INTEGER DEFAULT 0' },
       { name: 'rewritten_at', type: 'TEXT DEFAULT NULL' },
       { name: 'custom_ai_instructions', type: 'TEXT DEFAULT NULL' },
@@ -1069,25 +1069,66 @@ class ArticleRewriter {
   }
 
   async _callOpenRouterStructured(apiKey, model, prompt) {
-    var maxTokens = this._cfg.maxTokens || 4096;
+    // OpenRouter reasoning models (DeepSeek-R1, Nemotron, Minimax M2, Qwen QwQ)
+    // spend 1,500–4,000 tokens on internal <think> before producing JSON.
+    // Ensure at least 8192 tokens so both phases fit.
+    var configuredMaxTokens = this._cfg.maxTokens || 4096;
+    var maxTokens = Math.max(configuredMaxTokens, 8192);
     var temperature = this._cfg.temperature;
     if (temperature === undefined || temperature === null) temperature = 0.7;
 
     var client = this._openRouterClient(apiKey);
 
-    var response = await client.chat.completions.create({
+    // Build request with JSON mode (matches _callOpenAIStructured behaviour)
+    var requestBody = {
       model: model,
       max_tokens: maxTokens,
       temperature: temperature,
+      response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON.' },
+        { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON only — no prose, no markdown fences, no <think> blocks.' },
         { role: 'user', content: prompt },
       ],
-    });
+    };
 
-    var rawText = response.choices && response.choices[0] ? response.choices[0].message.content : '';
+    // Retry wrapper for 429 / 5xx with exponential backoff (2s, 4s, 8s)
+    var response = null;
+    var lastErr = null;
+    var maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        response = await client.chat.completions.create(requestBody);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        var status = (err && (err.status || err.statusCode)) || 0;
+        var isRateLimited = status === 429;
+        var isServerError = status >= 500 && status < 600;
+        var isRetryable = isRateLimited || isServerError;
+        if (!isRetryable || attempt === maxAttempts) {
+          throw err;
+        }
+        var waitMs = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+        console.log('[rewriter] OpenRouter ' + status + ' on attempt ' + attempt + '/' + maxAttempts + ' for ' + model + ' — retrying in ' + (waitMs / 1000) + 's');
+        await new Promise(function (resolve) { return setTimeout(resolve, waitMs); });
+      }
+    }
+    if (!response) {
+      throw lastErr || new Error('OpenRouter call failed after ' + maxAttempts + ' attempts');
+    }
+
+    // Extract text — reasoning models put output in reasoning_content / reasoning
+    var msg = (response.choices && response.choices[0] && response.choices[0].message) || {};
+    var rawText = msg.content || msg.reasoning_content || msg.reasoning || '';
+
+    // Strip any <think>...</think> blocks left by reasoning models
+    if (rawText && rawText.indexOf('<think>') !== -1) {
+      rawText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    }
+
     if (!rawText || rawText.length < 50) {
-      throw new Error('OpenRouter returned empty or too-short response');
+      throw new Error('OpenRouter returned empty or too-short response (model=' + model + ', content_len=' + (msg.content || '').length + ', reasoning_len=' + ((msg.reasoning_content || msg.reasoning || '')).length + ')');
     }
 
     var parsed = parseModelOutput(rawText);
