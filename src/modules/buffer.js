@@ -1,6 +1,47 @@
 'use strict';
 
+const { NEWS_CATEGORIES } = require('../utils/categories');
+
 const MODULE = 'buffer';
+
+// Maps known publisher domains to a NEWS_CATEGORIES slug.
+// Only domains where category is unambiguous are listed.
+const DOMAIN_CATEGORY_MAP = {
+  // Hindi news
+  'aajtak.in':              'hindi-news',
+  'ndtv.in':                'hindi-news',
+  'abplive.com':            'hindi-news',
+  'zeenews.india.com':      'hindi-news',
+  'amarujala.com':          'hindi-news',
+  'jagran.com':             'hindi-news',
+  'bhaskar.com':            'hindi-news',
+  'navbharattimes.indiatimes.com': 'hindi-news',
+  'livehindustan.com':      'hindi-news',
+  'punjabkesari.in':        'hindi-news',
+  // English news
+  'timesofindia.indiatimes.com': 'india-news',
+  'hindustantimes.com':     'india-news',
+  'ndtv.com':               'india-news',
+  'thehindu.com':           'india-news',
+  'indianexpress.com':      'india-news',
+  'indiatoday.in':          'india-news',
+  'thequint.com':           'india-news',
+  'scroll.in':              'india-news',
+  'thewire.in':             'india-news',
+  'firstpost.com':          'india-news',
+  // Sports
+  'cricbuzz.com':           'cricket',
+  'espncricinfo.com':       'cricket',
+  'goal.com':               'football',
+  // Entertainment
+  'bollywoodhungama.com':   'bollywood',
+  'pinkvilla.com':          'bollywood',
+  'filmfare.com':           'entertainment',
+  // Business
+  'economictimes.indiatimes.com': 'business',
+  'livemint.com':           'business',
+  'moneycontrol.com':       'business',
+};
 
 class ArticleBuffer {
   /**
@@ -55,6 +96,15 @@ class ArticleBuffer {
 
       // Attach fingerprint back to the article object so similarity engine can use it
       article.fingerprint = fingerprint;
+
+      // Domain-based category tagging — only when article has no explicit category
+      if (!article.page_category && article.domain) {
+        var mappedCategory = DOMAIN_CATEGORY_MAP[article.domain];
+        if (mappedCategory && NEWS_CATEGORIES[mappedCategory]) {
+          article.page_category = mappedCategory;
+          this.logger.debug(MODULE, '[domain-cat] Tagged ' + article.domain + ' → ' + mappedCategory);
+        }
+      }
 
       if (!this._stmts.insert) {
         this._stmts.insert = this.db.prepare(`
