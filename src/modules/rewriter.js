@@ -29,6 +29,42 @@ function countWords(html) {
   return text ? text.split(' ').length : 0;
 }
 
+// ─── API Key Format Validator ─────────────────────────────────────────────
+//
+// Each provider has a distinct, stable key prefix. A key pasted into the
+// wrong field will slip past naive "is it set?" checks and only fail when
+// the actual API call is made — producing confusing 401s with someone
+// else's key in the error message. This validator catches the mistake up
+// front, both on save (so users see a clear error) and at call time (so
+// the fallback chain skips a provider whose stored key is obviously wrong
+// for that provider).
+//
+//   Anthropic   → sk-ant-...
+//   OpenRouter  → sk-or-v1-...
+//   OpenAI      → anything starting with sk- that is NOT the above two
+//
+function validateKeyFormat(provider, key) {
+  if (!key || typeof key !== 'string') return { ok: false, reason: 'missing' };
+  var k = key.trim();
+  if (provider === 'openrouter') {
+    if (!k.indexOf || k.indexOf('sk-or-v1-') !== 0) {
+      return { ok: false, reason: 'OpenRouter keys must start with "sk-or-v1-"' };
+    }
+  } else if (provider === 'anthropic') {
+    if (k.indexOf('sk-ant-') !== 0) {
+      return { ok: false, reason: 'Anthropic keys must start with "sk-ant-"' };
+    }
+  } else if (provider === 'openai') {
+    if (k.indexOf('sk-or-v1-') === 0) {
+      return { ok: false, reason: 'this looks like an OpenRouter key (sk-or-v1-), not an OpenAI key' };
+    }
+    if (k.indexOf('sk-ant-') === 0) {
+      return { ok: false, reason: 'this looks like an Anthropic key (sk-ant-), not an OpenAI key' };
+    }
+  }
+  return { ok: true };
+}
+
 // ─── Source Content Cleaner ────────────────────────────────────────────────
 //
 // Strips noise from scraped/extracted source articles so the AI sees the
@@ -244,7 +280,7 @@ function buildPrompt(article, cluster, settings) {
     '',
     '2. IN BRIEF — Exactly 4 bullets. Each bullet is ONE fact, max 20 words, written as a complete plain-English sentence. Lead with the most newsworthy bullet. No opinions, no hedging, no transitions. These four bullets must collectively answer who/what/when/where for the entire story.',
     '',
-    '3. BODY — 400 to 700 words of plain prose. Maximum 2 H2 subheadings (use them only if the story genuinely splits into two distinct beats — otherwise zero). Default to paragraphs only. The ONLY exception: if a Step-1 signal is YES, you MUST include the matching structure inside the body markdown — markdown table for parallel_facts/comparison/conditional_rules, numbered list for steps, date-prefixed list for timeline. Otherwise: no H3, no lists, no tables, no images, no blockquotes, no code. Each paragraph is 2–4 sentences.',
+    '3. BODY — 250 to 700 words of plain prose, scaled to how much the story actually contains. Use 1–2 H2 subheadings (## prefix): always at least 1 H2 unless the total body is under 300 words. Add a second H2 only when the story genuinely splits into two separate beats. Under an H2, you may use up to 2 H3 subheadings (### prefix) if the section has distinct sub-points — otherwise skip H3. The ONLY exception to structure: if a Step-1 signal is YES, you MUST include the matching structure inside the body markdown — markdown table for parallel_facts/comparison/conditional_rules, numbered list for steps, date-prefixed list for timeline. Otherwise: no images, no blockquotes, no code. Each paragraph is 2–4 sentences.',
     '',
     '4. FAQ — Exactly 3 to 4 question/answer pairs. Questions mirror real "People Also Ask" queries. Answers are 2–3 sentences, factual, drawn from the body.',
     '',
@@ -286,7 +322,7 @@ function buildPrompt(article, cluster, settings) {
     '4. NEVER include bylines, author names, "Updated on…" lines, or photo credits.',
     '5. NEVER include "Also Read", "Read More", social-share text, or navigation fragments.',
     '6. NEVER include HTML tags, markdown code fences, <script>, or inline styles inside body_markdown.',
-    '7. NEVER drop below 400 words or exceed 700 words in the body.',
+    '7. NEVER exceed 700 words in the body. Never pad a short story to hit an arbitrary word count — 250 honest words beats 500 padded words every time.',
     '8. NEVER produce an article in a language other than the one specified above.',
     '9. NEVER use clickbait punctuation (!!!, ???) or all-caps words for emphasis.',
     '10. NEVER skip the in_brief block or the faqs section — both are mandatory.',
@@ -304,20 +340,20 @@ function buildPrompt(article, cluster, settings) {
     '    "Bullet 3: complete plain-English sentence, max 20 words.",',
     '    "Bullet 4: complete plain-English sentence, max 20 words."',
     '  ],',
-    '  "body_markdown": "Opening paragraph in plain prose. No headings yet.\\n\\nSecond paragraph that builds on the first.\\n\\n## Optional H2 only if the story splits\\n\\nMore paragraphs.",',
+    '  "body_markdown": "Opening paragraph in plain prose.\\n\\nSecond paragraph that builds on the first.\\n\\n## What This Means for [Subject]\\n\\nParagraph under the H2.\\n\\nAnother paragraph continuing the point.",',
     '  "faqs": [',
     '    {"q": "Question 1?", "a": "Answer 1, 2-3 sentences."},',
     '    {"q": "Question 2?", "a": "Answer 2."},',
     '    {"q": "Question 3?", "a": "Answer 3."}',
     '  ],',
     '  "language": "' + targetLang + '",',
-    '  "word_count_body": 540',
+    '  "word_count_body": 487',
     '}',
     '',
     'Required field types:',
     '- headline: string, 55–70 chars',
     '- in_brief: array of EXACTLY 4 strings',
-    '- body_markdown: string, 400–700 words of plain prose, max 2 H2 headings (## prefix)',
+    '- body_markdown: string, 250–700 words of plain prose, 1–2 H2 headings (## prefix, at least 1 unless under 300 words), optional H3 under H2 (### prefix, max 2 per H2 section)',
     '- faqs: array of 3–4 objects, each with "q" and "a" string keys',
     '- language: "' + targetLang + '"',
     '- word_count_body: integer count of words in body_markdown',
@@ -726,6 +762,27 @@ class ArticleRewriter {
       temperature: 'TEMPERATURE',
     };
 
+    // Validate key formats before saving — rejects an OpenRouter key pasted
+    // into the OpenAI field (and vice versa) with a clear error. Applies
+    // only to keys actually being set in this call; empty strings are
+    // treated as "no change" by the loop below.
+    var keyProviderMap = {
+      anthropicKey: 'anthropic',
+      openaiKey: 'openai',
+      openrouterKey: 'openrouter',
+    };
+    var kpKeys = Object.keys(keyProviderMap);
+    for (var kpi = 0; kpi < kpKeys.length; kpi++) {
+      var kpField = kpKeys[kpi];
+      var kpVal = settings[kpField];
+      if (kpVal !== undefined && kpVal !== null && String(kpVal).trim() !== '') {
+        var kpCheck = validateKeyFormat(keyProviderMap[kpField], String(kpVal));
+        if (!kpCheck.ok) {
+          throw new Error('Invalid ' + keyProviderMap[kpField] + ' API key — ' + kpCheck.reason + '. Paste it into the correct provider field.');
+        }
+      }
+    }
+
     var keys = Object.keys(mapping);
     for (var i = 0; i < keys.length; i++) {
       var jsKey = keys[i];
@@ -798,6 +855,15 @@ class ArticleRewriter {
       var errMsg = provider.toUpperCase() + ' API key is not configured. Go to Settings and enter your API key.';
       this.logger.error('rewriter', errMsg);
       throw new Error(errMsg);
+    }
+
+    // Format-check the primary key before we even try the call — saves
+    // a round-trip to the provider and surfaces a clearer error than 401.
+    var primaryCheck = validateKeyFormat(provider, primaryKey);
+    if (!primaryCheck.ok) {
+      var badKeyMsg = provider.toUpperCase() + ' API key format is wrong — ' + primaryCheck.reason + '. Fix it in Settings.';
+      this.logger.error('rewriter', badKeyMsg);
+      throw new Error(badKeyMsg);
     }
 
     // Resolve publication identity (used by master prompt)
@@ -874,6 +940,15 @@ class ArticleRewriter {
         var fbProvider = fallbackProviders[fi];
         var fb = self._getProviderKeyModel(fbProvider, {});
         if (!fb.key) continue;
+
+        // Skip this fallback if the saved key is clearly for another
+        // provider (e.g. an sk-or-v1- key pasted into the OpenAI field).
+        // Prevents a confusing upstream 401 with the wrong key in it.
+        var fbCheck = validateKeyFormat(fbProvider, fb.key);
+        if (!fbCheck.ok) {
+          self.logger.warn('rewriter', 'Skipping ' + fbProvider + ' fallback: ' + fbCheck.reason + ' — fix the key in Settings.');
+          continue;
+        }
 
         self.logger.info('rewriter', 'Trying fallback: ' + fbProvider + ' / ' + fb.model + '...');
         try {
