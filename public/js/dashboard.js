@@ -3482,8 +3482,35 @@
     var iframe = $('preview-iframe');
     if (!iframe) return;
     var doc = iframe.contentDocument || iframe.contentWindow.document;
+    // Wrap the rewritten HTML in a minimal CSS shell so the v2 structured
+    // blocks (.hdf-in-brief, .hdf-body, .hdf-faqs) render attractively in
+    // the preview iframe. WordPress themes style these on the live site.
+    var css =
+      'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;' +
+      'max-width:720px;margin:24px auto;padding:0 24px;line-height:1.65;color:#1a1a1a;background:#fff}' +
+      'h1,h2,h3{font-weight:700;color:#111;line-height:1.3}' +
+      'h2{font-size:22px;margin:28px 0 12px}' +
+      'h3{font-size:17px;margin:20px 0 8px}' +
+      'p{margin:0 0 14px;font-size:16px}' +
+      'a{color:#4a7aff;text-decoration:none}' +
+      'a:hover{text-decoration:underline}' +
+      '.hdf-in-brief{background:#f4f6fb;border-left:4px solid #4a7aff;padding:14px 18px;' +
+      'margin:20px 0;border-radius:6px}' +
+      '.hdf-in-brief h2{margin:0 0 8px;font-size:13px;text-transform:uppercase;' +
+      'letter-spacing:0.06em;color:#4a7aff}' +
+      '.hdf-in-brief ul{margin:0;padding-left:20px}' +
+      '.hdf-in-brief li{margin:6px 0;font-size:15px}' +
+      '.hdf-body{margin:20px 0}' +
+      '.hdf-faqs{margin-top:36px;border-top:2px solid #eee;padding-top:20px}' +
+      '.hdf-faqs > h2{font-size:20px;margin-top:0}' +
+      '.hdf-faq-item{margin:16px 0;padding:14px 16px;background:#fafafa;border-radius:6px}' +
+      '.hdf-faq-item h3{margin:0 0 6px;font-size:15px;color:#222}' +
+      '.hdf-faq-item p{margin:0;font-size:14px;color:#444}';
     doc.open();
-    doc.write(html);
+    doc.write(
+      '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' + css + '</style></head><body>' +
+      html + '</body></html>'
+    );
     doc.close();
   }
 

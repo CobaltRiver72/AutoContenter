@@ -58,9 +58,11 @@ function sanitizeHtmlForWP(html) {
   cleaned = cleaned.replace(/\s+style\s*=\s*"[^"]*"/gi, '');
   cleaned = cleaned.replace(/\s+style\s*=\s*'[^']*'/gi, '');
 
-  // Remove class attributes (except faq- classes)
-  cleaned = cleaned.replace(/\s+class\s*=\s*"(?!faq-)[^"]*"/gi, '');
-  cleaned = cleaned.replace(/\s+class\s*=\s*'(?!faq-)[^']*'/gi, '');
+  // Remove class attributes (except faq- and hdf- classes used by the
+  // master prompt v2 structured blocks: hdf-in-brief, hdf-body, hdf-faqs,
+  // hdf-faq-item — themes can style these on the WordPress side).
+  cleaned = cleaned.replace(/\s+class\s*=\s*"(?!faq-|hdf-)[^"]*"/gi, '');
+  cleaned = cleaned.replace(/\s+class\s*=\s*'(?!faq-|hdf-)[^']*'/gi, '');
 
   // Fix orphaned inline elements (not wrapped in block tags)
   var lines = cleaned.split('\n');

@@ -1,5 +1,7 @@
 'use strict';
 
+var { convertMarkdownToHtml } = require('../utils/markdown-to-html');
+
 // Model definitions — used by both backend and sent to frontend
 var AI_MODELS = {
   anthropic: [
@@ -188,91 +190,275 @@ function buildPrompt(article, cluster, settings) {
     ? '\nADDITIONAL INSTRUCTIONS FROM EDITOR:\n' + s.customPrompt.trim() + '\nFollow these additional instructions while also following all the above rules.\n'
     : '';
 
-  return '' +
-  '# IDENTITY\n' +
-  'You are the senior staff writer and editor at ' + publicationName + ' (' + publicationUrl + '), a fast-moving Indian digital news publication. Every article you publish must read like the work of a careful, experienced human journalist — never like an AI summary.\n\n' +
-  '# MISSION\n' +
-  'Synthesize the SOURCE ARTICLES below into ONE original, factual, 600–800 word news story. Combine facts, quotes, data, and context from MULTIPLE sources into a new, authoritative narrative. Do NOT paraphrase any single source. Do NOT invent facts. Do NOT speculate beyond what the sources support.\n\n' +
-  trendingContext +
-  '# CONTENT FILTER (BEFORE YOU WRITE)\n' +
-  'The source content has been pre-cleaned, but you must still ignore any of the following if they slip through:\n' +
-  '- Bylines, author names, "By X", "Updated by Y"\n' +
-  '- Navigation labels, menu items, breadcrumbs\n' +
-  '- Social-share strings ("Share on WhatsApp", "Tweet this", "Follow us on…")\n' +
-  '- "Also Read" / "Read More" / "Recommended" / "Trending Now" links and headings\n' +
-  '- Subscribe / newsletter / paywall prompts\n' +
-  '- Photo credits, "Representative Image", "File Photo", caption metadata\n' +
-  '- Ad markers ("Advertisement", "Sponsored", "Promoted")\n' +
-  'Treat these as noise. They are NOT part of the story and must NOT appear in your output.\n\n' +
-  '# REQUIRED STRUCTURE (600–800 WORDS, EXACTLY THIS ORDER)\n' +
-  '1. **HEADLINE** — 55–70 chars. Sharp, factual, click-worthy without being clickbait. Includes the primary keyword naturally. Rewrite — never copy a source headline verbatim.\n' +
-  '2. **IN BRIEF** — A 2–3 bullet "TL;DR" at the very top of the article body, formatted as <h2>In Brief</h2><ul><li>…</li></ul>. Each bullet is one fact, max 20 words.\n' +
-  '3. **OPENING PARAGRAPH** — Lead with the most newsworthy fact (who/what/when/where/why). Hook the reader in the first sentence. Include the target keyword naturally.\n' +
-  '4. **BODY** — 3–5 short H2 sections expanding the story: key details, context/background, analysis/impact for Indian readers, what\'s next. Each H2 subheading should contain a keyword variation or a related search query. Use short paragraphs (2–3 sentences each). Use <ul>/<ol> lists where appropriate.\n' +
-  '5. **FAQ** — Exactly 5–7 Q/A pairs, formatted as a JSON array (see OUTPUT FORMAT). Questions must mirror real "People Also Ask" queries. Answers are 2–3 sentences, factual, sourced from the article body.\n\n' +
-  '# SEMANTIC SEO RULES\n' +
-  '- Place the target keyword in: title/H1, first paragraph, meta description, slug, at least 2 H2 subheadings, FAQ questions, conclusion.\n' +
-  '- Use 3–6 LSI / related keywords throughout the body — never the same phrase twice in a row.\n' +
-  '- Match search intent (informational vs. transactional vs. navigational) — most news is informational; write accordingly.\n' +
-  '- Internal-link opportunity: do not invent links, but write the body so it would naturally accept 1–2 internal links to related ' + publicationName + ' coverage.\n' +
-  '- Cite specific numbers, dates, prices (₹), times (IST), and proper nouns wherever the sources support them.\n\n' +
-  '# TONE\n' +
-  '- Indian English news register: clear, neutral, confident.\n' +
-  '- No filler ("In today\'s fast-paced world…"), no AI tells ("As an AI…", "It\'s worth noting that…"), no hedging clichés.\n' +
-  '- Active voice. Concrete subjects. Short sentences.\n' +
-  '- Indian context (₹ prices, IST times, Indian cities/states) where relevant.\n\n' +
-  '# HEADLINE REWRITING RULES\n' +
-  '- Never reuse a source headline word-for-word.\n' +
-  '- Keep it factual — no exaggeration, no fake urgency, no ALL CAPS.\n' +
-  '- Front-load the most important keyword.\n' +
-  '- Test it against this sniff: would a serious news reader click and trust it? If not, rewrite.\n\n' +
-  languageBlock + '\n\n' +
-  keywordBlock + '\n\n' +
-  '# 10 ABSOLUTE RULES — NEVER BREAK THESE\n' +
-  '1. NEVER fabricate facts, names, numbers, dates, quotes, or events not present in the sources.\n' +
-  '2. NEVER copy more than 6 consecutive words from any single source. Synthesize.\n' +
-  '3. NEVER include "As an AI", "I cannot", "I am unable", or any meta-commentary about being a language model.\n' +
-  '4. NEVER include bylines, author names, dates of publication, or "Updated on…" lines from the sources.\n' +
-  '5. NEVER include "Also Read", "Read More", social-share text, or navigation fragments.\n' +
-  '6. NEVER include <script> tags, inline styles, <html>/<head>/<body> tags, or any non-content markup.\n' +
-  '7. NEVER drop below 600 words or exceed 800 words in the article body.\n' +
-  '8. NEVER produce an article in a language other than the one specified above.\n' +
-  '9. NEVER use clickbait punctuation (!!!, ???) or all-caps words for emphasis.\n' +
-  '10. NEVER skip the In Brief block or the FAQ section — both are mandatory.\n\n' +
-  '# HTML OUTPUT RULES (for the "content" field)\n' +
-  '- Output clean HTML only — no <html>, <head>, or <body> wrappers.\n' +
-  '- Start with <h2>In Brief</h2><ul>…</ul>, then the opening <p>, then body H2 sections.\n' +
-  '- Use <h2> for section subheadings (NOT <h1> — the title is rendered as H1 by the CMS).\n' +
-  '- Use <strong> for emphasis, <ul>/<ol> for lists, <blockquote> for source quotes.\n' +
-  '- Do NOT include the FAQ inside the "content" field — emit it as the structured "faq" array (the CMS renders it separately).\n' +
-  '- Do NOT include inline CSS or <script>.\n' +
-  customBlock + '\n' +
-  '# SOURCE ARTICLES\n' +
-  sourceArticles + '\n\n' +
-  '# OUTPUT FORMAT\n' +
-  'Respond with VALID JSON ONLY. No markdown code fences. No prose before or after the JSON. The schema is:\n' +
-  '{\n' +
-  '  "title": "SEO-optimized headline (55-70 chars)",\n' +
-  '  "slug": "url-friendly-slug-under-60-chars",\n' +
-  '  "excerpt": "Google Discover summary under 160 chars",\n' +
-  '  "meta_description": "Meta description under 155 chars, primary keyword in first 60 chars",\n' +
-  '  "target_keyword": "primary long-tail keyword",\n' +
-  '  "related_keywords": ["lsi keyword 2", "lsi keyword 3", "lsi keyword 4"],\n' +
-  '  "content": "<h2>In Brief</h2><ul><li>...</li></ul><p>Opening paragraph...</p><h2>Section heading</h2><p>...</p>",\n' +
-  '  "faq": [\n' +
-  '    {"question": "Q1?", "answer": "A1."},\n' +
-  '    {"question": "Q2?", "answer": "A2."}\n' +
-  '  ],\n' +
-  '  "word_count": 720\n' +
-  '}';
+  // ─── Master AI Content Writer Prompt v2 ─────────────────────────────────
+  // Plain English, semantic triples, knowledge flow. The body comes back as
+  // markdown (not HTML) so the model can focus on prose. The pipeline
+  // converts it to HTML before storing in rewritten_html.
+  return [
+    '# IDENTITY',
+    'You are the senior staff writer at ' + publicationName + ' (' + publicationUrl + '). You write for a busy Indian reader who has 60 seconds on a phone. Every sentence must earn its place. Every paragraph must read like a careful human journalist wrote it, not an AI.',
+    '',
+    '# WHO YOU ARE WRITING FOR',
+    'A 60-second phone reader. They scan, they tap, they leave. You earn their attention with plain English, concrete facts, and a clear knowledge flow. They do not read filler. They do not read corporate copy. They read sentences that tell them something true, in order.',
+    '',
+    '# WHAT TO USE FROM THE SOURCES',
+    'KEEP from sources:',
+    '- Hard facts: who, what, when, where, why, how.',
+    '- Names, numbers, dates, prices (₹), times (IST), places.',
+    '- Direct quotes (only if attributed to a real, named person in the source).',
+    '- Cause-and-effect relationships actually stated in the source.',
+    '',
+    'IGNORE from sources:',
+    '- Bylines, "By X", "Updated by Y", author photo captions.',
+    '- "Also Read", "Read More", "Recommended", "Trending Now".',
+    '- "Share on WhatsApp", "Tweet this", "Follow us", subscribe prompts.',
+    '- "Representative Image", "File Photo", photo credit lines.',
+    '- "Advertisement", "Sponsored", "Promoted".',
+    '- Boilerplate intros ("In today\'s fast-paced world…", "In a major development…").',
+    '',
+    trendingContext.replace(/\n+$/, ''),
+    '',
+    '# REQUIRED STRUCTURE (IN THIS EXACT ORDER)',
+    '',
+    '1. HEADLINE — 55–70 characters. Sharp, factual, no clickbait. Front-load the primary keyword. Never copy a source headline verbatim. Active voice.',
+    '',
+    '2. IN BRIEF — Exactly 4 bullets. Each bullet is ONE fact, max 20 words, written as a complete plain-English sentence. Lead with the most newsworthy bullet. No opinions, no hedging, no transitions. These four bullets must collectively answer who/what/when/where for the entire story.',
+    '',
+    '3. BODY — 400 to 700 words of plain prose. Maximum 2 H2 subheadings (use them only if the story genuinely splits into two distinct beats — otherwise zero). No H3, no lists, no tables, no images, no blockquotes, no code. Just paragraphs. Each paragraph is 2–4 sentences.',
+    '',
+    '4. FAQ — Exactly 3 to 4 question/answer pairs. Questions mirror real "People Also Ask" queries. Answers are 2–3 sentences, factual, drawn from the body.',
+    '',
+    '# THE FIVE SEMANTIC RULES (NON-NEGOTIABLE)',
+    '',
+    'Rule 1 — PLAIN ENGLISH. Use the simplest word that carries the meaning. "Use" not "utilize". "Help" not "facilitate". "Now" not "at the present time". A 12-year-old should be able to read every sentence aloud.',
+    '',
+    'Rule 2 — SVO SEMANTIC TRIPLES. Every sentence carries one Subject → Verb → Object triple. "The RBI cut the repo rate by 25 basis points." Subject = RBI, Verb = cut, Object = repo rate. No buried subjects, no nested clauses, no passive constructions where active works.',
+    '',
+    'Rule 3 — KNOWLEDGE FLOW. Each sentence builds on the previous one. The object of sentence 1 becomes the subject of sentence 2 wherever possible. The reader never has to backtrack. The body reads like a chain, not a pile.',
+    '',
+    'Rule 4 — EVERY WORD EARNS ITS PLACE. If a word can be deleted without losing meaning, delete it. No "very", no "really", no "quite", no "in order to", no "the fact that". Cut adverbs unless they add a fact.',
+    '',
+    'Rule 5 — HEADINGS PREVIEW + BRIDGE. If you use an H2, it must (a) preview the next 1–2 paragraphs in plain English and (b) bridge from the previous section. Never a one-word label. Never a question.',
+    '',
+    '# BUZZWORD BAN LIST (NEVER USE)',
+    'leverage, utilize, facilitate, robust, seamless, cutting-edge, game-changer, paradigm shift, synergy, holistic, dive deep, unpack, take a look, in this article, in conclusion, it goes without saying, needless to say, it is worth noting, in today\'s fast-paced world, in a major development, sources said, according to reports (without naming the report), unprecedented (unless literally true), revolutionary, groundbreaking, world-class, best-in-class, next-generation, state-of-the-art.',
+    '',
+    'If you catch yourself reaching for one of these, stop and write the plain-English version instead.',
+    '',
+    '# TONE',
+    '- Indian English news register: clear, neutral, confident.',
+    '- Active voice always.',
+    '- Short sentences. Average 15 words. Never exceed 25.',
+    '- Concrete subjects (people, companies, agencies, places) — never "it" or "they" without an antecedent in the same sentence.',
+    '- Indian context where relevant: ₹ prices, IST times, Indian cities, states, ministries.',
+    '- No exclamation marks. No question marks except in FAQs. No ALL CAPS.',
+    '',
+    '# CROSS-LANGUAGE RULES',
+    languageBlock,
+    '',
+    '# KEYWORD RULES',
+    keywordBlock,
+    '',
+    '# 10 ABSOLUTE RULES — NEVER BREAK THESE',
+    '1. NEVER fabricate facts, names, numbers, dates, quotes, or events not present in the sources.',
+    '2. NEVER copy more than 6 consecutive words from any single source. Synthesize.',
+    '3. NEVER include "As an AI", "I cannot", "I am unable", or any meta-commentary.',
+    '4. NEVER include bylines, author names, "Updated on…" lines, or photo credits.',
+    '5. NEVER include "Also Read", "Read More", social-share text, or navigation fragments.',
+    '6. NEVER include HTML tags, markdown code fences, <script>, or inline styles inside body_markdown.',
+    '7. NEVER drop below 400 words or exceed 700 words in the body.',
+    '8. NEVER produce an article in a language other than the one specified above.',
+    '9. NEVER use clickbait punctuation (!!!, ???) or all-caps words for emphasis.',
+    '10. NEVER skip the in_brief block or the faqs section — both are mandatory.',
+    customBlock,
+    '# SOURCE ARTICLES',
+    sourceArticles,
+    '',
+    '# OUTPUT FORMAT',
+    'Respond with VALID JSON ONLY. No markdown code fences around the JSON. No prose before or after. The schema is:',
+    '{',
+    '  "headline": "55-70 character headline, primary keyword front-loaded",',
+    '  "in_brief": [',
+    '    "Bullet 1: complete plain-English sentence, max 20 words.",',
+    '    "Bullet 2: complete plain-English sentence, max 20 words.",',
+    '    "Bullet 3: complete plain-English sentence, max 20 words.",',
+    '    "Bullet 4: complete plain-English sentence, max 20 words."',
+    '  ],',
+    '  "body_markdown": "Opening paragraph in plain prose. No headings yet.\\n\\nSecond paragraph that builds on the first.\\n\\n## Optional H2 only if the story splits\\n\\nMore paragraphs.",',
+    '  "faqs": [',
+    '    {"q": "Question 1?", "a": "Answer 1, 2-3 sentences."},',
+    '    {"q": "Question 2?", "a": "Answer 2."},',
+    '    {"q": "Question 3?", "a": "Answer 3."}',
+    '  ],',
+    '  "language": "' + targetLang + '",',
+    '  "word_count_body": 540',
+    '}',
+    '',
+    'Required field types:',
+    '- headline: string, 55–70 chars',
+    '- in_brief: array of EXACTLY 4 strings',
+    '- body_markdown: string, 400–700 words of plain prose, max 2 H2 headings (## prefix)',
+    '- faqs: array of 3–4 objects, each with "q" and "a" string keys',
+    '- language: "' + targetLang + '"',
+    '- word_count_body: integer count of words in body_markdown',
+  ].join('\n');
 }
 
-function parseAIResponse(text) {
+// ─── v2 Output Parser ──────────────────────────────────────────────────────
+//
+// Parses model output in the v2 schema:
+//   { headline, in_brief[], body_markdown, faqs[{q,a}], language, word_count_body }
+//
+// Strips accidental markdown fences, validates required fields and types, and
+// hard-caps in_brief at 4 bullets. Throws on hard validation failures so the
+// caller can fall through to the next provider.
+//
+function parseModelOutput(text) {
+  if (!text || typeof text !== 'string') {
+    throw new Error('Empty model output');
+  }
+
   var cleaned = text.trim();
+
+  // Strip code fences if the model wrapped its response despite instructions
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
   }
-  return JSON.parse(cleaned);
+
+  // Some models prepend a sentence before the JSON — extract the first {...} block
+  if (cleaned[0] !== '{') {
+    var firstBrace = cleaned.indexOf('{');
+    var lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    }
+  }
+
+  var parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error('Model returned invalid JSON: ' + e.message);
+  }
+
+  // Required fields
+  if (typeof parsed.headline !== 'string' || parsed.headline.trim().length === 0) {
+    throw new Error('Model output missing required field: headline');
+  }
+  if (!Array.isArray(parsed.in_brief)) {
+    throw new Error('Model output missing required field: in_brief (array)');
+  }
+  if (typeof parsed.body_markdown !== 'string' || parsed.body_markdown.trim().length === 0) {
+    throw new Error('Model output missing required field: body_markdown');
+  }
+  if (!Array.isArray(parsed.faqs)) {
+    throw new Error('Model output missing required field: faqs (array)');
+  }
+
+  // Hard cap in_brief at 4 bullets and coerce to strings
+  var inBrief = parsed.in_brief.slice(0, 4).map(function (b) {
+    return String(b == null ? '' : b).trim();
+  }).filter(function (b) { return b.length > 0; });
+
+  if (inBrief.length === 0) {
+    throw new Error('Model output in_brief is empty after cleaning');
+  }
+
+  // Normalize FAQs to a stable {question, answer} shape used by the rest of
+  // the pipeline (publisher.js, schema markup, etc.). The v2 prompt outputs
+  // {q,a} but old drafts and consumers expect {question, answer}.
+  var faqs = [];
+  for (var i = 0; i < parsed.faqs.length; i++) {
+    var f = parsed.faqs[i] || {};
+    var q = f.q || f.question || '';
+    var a = f.a || f.answer || '';
+    if (typeof q === 'string' && typeof a === 'string' && q.trim() && a.trim()) {
+      faqs.push({ question: q.trim(), answer: a.trim() });
+    }
+  }
+
+  return {
+    headline: parsed.headline.trim(),
+    inBrief: inBrief,
+    bodyMarkdown: parsed.body_markdown.trim(),
+    faqs: faqs,
+    language: parsed.language || '',
+    wordCountBody: parseInt(parsed.word_count_body, 10) || 0,
+  };
+}
+
+// ─── v2 → HTML Composition ─────────────────────────────────────────────────
+//
+// Builds the final rewritten_html from the v2 structured output. Format:
+//   <div class="hdf-in-brief">…</div>
+//   <div class="hdf-body">{converted body markdown}</div>
+//   <div class="hdf-faqs">…</div>
+//
+// Embedding the structured blocks in HTML lets the existing publisher and
+// dashboard preview consume rewritten_html unchanged while still preserving
+// the structured fields (in_brief_json, body_markdown) for future use.
+//
+function buildRewrittenHtml(inBrief, bodyMarkdown, faqs) {
+  var parts = [];
+
+  // In Brief block
+  if (inBrief && inBrief.length > 0) {
+    parts.push('<div class="hdf-in-brief">');
+    parts.push('<h2>In Brief</h2>');
+    parts.push('<ul>');
+    for (var i = 0; i < inBrief.length; i++) {
+      parts.push('<li>' + escapeHtmlText(inBrief[i]) + '</li>');
+    }
+    parts.push('</ul>');
+    parts.push('</div>');
+  }
+
+  // Body
+  parts.push('<div class="hdf-body">');
+  parts.push(convertMarkdownToHtml(bodyMarkdown));
+  parts.push('</div>');
+
+  // FAQs
+  if (faqs && faqs.length > 0) {
+    parts.push('<div class="hdf-faqs">');
+    parts.push('<h2>Frequently Asked Questions</h2>');
+    for (var j = 0; j < faqs.length; j++) {
+      parts.push('<div class="hdf-faq-item">');
+      parts.push('<h3>' + escapeHtmlText(faqs[j].question) + '</h3>');
+      parts.push('<p>' + escapeHtmlText(faqs[j].answer) + '</p>');
+      parts.push('</div>');
+    }
+    parts.push('</div>');
+  }
+
+  return parts.join('\n');
+}
+
+function escapeHtmlText(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Build a unified result object from v2 parsed output. Used by all 3
+// provider methods to keep the shape consistent.
+function buildRewriteResult(parsed, tokensUsed) {
+  var contentHtml = buildRewrittenHtml(parsed.inBrief, parsed.bodyMarkdown, parsed.faqs);
+  return {
+    title: parsed.headline,
+    content: contentHtml,
+    bodyMarkdown: parsed.bodyMarkdown,
+    inBrief: parsed.inBrief,
+    excerpt: parsed.inBrief[0] || '',
+    metaDescription: (parsed.inBrief[0] || '').slice(0, 155),
+    slug: '',
+    targetKeyword: '',
+    relatedKeywords: [],
+    faq: parsed.faqs,
+    wordCount: parsed.wordCountBody || countWords(contentHtml),
+    tokensUsed: tokensUsed,
+  };
 }
 
 // ─── Rewriter Module ──────────────────────────────────────────────────────
@@ -613,22 +799,9 @@ class ArticleRewriter {
       throw new Error('Anthropic returned empty or too-short response');
     }
 
-    var parsed = parseAIResponse(rawText);
+    var parsed = parseModelOutput(rawText);
     var tokensUsed = (response.usage ? (response.usage.input_tokens || 0) + (response.usage.output_tokens || 0) : 0);
-    var wc = parsed.content ? countWords(parsed.content) : (parsed.word_count || 0);
-
-    return {
-      title: parsed.title,
-      content: parsed.content,
-      excerpt: parsed.excerpt,
-      metaDescription: parsed.meta_description,
-      slug: parsed.slug,
-      targetKeyword: parsed.target_keyword || '',
-      relatedKeywords: parsed.related_keywords || [],
-      faq: parsed.faq || [],
-      wordCount: wc,
-      tokensUsed: tokensUsed,
-    };
+    return buildRewriteResult(parsed, tokensUsed);
   }
 
   async _callOpenAIStructured(apiKey, model, prompt) {
@@ -671,22 +844,9 @@ class ArticleRewriter {
       throw new Error('OpenAI returned empty or too-short response');
     }
 
-    var parsed = parseAIResponse(rawText);
+    var parsed = parseModelOutput(rawText);
     var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
-    var wc = parsed.content ? countWords(parsed.content) : (parsed.word_count || 0);
-
-    return {
-      title: parsed.title,
-      content: parsed.content,
-      excerpt: parsed.excerpt,
-      metaDescription: parsed.meta_description,
-      slug: parsed.slug,
-      targetKeyword: parsed.target_keyword || '',
-      relatedKeywords: parsed.related_keywords || [],
-      faq: parsed.faq || [],
-      wordCount: wc,
-      tokensUsed: tokensUsed,
-    };
+    return buildRewriteResult(parsed, tokensUsed);
   }
 
   // ─── OpenRouter calls (uses OpenAI SDK with custom baseURL) ──────────
@@ -725,22 +885,9 @@ class ArticleRewriter {
       throw new Error('OpenRouter returned empty or too-short response');
     }
 
-    var parsed = parseAIResponse(rawText);
+    var parsed = parseModelOutput(rawText);
     var tokensUsed = (response.usage ? (response.usage.prompt_tokens || 0) + (response.usage.completion_tokens || 0) : 0);
-    var wc = parsed.content ? countWords(parsed.content) : (parsed.word_count || 0);
-
-    return {
-      title: parsed.title,
-      content: parsed.content,
-      excerpt: parsed.excerpt,
-      metaDescription: parsed.meta_description,
-      slug: parsed.slug,
-      targetKeyword: parsed.target_keyword || '',
-      relatedKeywords: parsed.related_keywords || [],
-      faq: parsed.faq || [],
-      wordCount: wc,
-      tokensUsed: tokensUsed,
-    };
+    return buildRewriteResult(parsed, tokensUsed);
   }
 
   // ─── Test connection ────────────────────────────────────────────────────

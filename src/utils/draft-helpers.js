@@ -843,6 +843,9 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
     var provider = result.aiProvider || result.provider || opts.provider || '';
     var tokensUsed = result.tokensUsed || 0;
     var faqData = result.faq || result.faqs || [];
+    // v2 structured fields (master prompt v2 only — null on legacy paths)
+    var inBriefData = Array.isArray(result.inBrief) ? result.inBrief : null;
+    var bodyMarkdownData = typeof result.bodyMarkdown === 'string' ? result.bodyMarkdown : null;
 
     // Validate AI output
     var validation = validateRewriteOutput(html, content);
@@ -868,11 +871,24 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
       "  ai_provider = ?," +
       "  ai_tokens_used = ?," +
       "  faq_json = ?," +
+      "  in_brief_json = ?," +
+      "  body_markdown = ?," +
       "  error_message = NULL," +
       "  status = 'ready'," +
       "  updated_at = datetime('now')" +
       " WHERE id = ?"
-    ).run(html, title, wordCount, model, provider, tokensUsed, faqData.length > 0 ? JSON.stringify(faqData) : null, draftId);
+    ).run(
+      html,
+      title,
+      wordCount,
+      model,
+      provider,
+      tokensUsed,
+      faqData.length > 0 ? JSON.stringify(faqData) : null,
+      inBriefData && inBriefData.length > 0 ? JSON.stringify(inBriefData) : null,
+      bodyMarkdownData || null,
+      draftId
+    );
 
     logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ')');
   } catch (err) {

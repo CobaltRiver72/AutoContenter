@@ -157,10 +157,10 @@ function runMigrations() {
       // Column already exists — ignore
     }
 
-    // Add faq_json column to drafts
-    try {
-      db.exec('ALTER TABLE drafts ADD COLUMN faq_json TEXT DEFAULT NULL');
-    } catch (e) { /* already exists */ }
+    // NOTE: faq_json + master prompt v2 columns (in_brief_json, body_markdown)
+    // are added after the drafts CREATE TABLE statement below — the ALTER
+    // TABLE migrations must run after the table exists, otherwise they
+    // silently fail on a fresh database.
 
     // Add page_category and language columns to articles if they don't exist
     try {
@@ -238,6 +238,21 @@ function runMigrations() {
     } catch (e) {
       console.warn('[db] Could not create UNIQUE index on drafts.source_url — duplicates may exist');
     }
+
+    // Add faq_json column to drafts (must run after CREATE TABLE drafts)
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN faq_json TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    // Master Prompt v2 — structured fields
+    // in_brief_json: JSON array of bullet strings (the v2 "IN BRIEF" block)
+    // body_markdown: raw markdown body returned by the model (pre-conversion)
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN in_brief_json TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN body_markdown TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
 
     // Add featured_image column to drafts if it doesn't exist
     try {
