@@ -1714,6 +1714,87 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/drafts/failed — List failed drafts with error details ──────────
+  // MUST be registered before /drafts/:id parametric route.
+  router.get('/drafts/failed', function (req, res) {
+    try {
+      var pp = parsePagination(req);
+      var rows = db.prepare(
+        "SELECT d.id, d.source_url, d.source_domain, d.rewritten_title, d.rewritten_word_count, " +
+        "  d.ai_model_used, d.error_message, d.retry_count, d.updated_at, d.mode, d.cluster_id, " +
+        "  d.rewritten_html, " +
+        "  c.topic, c.article_count " +
+        "FROM drafts d " +
+        "LEFT JOIN clusters c ON d.cluster_id = c.id " +
+        "WHERE d.status = 'failed' " +
+        "ORDER BY d.updated_at DESC " +
+        "LIMIT ? OFFSET ?"
+      ).all(pp.perPage, (pp.page - 1) * pp.perPage);
+
+      // Strip large html field — only need presence flag
+      var mapped = rows.map(function (r) {
+        return {
+          id: r.id,
+          source_url: r.source_url,
+          source_domain: r.source_domain,
+          rewritten_title: r.rewritten_title,
+          rewritten_word_count: r.rewritten_word_count,
+          ai_model_used: r.ai_model_used,
+          error_message: r.error_message,
+          retry_count: r.retry_count,
+          updated_at: r.updated_at,
+          mode: r.mode,
+          cluster_id: r.cluster_id,
+          topic: r.topic,
+          article_count: r.article_count,
+          has_rewritten_html: !!(r.rewritten_html && r.rewritten_html.length > 100),
+        };
+      });
+
+      var total = db.prepare("SELECT COUNT(*) as count FROM drafts WHERE status = 'failed'").get().count || 0;
+      res.json({ success: true, data: mapped, total: total, page: pp.page, perPage: pp.perPage });
+    } catch (err) {
+      logger.error('api', 'GET /api/drafts/failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/drafts/retry-all-failed — Bulk reset all failed drafts ────────
+  // MUST be registered before /drafts/:id parametric route.
+  router.post('/drafts/retry-all-failed', function (req, res) {
+    try {
+      // Drafts with rewritten content → ready; without → back to draft
+      var withContent = db.prepare(
+        "UPDATE drafts SET status = 'ready', error_message = NULL, retry_count = 0, " +
+        "failed_permanent = 0, last_error_at = NULL, next_run_at = NULL, " +
+        "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+        "updated_at = datetime('now') " +
+        "WHERE status = 'failed' AND rewritten_html IS NOT NULL AND LENGTH(rewritten_html) > 100"
+      ).run();
+
+      var withoutContent = db.prepare(
+        "UPDATE drafts SET status = 'draft', error_message = NULL, retry_count = 0, " +
+        "failed_permanent = 0, last_error_at = NULL, next_run_at = NULL, " +
+        "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+        "updated_at = datetime('now') " +
+        "WHERE status = 'failed' AND (rewritten_html IS NULL OR LENGTH(rewritten_html) <= 100)"
+      ).run();
+
+      // Reset any cluster that no longer has failed drafts
+      db.prepare(
+        "UPDATE clusters SET status = 'ready' WHERE status = 'failed' " +
+        "AND id IN (SELECT DISTINCT cluster_id FROM drafts WHERE status = 'ready' AND cluster_id IS NOT NULL)"
+      ).run();
+
+      var total = withContent.changes + withoutContent.changes;
+      logger.info('api', 'Bulk retry: reset ' + total + ' failed drafts (' + withContent.changes + ' to ready, ' + withoutContent.changes + ' to draft)');
+      res.json({ success: true, count: total, toReady: withContent.changes, toDraft: withoutContent.changes, message: 'Reset ' + total + ' drafts' });
+    } catch (err) {
+      logger.error('api', 'POST /drafts/retry-all-failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // ─── POST /api/drafts/publish-all-ready ─────────────────────────────────────
   // Publish every ready primary draft to WordPress in a background loop with
   // 3-second spacing. MUST be registered before /drafts/:id parametric routes.
@@ -2720,10 +2801,15 @@ function createApiRouter(deps) {
           publishPromise.then(function (result) {
             publishUrl = result.wpPostUrl || '';
             db.prepare(
-              "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+              "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, " +
+              "error_message = NULL, retry_count = 0, failed_permanent = 0, " +
+              "published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
             ).run(result.wpPostId, publishUrl, id);
             if (result.wpImageId) {
               try { db.prepare("UPDATE drafts SET wp_media_id = ? WHERE id = ?").run(result.wpImageId, id); } catch (e) { /* ignore */ }
+            }
+            if (draft.cluster_id) {
+              try { db.prepare("UPDATE clusters SET status = 'published', published_at = datetime('now') WHERE id = ?").run(draft.cluster_id); } catch (e) { /* ignore */ }
             }
             var action = result.isUpdate ? 'updated' : 'published';
             logger.info('api', 'Draft ' + id + ' ' + action + ' to WordPress: ' + publishUrl + (result.wpImageId ? ' (image: ' + result.wpImageId + ')' : ''));
@@ -2781,21 +2867,36 @@ function createApiRouter(deps) {
   });
 
   // ─── POST /api/drafts/:id/retry — Reset a failed draft for retry ──────
+  // If the draft has rewritten_html → reset to 'ready' (publish retry).
+  // If it has no content yet → reset to 'draft' (rewrite retry).
 
   router.post('/drafts/:id/retry', function (req, res) {
     try {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
-      var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
+
+      var draft = db.prepare('SELECT id, cluster_id, status, rewritten_html FROM drafts WHERE id = ?').get(id);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+      if (draft.status !== 'failed') {
+        return res.status(400).json({ success: false, error: 'Draft is not in failed state (current: ' + draft.status + ')' });
+      }
+
+      var hasContent = !!(draft.rewritten_html && draft.rewritten_html.length > 100);
+      var newStatus = hasContent ? 'ready' : 'draft';
 
       db.prepare(
-        "UPDATE drafts SET status = 'draft', retry_count = 0, failed_permanent = 0, " +
-        "error_message = NULL, last_error_at = NULL, updated_at = datetime('now') WHERE id = ?"
-      ).run(id);
+        "UPDATE drafts SET status = ?, retry_count = 0, failed_permanent = 0, " +
+        "error_message = NULL, last_error_at = NULL, next_run_at = NULL, " +
+        "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+        "updated_at = datetime('now') WHERE id = ?"
+      ).run(newStatus, id);
 
-      logger.info('api', 'Draft ' + id + ' reset for retry');
-      res.json({ success: true });
+      if (draft.cluster_id) {
+        db.prepare("UPDATE clusters SET status = 'ready' WHERE id = ? AND status = 'failed'").run(draft.cluster_id);
+      }
+
+      logger.info('api', 'Draft ' + id + ' reset from failed to ' + newStatus + ' for retry');
+      res.json({ success: true, newStatus: newStatus });
     } catch (err) {
       logger.error('api', 'POST /drafts/:id/retry: ' + err.message);
       res.status(500).json({ success: false, error: 'Failed to reset draft' });

@@ -280,6 +280,7 @@
       case 'trends': loadTrends(); break;
       case 'clusters': loadClusters(); break;
       case 'ready': loadReady(); break;
+      case 'failed': loadFailedDrafts(); break;
       case 'published': loadPublished(); break;
       case 'settings': loadSettings(); loadAISettings(); break;
       case 'logs': loadLogs(); break;
@@ -2088,6 +2089,8 @@
 
   var readyCurrentPage = 1;
   var _loadReadyInFlight = false;
+  var failedCurrentPage = 1;
+  var _loadFailedInFlight = false;
 
   function loadReady(page) {
     if (_loadReadyInFlight) return;
@@ -2229,6 +2232,132 @@
       .catch(function (err) {
         showToast('Failed: ' + err.message, 'error');
       });
+  };
+
+  // ─── Failed Drafts Page ────────────────────────────────────────────────
+
+  function loadFailedDrafts(page) {
+    if (_loadFailedInFlight) return;
+    _loadFailedInFlight = true;
+
+    if (typeof page === 'number' && page > 0) failedCurrentPage = page;
+
+    var container = $('failedList');
+    var pagination = $('failedPagination');
+
+    var refreshBtn = $('failedRefreshBtn');
+    if (refreshBtn && !refreshBtn.__wired) {
+      refreshBtn.__wired = true;
+      refreshBtn.addEventListener('click', function () { loadFailedDrafts(); });
+    }
+    var retryAllBtn = $('retryAllFailedBtn');
+    if (retryAllBtn && !retryAllBtn.__wired) {
+      retryAllBtn.__wired = true;
+      retryAllBtn.addEventListener('click', function () {
+        if (!confirm('Reset all failed drafts? Those with rewritten content go to Ready; others go back to Draft for rewrite.')) return;
+        fetchApi('/api/drafts/retry-all-failed', { method: 'POST' })
+          .then(function (data) {
+            if (data.success) {
+              showToast('Reset ' + data.count + ' drafts (' + data.toReady + ' to ready, ' + data.toDraft + ' to draft)', 'success');
+              loadFailedDrafts();
+              loadReady();
+            } else {
+              showToast('Bulk retry failed: ' + (data.error || 'Unknown'), 'error');
+            }
+          })
+          .catch(function (err) { showToast('Bulk retry failed: ' + err.message, 'error'); });
+      });
+    }
+
+    if (container) container.innerHTML = '<p class="placeholder-text">Loading...</p>';
+    if (pagination) pagination.innerHTML = '';
+
+    fetchApi('/api/drafts/failed?page=' + failedCurrentPage)
+      .then(function (data) {
+        renderFailedTable(container, data.data || []);
+        updateFailedBadge(data.total || 0);
+        if (pagination && typeof renderPagination === 'function') {
+          renderPagination(pagination, data.total || 0, data.page || 1, data.perPage || 20, function (p) {
+            loadFailedDrafts(p);
+          });
+        }
+      })
+      .catch(function (err) {
+        if (container) container.innerHTML = '<p class="placeholder-text">Failed to load: ' + escapeHtml(err.message) + '</p>';
+      })
+      .finally(function () { _loadFailedInFlight = false; });
+  }
+
+  function renderFailedTable(container, rows) {
+    if (!container) return;
+    if (!rows || rows.length === 0) {
+      container.innerHTML =
+        '<div class="feed-empty">' +
+          '<div class="feed-empty-icon">&#9888;</div>' +
+          '<div class="feed-empty-title">No failed drafts</div>' +
+          '<div class="feed-empty-desc">All caught up.</div>' +
+        '</div>';
+      return;
+    }
+
+    var html = '<table class="data-table">' +
+      '<thead><tr>' +
+        '<th>Title</th>' +
+        '<th>Domain</th>' +
+        '<th>Error</th>' +
+        '<th>Retries</th>' +
+        '<th>Failed At</th>' +
+        '<th>Actions</th>' +
+      '</tr></thead><tbody>';
+
+    for (var i = 0; i < rows.length; i++) {
+      var d = rows[i];
+      var title = d.rewritten_title || d.topic || d.source_domain || 'Untitled';
+      var errorMsg = d.error_message ? d.error_message.substring(0, 120) : 'Unknown error';
+      var failedAt = d.updated_at ? new Date(d.updated_at).toLocaleString() : '&mdash;';
+      var retryLabel = d.has_rewritten_html ? 'Retry Publish' : 'Retry Rewrite';
+
+      html += '<tr>' +
+        '<td><strong>' + escapeHtml(String(title).substring(0, 80)) + '</strong></td>' +
+        '<td>' + escapeHtml(d.source_domain || '') + '</td>' +
+        '<td style="color:var(--danger,#f87171);font-size:12px;">' + escapeHtml(errorMsg) + '</td>' +
+        '<td>' + (d.retry_count || 0) + '</td>' +
+        '<td>' + failedAt + '</td>' +
+        '<td>' +
+          '<button class="btn btn-sm btn-warning" onclick="window.__retryFailedDraft(' + d.id + ')">' + retryLabel + '</button>' +
+        '</td>' +
+      '</tr>';
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  function updateFailedBadge(total) {
+    var badge = $('failed-badge');
+    if (!badge) return;
+    if (total > 0) {
+      badge.textContent = total;
+      badge.style.display = 'inline';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
+  }
+
+  window.__retryFailedDraft = function (draftId) {
+    fetchApi('/api/drafts/' + draftId + '/retry', { method: 'POST' })
+      .then(function (data) {
+        if (data.success) {
+          var msg = data.newStatus === 'ready' ? 'Draft reset to Ready — publish when ready' : 'Draft reset to Draft — rewrite will be triggered';
+          showToast(msg, 'success');
+          loadFailedDrafts();
+          if (data.newStatus === 'ready') loadReady();
+        } else {
+          showToast('Retry failed: ' + (data.error || 'Unknown'), 'error');
+        }
+      })
+      .catch(function (err) { showToast('Retry failed: ' + err.message, 'error'); });
   };
 
   // ─── Published Page (Drafts + Auto-Published) ──────────────────────────
@@ -2996,8 +3125,16 @@
   window.__retryDraft = function (id) {
     fetchApi('/api/drafts/' + id + '/retry', { method: 'POST' })
       .then(function (data) {
-        if (data.success) { showToast('Draft reset for retry', 'info'); setTimeout(loadPublished, 1000); }
-        else showToast('Retry failed: ' + (data.error || 'Unknown'), 'error');
+        if (data.success) {
+          showToast('Draft reset for retry', 'info');
+          setTimeout(loadPublished, 1000);
+          // Refresh failed badge after a short delay
+          setTimeout(function () {
+            fetchApi('/api/drafts/failed?page=1').then(function (d) { updateFailedBadge(d.total || 0); }).catch(function () {});
+          }, 1500);
+        } else {
+          showToast('Retry failed: ' + (data.error || 'Unknown'), 'error');
+        }
       })
       .catch(function (err) { showToast('Retry failed: ' + err.message, 'error'); });
   };

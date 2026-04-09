@@ -34,6 +34,10 @@
         <span class="nav-icon">&#9889;</span> Ready to Publish
         <span class="nav-badge" id="ready-badge" style="display:none"></span>
       </a>
+      <a href="#failed" class="nav-link" data-page="failed">
+        <span class="nav-icon">&#9888;</span> Failed
+        <span class="nav-badge" id="failed-badge" style="display:none"></span>
+      </a>
       <a href="#published" class="nav-link" data-page="published">
         <span class="nav-icon">&#10003;</span> Published
       </a>
@@ -281,6 +285,22 @@
           <p class="placeholder-text">Loading...</p>
         </div>
         <div id="readyPagination" class="pagination"></div>
+      </section>
+
+      <!-- Failed Drafts -->
+      <section class="page hidden" id="page-failed">
+        <div class="page-header">
+          <h2 class="page-title">Failed Drafts</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm" id="failedRefreshBtn">Refresh</button>
+            <button class="btn btn-sm btn-warning" id="retryAllFailedBtn">Retry All</button>
+          </div>
+        </div>
+        <p class="page-subtitle" style="color:var(--text-secondary);margin-bottom:12px">Drafts that failed to publish. Click Retry to attempt again.</p>
+        <div id="failedList" class="table-wrap">
+          <p class="placeholder-text">Loading...</p>
+        </div>
+        <div id="failedPagination" class="pagination"></div>
       </section>
 
       <!-- Published -->
