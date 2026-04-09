@@ -1344,6 +1344,15 @@ function isReasoningModel(id) {
   return false;
 }
 
+// Blocklist: specific OpenRouter model IDs that should NEVER appear
+// in the dropdown, regardless of their free-tier status. Add one ID
+// per line. Matched case-insensitively with an exact equals check.
+// To apply a change: restart the Node process OR hit the Refresh
+// OpenRouter Models button in Settings (POST /api/ai/openrouter-models/refresh).
+var OPENROUTER_BLOCKLIST = [
+  'z-ai/glm-4.5-air:free',
+];
+
 var _openrouterModelCache = { models: null, fetchedAt: 0 };
 var OPENROUTER_CACHE_MS = 60 * 60 * 1000; // 1 hour
 
@@ -1376,7 +1385,13 @@ async function fetchOpenRouterFreeModels(forceRefresh) {
       if (!m || !m.id) return false;
       var idIsFree = m.id.indexOf(':free') !== -1;
       var priceIsZero = m.pricing && (m.pricing.prompt === '0' || m.pricing.prompt === 0);
-      return idIsFree || priceIsZero;
+      if (!(idIsFree || priceIsZero)) return false;
+      // Apply blocklist — case-insensitive exact match
+      var lowerId = m.id.toLowerCase();
+      for (var bi = 0; bi < OPENROUTER_BLOCKLIST.length; bi++) {
+        if (OPENROUTER_BLOCKLIST[bi].toLowerCase() === lowerId) return false;
+      }
+      return true;
     });
 
     // Map to our shape, sort by context length descending (bigger = better default sort)
