@@ -1634,6 +1634,163 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/drafts/ready — Rewritten but not yet published ─────────────────
+  // MUST be before /drafts/:id to prevent Express matching "ready" as :id.
+  router.get('/drafts/ready', function (req, res) {
+    try {
+      var pp = parsePageParam(req, 20);
+      var rows = db.prepare(
+        "SELECT d.id, d.source_url, d.source_domain, d.rewritten_title, d.rewritten_word_count, " +
+        "  d.ai_model_used, d.target_keyword, d.updated_at, d.mode, d.cluster_id, " +
+        "  c.topic, c.article_count, c.trends_boosted " +
+        "FROM drafts d " +
+        "LEFT JOIN clusters c ON d.cluster_id = c.id " +
+        "WHERE d.status = 'ready' " +
+        "  AND d.cluster_role = 'primary' " +
+        "  AND d.rewritten_html IS NOT NULL " +
+        "  AND LENGTH(d.rewritten_html) > 100 " +
+        "ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
+        "LIMIT ? OFFSET ?"
+      ).all(pp.perPage, (pp.page - 1) * pp.perPage);
+
+      var total = db.prepare(
+        "SELECT COUNT(*) as count FROM drafts d " +
+        "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
+        "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100"
+      ).get().count || 0;
+
+      res.json({ success: true, data: rows, total: total, page: pp.page, perPage: pp.perPage });
+    } catch (err) {
+      logger.error('api', 'GET /api/drafts/ready failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/drafts/publish-all-ready ─────────────────────────────────────
+  // Publish every ready primary draft to WordPress in a background loop with
+  // 3-second spacing. MUST be registered before /drafts/:id parametric routes.
+  router.post('/drafts/publish-all-ready', function (req, res) {
+    try {
+      var publisherMod = deps.publisher || (deps.scheduler && deps.scheduler.publisher);
+      if (publisherMod && !publisherMod.enabled && typeof publisherMod.reinit === 'function') {
+        publisherMod.reinit();
+      }
+      if (!publisherMod || !publisherMod.enabled) {
+        return res.status(400).json({ success: false, error: 'WordPress publisher not configured. Set WP credentials in Settings.' });
+      }
+
+      var readyDrafts = db.prepare(
+        "SELECT id FROM drafts WHERE status = 'ready' AND cluster_role = 'primary' " +
+        "AND rewritten_html IS NOT NULL AND LENGTH(rewritten_html) > 100"
+      ).all();
+
+      if (readyDrafts.length === 0) {
+        return res.json({ success: true, queued: 0, message: 'No ready articles found' });
+      }
+
+      // Fire and forget — publish each one with a 3-second delay between them
+      (async function () {
+        for (var i = 0; i < readyDrafts.length; i++) {
+          try {
+            // Re-fetch to ensure still ready
+            var d = db.prepare("SELECT * FROM drafts WHERE id = ? AND status = 'ready'").get(readyDrafts[i].id);
+            if (!d) continue;
+
+            var article = {
+              title: d.rewritten_title || d.extracted_title || d.source_title,
+              content: d.rewritten_html,
+              excerpt: d.extracted_excerpt || '',
+              metaDescription: d.meta_description || d.extracted_excerpt || '',
+              slug: (function () {
+                var source = d.target_keyword || d.rewritten_title || d.extracted_title || d.source_title || '';
+                return source.toLowerCase()
+                  .replace(/[^\w\s-]/g, '')
+                  .replace(/\s+/g, '-')
+                  .replace(/-+/g, '-')
+                  .replace(/^-|-$/g, '')
+                  .slice(0, 70);
+              })(),
+              targetKeyword: d.target_keyword || '',
+              relatedKeywords: [],
+              faq: (function () { try { return d.faq_json ? JSON.parse(d.faq_json) : []; } catch (e) { return []; } })(),
+              wordCount: d.rewritten_word_count || 0,
+              aiModel: d.ai_model_used || 'manual',
+              tokensUsed: 0,
+              featuredImage: d.featured_image || null,
+              schemaTypes: d.schema_types || 'NewsArticle,FAQPage,BreadcrumbList',
+              targetDomain: d.target_domain || '',
+            };
+
+            var clusterDrafts = d.cluster_id
+              ? db.prepare("SELECT * FROM drafts WHERE cluster_id = ?").all(d.cluster_id)
+              : [d];
+
+            var clusterObj = {
+              id: d.cluster_id || null,
+              articles: clusterDrafts.map(function (cd) {
+                return {
+                  url: cd.source_url,
+                  domain: cd.source_domain,
+                  title: cd.source_title,
+                  content_markdown: cd.extracted_content || cd.source_content_markdown || '',
+                  featured_image: cd.featured_image || null,
+                };
+              }),
+            };
+
+            // Idempotent: UPDATE existing post if wp_post_id exists, else CREATE new
+            var pubResult;
+            if (d.wp_post_id) {
+              var updateData = {
+                title: article.title,
+                content: article.content,
+                excerpt: article.excerpt,
+                featured_media: d.wp_media_id || 0,
+              };
+              var upd = await publisherMod.updatePost(d.wp_post_id, updateData);
+              pubResult = { wpPostId: upd.wpPostId, wpPostUrl: upd.wpPostUrl, wpImageId: d.wp_media_id || null };
+            } else {
+              pubResult = await publisherMod.publish(article, clusterObj, db);
+            }
+
+            db.prepare(
+              "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, " +
+              "published_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+            ).run(pubResult.wpPostId || null, pubResult.wpPostUrl || null, d.id);
+
+            if (pubResult.wpImageId) {
+              try { db.prepare("UPDATE drafts SET wp_media_id = ? WHERE id = ?").run(pubResult.wpImageId, d.id); } catch (e) { /* ignore */ }
+            }
+
+            if (d.cluster_id) {
+              db.prepare("UPDATE clusters SET status = 'published', published_at = datetime('now') WHERE id = ?")
+                .run(d.cluster_id);
+            }
+
+            logger.info('api', 'Batch publish: draft #' + d.id + ' -> WP post ' + (pubResult.wpPostUrl || ''));
+
+            // Wait 3 seconds between publishes to avoid overloading WP REST API
+            if (i < readyDrafts.length - 1) {
+              await new Promise(function (resolve) { setTimeout(resolve, 3000); });
+            }
+          } catch (err) {
+            logger.warn('api', 'Batch publish failed for draft #' + readyDrafts[i].id + ': ' + (err.message || err));
+          }
+        }
+        logger.info('api', 'Batch publish complete: ' + readyDrafts.length + ' drafts processed');
+      })();
+
+      res.json({
+        success: true,
+        queued: readyDrafts.length,
+        message: 'Publishing ' + readyDrafts.length + ' articles in the background',
+      });
+    } catch (err) {
+      logger.error('api', 'publish-all-ready failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // GET /api/drafts/:id — Get single draft
   router.get('/drafts/:id', function (req, res) {
     try {
@@ -1798,8 +1955,9 @@ function createApiRouter(deps) {
 
   // ─── Manual URL Import ────────────────────────────────────────────────
   // User pastes URLs one per line. We create draft records with mode='manual_import'
-  // and the existing extraction loop picks them up automatically. After extraction,
-  // they're marked as status='published' (local only — no WordPress push).
+  // and the existing extraction loop picks them up automatically.
+  // The extraction loop picks them up, then the rewrite + publish workers handle them
+  // exactly like auto-pipeline articles. Full AI rewrite + WordPress publish.
   router.post('/drafts/manual-import', async function (req, res) {
     try {
       var body = req.body || {};
@@ -1872,7 +2030,7 @@ function createApiRouter(deps) {
           skipped: skipped,
           invalid: invalidUrls,
         },
-        message: imported.length + ' URLs queued for extraction. They will appear in the Published list as they finish processing.',
+        message: imported.length + ' URLs queued. Each will be extracted, AI-rewritten, and published to WordPress automatically.',
       });
 
     } catch (err) {

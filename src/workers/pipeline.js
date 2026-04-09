@@ -118,42 +118,36 @@ class Pipeline {
           this.logger.info(MODULE, 'Extracted #' + draft.id + ' -> ' +
             updated.extraction_status + ' (' + (updated.extracted_content || '').length + ' chars)');
 
-          // ─── MANUAL IMPORT: Auto-publish after extraction ───────────────
-          // Manual imports skip the rewrite queue entirely. The raw extracted
-          // content IS the final content. Mark as published locally (no WP push).
+          // ─── MANUAL IMPORT: Create synthetic cluster so rewrite + publish pipeline handles it ───
           if (updated.mode === 'manual_import') {
-            // Accept any extraction state where we got usable content. The
-            // extractor writes 'success', 'cached' (Google Cache), or 'fallback'
-            // (low-quality Readability) — all three produce content worth keeping.
             var extractionOk = updated.extraction_status === 'success'
               || updated.extraction_status === 'cached'
               || updated.extraction_status === 'fallback';
 
             if (extractionOk && updated.extracted_content && updated.extracted_content.length >= 50) {
+              // Create a synthetic single-article cluster so the existing rewrite
+              // and publish workers can handle this import exactly like an auto article.
+              var clusterTitle = updated.extracted_title || draft.source_title || ('Manual Import: ' + draft.source_domain);
+              var clusterInsert = this.db.prepare(
+                "INSERT INTO clusters (topic, article_count, avg_similarity, primary_article_id, " +
+                "trends_boosted, priority, status, detected_at) " +
+                "VALUES (?, 1, 1.0, ?, 0, 'normal', 'queued', datetime('now'))"
+              );
+              var clusterResult = clusterInsert.run(clusterTitle, draft.id);
+              var newClusterId = typeof clusterResult.lastInsertRowid === 'bigint'
+                ? Number(clusterResult.lastInsertRowid)
+                : clusterResult.lastInsertRowid;
+
+              // Assign cluster to the draft and mark it as primary
               this.db.prepare(
-                "UPDATE drafts SET status = 'published', " +
-                "published_at = datetime('now'), " +
-                "updated_at = datetime('now') " +
-                "WHERE id = ?"
-              ).run(draft.id);
-              this.logger.info(MODULE, 'Manual import #' + draft.id + ' auto-published (local only, ' +
-                updated.extraction_status + ')');
-            } else {
-              // Extraction failed — populate error tracking so the UI can show
-              // a useful message and (eventually) a retry button.
-              var failMsg = 'Manual import extraction failed (status=' +
-                (updated.extraction_status || 'unknown') + ', content length=' +
-                ((updated.extracted_content || '').length) + ')';
-              this.db.prepare(
-                "UPDATE drafts SET status = 'failed', " +
-                "failed_permanent = 1, " +
-                "error_message = COALESCE(error_message, ?), " +
-                "last_error_at = datetime('now'), " +
-                "updated_at = datetime('now') " +
-                "WHERE id = ?"
-              ).run(failMsg, draft.id);
-              this.logger.warn(MODULE, 'Manual import #' + draft.id + ' failed extraction — ' + failMsg);
+                "UPDATE drafts SET cluster_id = ?, cluster_role = 'primary', updated_at = datetime('now') WHERE id = ?"
+              ).run(newClusterId, draft.id);
+
+              this.logger.info(MODULE,
+                'Manual import #' + draft.id + ' -> synthetic cluster #' + newClusterId + ' created. Queued for AI rewrite.');
             }
+            // If extraction failed, extractDraftContent() already set status = 'failed'.
+            // No extra handling needed here.
           }
           // ─── END MANUAL IMPORT HANDLING ─────────────────────────────────
         }
@@ -195,12 +189,12 @@ class Pipeline {
         "SELECT d.cluster_id, c.topic, c.trends_boosted, COUNT(*) as draft_count " +
         "FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
-        "WHERE d.mode = 'auto' AND d.cluster_id IS NOT NULL AND d.status = 'draft' " +
+        "WHERE d.mode IN ('auto', 'manual_import') AND d.cluster_id IS NOT NULL AND d.status = 'draft' " +
         "  AND c.status = 'queued' " +
         "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
         "  AND NOT EXISTS (" +
         "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
-        "    AND d2.status = 'fetching' AND d2.mode = 'auto'" +
+        "    AND d2.status = 'fetching' AND d2.mode IN ('auto', 'manual_import')" +
         "  ) " +
         "GROUP BY d.cluster_id " +
         "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
@@ -460,7 +454,7 @@ class Pipeline {
       var readyPrimary = this.db.prepare(
         "SELECT d.*, c.topic, c.trends_boosted FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
-        "WHERE d.mode = 'auto' AND d.status = 'ready' AND d.cluster_role = 'primary' " +
+        "WHERE d.mode IN ('auto', 'manual_import') AND d.status = 'ready' AND d.cluster_role = 'primary' " +
         "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100 " +
         "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
         "  AND c.status = 'queued' " +

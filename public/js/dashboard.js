@@ -279,6 +279,7 @@
       case 'rules': loadRules(); break;
       case 'trends': loadTrends(); break;
       case 'clusters': loadClusters(); break;
+      case 'ready': loadReady(); break;
       case 'published': loadPublished(); break;
       case 'settings': loadSettings(); loadAISettings(); break;
       case 'logs': loadLogs(); break;
@@ -2080,6 +2081,153 @@
       })
       .catch(function (err) {
         showToast('Failed to skip: ' + err.message, 'error');
+      });
+  };
+
+  // ─── Ready to Publish Page ─────────────────────────────────────────────
+
+  var readyCurrentPage = 1;
+  var _loadReadyInFlight = false;
+
+  function loadReady(page) {
+    if (_loadReadyInFlight) return;
+    _loadReadyInFlight = true;
+
+    if (typeof page === 'number' && page > 0) readyCurrentPage = page;
+
+    var container = $('readyList');
+    var pagination = $('readyPagination');
+
+    var refreshBtn = $('readyRefreshBtn');
+    if (refreshBtn && !refreshBtn.__wired) {
+      refreshBtn.__wired = true;
+      refreshBtn.addEventListener('click', function () { loadReady(); });
+    }
+    var publishAllBtn = $('publishAllReadyBtn');
+    if (publishAllBtn && !publishAllBtn.__wired) {
+      publishAllBtn.__wired = true;
+      publishAllBtn.addEventListener('click', function () { window.__publishAllReady(); });
+    }
+
+    if (container) container.innerHTML = '<p class="placeholder-text">Loading...</p>';
+    if (pagination) pagination.innerHTML = '';
+
+    fetchApi('/api/drafts/ready?page=' + readyCurrentPage)
+      .then(function (data) {
+        renderReadyTable(container, data.data || []);
+        updateReadyBadge(data.total || 0);
+
+        if (pagination && typeof renderPagination === 'function') {
+          renderPagination(pagination, data.total || 0, data.page || 1, data.perPage || 20, function (p) {
+            loadReady(p);
+          });
+        }
+      })
+      .catch(function (err) {
+        if (container) container.innerHTML = '<p class="placeholder-text">Failed to load: ' + escapeHtml(err.message) + '</p>';
+      })
+      .finally(function () {
+        _loadReadyInFlight = false;
+      });
+  }
+
+  function renderReadyTable(container, rows) {
+    if (!container) return;
+
+    if (!rows || rows.length === 0) {
+      container.innerHTML =
+        '<div class="feed-empty">' +
+          '<div class="feed-empty-icon">&#9889;</div>' +
+          '<div class="feed-empty-title">No articles ready to publish yet</div>' +
+          '<div class="feed-empty-desc">Articles appear here after AI rewrite completes.</div>' +
+        '</div>';
+      return;
+    }
+
+    var html = '<table class="data-table">' +
+      '<thead>' +
+        '<tr>' +
+          '<th>Title</th>' +
+          '<th>Source Domain</th>' +
+          '<th>Words</th>' +
+          '<th>AI Model</th>' +
+          '<th>Rewritten At</th>' +
+          '<th>Mode</th>' +
+          '<th>Actions</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>';
+
+    for (var i = 0; i < rows.length; i++) {
+      var d = rows[i];
+      var title = d.rewritten_title || d.topic || d.source_domain || 'Untitled';
+      var words = d.rewritten_word_count ? (d.rewritten_word_count + ' words') : '&mdash;';
+      var model = d.ai_model_used || '&mdash;';
+      var rewrittenAt = d.updated_at ? new Date(d.updated_at).toLocaleString() : '&mdash;';
+      var mode = d.mode === 'manual_import'
+        ? '<span class="badge badge-manual">Manual</span>'
+        : '<span class="badge badge-auto">Auto</span>';
+      var trendsBadge = d.trends_boosted ? ' <span class="badge badge-trend">&#128293; Trending</span>' : '';
+
+      html += '<tr>' +
+        '<td><strong>' + escapeHtml(String(title).substring(0, 80)) + '</strong>' + trendsBadge + '</td>' +
+        '<td>' + escapeHtml(d.source_domain || '') + '</td>' +
+        '<td>' + words + '</td>' +
+        '<td>' + escapeHtml(model) + '</td>' +
+        '<td>' + rewrittenAt + '</td>' +
+        '<td>' + mode + '</td>' +
+        '<td>' +
+          '<button class="btn btn-sm btn-primary" onclick="window.__publishReady(' + d.id + ')">Publish Now</button> ' +
+          '<button class="btn btn-sm" onclick="window.__openEditor(' + d.id + ')">Preview</button>' +
+        '</td>' +
+      '</tr>';
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  function updateReadyBadge(total) {
+    var badge = $('ready-badge');
+    if (!badge) return;
+    if (total > 0) {
+      badge.textContent = total;
+      badge.style.display = 'inline';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
+  }
+
+  window.__publishReady = function (draftId) {
+    if (!confirm('Publish this article to WordPress now?')) return;
+    fetchApi('/api/drafts/' + draftId + '/publish', { method: 'POST' })
+      .then(function (data) {
+        if (data.success) {
+          showToast('Published successfully!', 'success');
+          loadReady();
+        } else {
+          showToast('Publish failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Publish failed: ' + err.message, 'error');
+      });
+  };
+
+  window.__publishAllReady = function () {
+    if (!confirm('Publish ALL ready articles to WordPress now? This will ignore the hourly rate limit.')) return;
+    fetchApi('/api/drafts/publish-all-ready', { method: 'POST' })
+      .then(function (data) {
+        if (data.success) {
+          showToast('Publishing ' + (data.queued || 0) + ' articles in the background...', 'success');
+          setTimeout(function () { loadReady(); }, 3000);
+        } else {
+          showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Failed: ' + err.message, 'error');
       });
   };
 

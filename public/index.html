@@ -30,6 +30,10 @@
       <a href="#clusters" class="nav-link" data-page="clusters">
         <span class="nav-icon">&#10070;</span> Clusters
       </a>
+      <a href="#ready" class="nav-link" data-page="ready">
+        <span class="nav-icon">&#9889;</span> Ready to Publish
+        <span class="nav-badge" id="ready-badge" style="display:none"></span>
+      </a>
       <a href="#published" class="nav-link" data-page="published">
         <span class="nav-icon">&#10003;</span> Published
       </a>
@@ -261,6 +265,22 @@
           <p class="placeholder-text">Loading...</p>
         </div>
         <div id="clustersPagination" class="pagination"></div>
+      </section>
+
+      <!-- Ready to Publish -->
+      <section class="page hidden" id="page-ready">
+        <div class="page-header">
+          <h2 class="page-title">Ready to Publish</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm" id="readyRefreshBtn">Refresh</button>
+            <button class="btn btn-sm btn-primary" id="publishAllReadyBtn">Publish All</button>
+          </div>
+        </div>
+        <p class="page-subtitle" style="color:var(--text-secondary);margin-bottom:12px">AI-rewritten articles waiting to go live on WordPress.</p>
+        <div id="readyList" class="table-wrap">
+          <p class="placeholder-text">Loading...</p>
+        </div>
+        <div id="readyPagination" class="pagination"></div>
       </section>
 
       <!-- Published -->
