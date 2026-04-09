@@ -3440,6 +3440,9 @@
           $('html-code-editor').value = '';
         }
 
+        // Versions bar
+        loadVersions(draftId);
+
         // Reset tabs to defaults
         resetEditorTabs();
 
@@ -3456,6 +3459,98 @@
     currentDraftId = null;
     currentDraft = null;
     loadPublished();
+  }
+
+  // ─── Draft Versions ────────────────────────────────────────────────
+  // Loads version history into the editor's version bar. Shows the bar
+  // only if at least one version exists. Restoring an old version creates
+  // a new version row (so restores are also tracked).
+  function loadVersions(draftId) {
+    var bar = $('editor-version-bar');
+    var sel = $('editor-version-select');
+    var restoreBtn = $('editor-version-restore');
+    var currentTag = $('editor-version-current-tag');
+    if (!bar || !sel) return;
+
+    fetchApi('/api/drafts/' + draftId + '/versions')
+      .then(function (res) {
+        if (!res || !res.success) {
+          bar.style.display = 'none';
+          return;
+        }
+        var versions = res.versions || [];
+        var currentVersion = res.current_version || 0;
+
+        if (versions.length === 0) {
+          bar.style.display = 'none';
+          return;
+        }
+
+        bar.style.display = 'flex';
+        sel.innerHTML = '';
+        for (var i = 0; i < versions.length; i++) {
+          var v = versions[i];
+          var label = 'v' + v.version + ' \u2014 ' +
+                      (v.rewritten_word_count || '?') + ' words \u2014 ' +
+                      (v.ai_model_used || '?') + ' \u2014 ' +
+                      (v.created_at || '');
+          var opt = document.createElement('option');
+          opt.value = String(v.version);
+          opt.textContent = label;
+          if (v.version === currentVersion) opt.selected = true;
+          sel.appendChild(opt);
+        }
+
+        if (currentTag) currentTag.textContent = 'current: v' + currentVersion;
+
+        // Show restore only when a non-current version is selected
+        function syncRestore() {
+          var picked = parseInt(sel.value, 10);
+          if (restoreBtn) {
+            restoreBtn.style.display = (picked && picked !== currentVersion) ? '' : 'none';
+          }
+        }
+        sel.onchange = function () {
+          var picked = parseInt(sel.value, 10);
+          syncRestore();
+          if (!picked || picked === currentVersion) return;
+          // Preview the picked version inline (HTML editor + preview iframe)
+          fetchApi('/api/drafts/' + draftId + '/versions/' + picked)
+            .then(function (vr) {
+              if (!vr || !vr.success || !vr.version) return;
+              var html = vr.version.rewritten_html || '';
+              var htmlEd = $('html-code-editor');
+              if (htmlEd) htmlEd.value = html;
+              updatePreviewIframe(html);
+            })
+            .catch(function () { /* ignore */ });
+        };
+        syncRestore();
+
+        if (restoreBtn) {
+          restoreBtn.onclick = function () {
+            var picked = parseInt(sel.value, 10);
+            if (!picked || picked === currentVersion) return;
+            if (!confirm('Restore version ' + picked + '? This creates a new version on top of the current one.')) return;
+            fetchApi('/api/drafts/' + draftId + '/versions/' + picked + '/restore', { method: 'POST' })
+              .then(function (rr) {
+                if (!rr || !rr.success) {
+                  showToast('Restore failed', 'error');
+                  return;
+                }
+                showToast('Restored v' + picked + ' as v' + rr.new_version, 'success');
+                // Reload editor + version list
+                openEditor(draftId);
+              })
+              .catch(function (err) {
+                showToast('Restore failed: ' + err.message, 'error');
+              });
+          };
+        }
+      })
+      .catch(function () {
+        bar.style.display = 'none';
+      });
   }
 
   function resetEditorTabs() {
@@ -3607,7 +3702,6 @@
           { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (Best)' },
         ],
         openai: [
-          { value: 'gpt-4o', label: 'GPT-4o (Balanced)' },
           { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast)' },
           { value: 'gpt-4.1', label: 'GPT-4.1 (Latest)' },
           { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (Latest Fast)' },
@@ -4253,7 +4347,7 @@
         }
         el = $('openai-key');
         if (el && data.openaiKey) el.placeholder = data.openaiKey;
-        el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o';
+        el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o-mini';
         el = $('openrouter-key');
         if (el && data.openrouterKey) el.placeholder = data.openrouterKey;
         window.__lastSavedOpenrouterModel = data.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free';

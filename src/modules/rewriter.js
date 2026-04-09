@@ -12,7 +12,6 @@ var AI_MODELS = {
     { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', tier: 'Latest Best', type: 'standard' },
   ],
   openai: [
-    { id: 'gpt-4o', name: 'GPT-4o', tier: 'Balanced', type: 'standard' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', tier: 'Fast & Cheap', type: 'standard' },
     { id: 'gpt-4.1', name: 'GPT-4.1', tier: 'Latest', type: 'standard' },
     { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', tier: 'Latest Fast', type: 'standard' },
@@ -218,13 +217,34 @@ function buildPrompt(article, cluster, settings) {
     '',
     trendingContext.replace(/\n+$/, ''),
     '',
+    '# STEP 1 — STRUCTURE SIGNALS (MANDATORY, COMES BEFORE THE JSON)',
+    '',
+    'Before you write anything else, output a <signals>...</signals> block that answers these 5 yes/no questions about the story. Plain "yes" or "no" only — no commentary.',
+    '',
+    '<signals>',
+    'parallel_facts: yes/no',
+    'steps: yes/no',
+    'comparison: yes/no',
+    'conditional_rules: yes/no',
+    'timeline: yes/no',
+    '</signals>',
+    '',
+    'Definitions:',
+    '- parallel_facts: the story contains 3+ items of the same kind that share the same attributes (e.g. five phone models with price, RAM, battery; ten cities with rainfall numbers). If yes, you MUST include a markdown table inside body_markdown rendering those rows.',
+    '- steps: the story describes a sequence of actions the reader can follow in order (how to apply, how to check status, how to register). If yes, you MUST include a numbered list (1. 2. 3.) inside body_markdown.',
+    '- comparison: the story explicitly compares 2+ named things head-to-head on the same attributes (Plan A vs Plan B, iPhone vs Pixel). If yes, you MUST include a markdown comparison table.',
+    '- conditional_rules: the story spells out eligibility/criteria/rules where "if X then Y" applies (eligibility for a scheme, who qualifies for a discount). If yes, you MUST include a markdown table mapping conditions to outcomes.',
+    '- timeline: the story has 3+ dated events that matter in order (court hearings, policy phases, election milestones). If yes, you MUST include a date-prefixed list inside body_markdown.',
+    '',
+    'After the <signals> block, output the JSON. Do NOT include the <signals> block inside the JSON.',
+    '',
     '# REQUIRED STRUCTURE (IN THIS EXACT ORDER)',
     '',
     '1. HEADLINE — 55–70 characters. Sharp, factual, no clickbait. Front-load the primary keyword. Never copy a source headline verbatim. Active voice.',
     '',
     '2. IN BRIEF — Exactly 4 bullets. Each bullet is ONE fact, max 20 words, written as a complete plain-English sentence. Lead with the most newsworthy bullet. No opinions, no hedging, no transitions. These four bullets must collectively answer who/what/when/where for the entire story.',
     '',
-    '3. BODY — 400 to 700 words of plain prose. Maximum 2 H2 subheadings (use them only if the story genuinely splits into two distinct beats — otherwise zero). No H3, no lists, no tables, no images, no blockquotes, no code. Just paragraphs. Each paragraph is 2–4 sentences.',
+    '3. BODY — 400 to 700 words of plain prose. Maximum 2 H2 subheadings (use them only if the story genuinely splits into two distinct beats — otherwise zero). Default to paragraphs only. The ONLY exception: if a Step-1 signal is YES, you MUST include the matching structure inside the body markdown — markdown table for parallel_facts/comparison/conditional_rules, numbered list for steps, date-prefixed list for timeline. Otherwise: no H3, no lists, no tables, no images, no blockquotes, no code. Each paragraph is 2–4 sentences.',
     '',
     '4. FAQ — Exactly 3 to 4 question/answer pairs. Questions mirror real "People Also Ask" queries. Answers are 2–3 sentences, factual, drawn from the body.',
     '',
@@ -304,6 +324,86 @@ function buildPrompt(article, cluster, settings) {
   ].join('\n');
 }
 
+// ─── v2 Signals Extractor ──────────────────────────────────────────────────
+//
+// Pulls the Step-1 <signals>...</signals> block out of the raw model response.
+// Returns { signals: {parallel_facts, steps, comparison, conditional_rules,
+// timeline}, remaining: <text without signals block> }. If no block is found,
+// signals is null and remaining is the original text. Defensive — never throws.
+//
+function extractSignals(rawText) {
+  if (!rawText || typeof rawText !== 'string') {
+    return { signals: null, remaining: rawText || '' };
+  }
+  var match = rawText.match(/<signals>([\s\S]*?)<\/signals>/i);
+  if (!match) {
+    return { signals: null, remaining: rawText };
+  }
+  var inner = match[1];
+  var signals = {
+    parallel_facts: 'no',
+    steps: 'no',
+    comparison: 'no',
+    conditional_rules: 'no',
+    timeline: 'no',
+  };
+  var lines = inner.split(/\r?\n/);
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li].trim();
+    if (!line) continue;
+    var kv = line.split(':');
+    if (kv.length < 2) continue;
+    var key = kv[0].trim().toLowerCase().replace(/[^a-z_]/g, '');
+    var val = kv.slice(1).join(':').trim().toLowerCase();
+    if (signals.hasOwnProperty(key)) {
+      signals[key] = (val === 'yes' || val === 'true' || val === '1') ? 'yes' : 'no';
+    }
+  }
+  var remaining = rawText.replace(match[0], '').trim();
+  return { signals: signals, remaining: remaining };
+}
+
+// ─── v2 Structure Validator ────────────────────────────────────────────────
+//
+// Given the body markdown and the signals block, returns
+// { valid: bool, errors: [string] }. If a signal is YES, the body markdown
+// MUST contain the matching structure:
+//   parallel_facts    → markdown table (| col | col |)
+//   steps             → numbered list  (^1. 2. 3. ...)
+//   comparison        → markdown table (treated same as parallel_facts)
+//   conditional_rules → markdown table (treated same as parallel_facts)
+//   timeline          → date-prefixed list lines (e.g. "- 2024-01-01:" or "1. Jan 2024 —")
+//
+function validateStructure(bodyMarkdown, signals) {
+  var errors = [];
+  if (!signals || typeof signals !== 'object') {
+    return { valid: true, errors: errors };
+  }
+  var body = String(bodyMarkdown || '');
+
+  var hasTable = /^\s*\|.*\|\s*$/m.test(body) && /^\s*\|[\s:|-]+\|\s*$/m.test(body);
+  var hasNumberedList = /^\s*\d+\.\s+\S/m.test(body);
+  var hasTimeline = /^\s*[-*\d+.]+\s*\d{4}/m.test(body) || /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d/i.test(body);
+
+  if (signals.parallel_facts === 'yes' && !hasTable) {
+    errors.push('signals.parallel_facts = yes but body has no markdown table');
+  }
+  if (signals.steps === 'yes' && !hasNumberedList) {
+    errors.push('signals.steps = yes but body has no numbered list');
+  }
+  if (signals.comparison === 'yes' && !hasTable) {
+    errors.push('signals.comparison = yes but body has no comparison table');
+  }
+  if (signals.conditional_rules === 'yes' && !hasTable) {
+    errors.push('signals.conditional_rules = yes but body has no conditions table');
+  }
+  if (signals.timeline === 'yes' && !hasTimeline) {
+    errors.push('signals.timeline = yes but body has no timeline list');
+  }
+
+  return { valid: errors.length === 0, errors: errors };
+}
+
 // ─── v2 Output Parser ──────────────────────────────────────────────────────
 //
 // Parses model output in the v2 schema:
@@ -311,14 +411,19 @@ function buildPrompt(article, cluster, settings) {
 //
 // Strips accidental markdown fences, validates required fields and types, and
 // hard-caps in_brief at 4 bullets. Throws on hard validation failures so the
-// caller can fall through to the next provider.
+// caller can fall through to the next provider. Also extracts the Step-1
+// <signals> block when present and exposes it on the returned object.
 //
 function parseModelOutput(text) {
   if (!text || typeof text !== 'string') {
     throw new Error('Empty model output');
   }
 
-  var cleaned = text.trim();
+  // Pull the signals block out before any JSON cleanup so the brace
+  // extractor doesn't trip over `<signals>` characters.
+  var sig = extractSignals(text);
+  var signals = sig.signals;
+  var cleaned = (sig.remaining || '').trim();
 
   // Strip code fences if the model wrapped its response despite instructions
   if (cleaned.startsWith('```')) {
@@ -384,6 +489,7 @@ function parseModelOutput(text) {
     faqs: faqs,
     language: parsed.language || '',
     wordCountBody: parseInt(parsed.word_count_body, 10) || 0,
+    signals: signals,
   };
 }
 
@@ -456,6 +562,7 @@ function buildRewriteResult(parsed, tokensUsed) {
     targetKeyword: '',
     relatedKeywords: [],
     faq: parsed.faqs,
+    signals: parsed.signals || null,
     wordCount: parsed.wordCountBody || countWords(contentHtml),
     tokensUsed: tokensUsed,
   };
@@ -561,7 +668,7 @@ class ArticleRewriter {
       anthropicKey:     this._getSetting('ANTHROPIC_API_KEY')    || process.env.ANTHROPIC_API_KEY    || '',
       anthropicModel:   this._getSetting('ANTHROPIC_MODEL')      || process.env.ANTHROPIC_MODEL      || 'claude-haiku-4-5-20251001',
       openaiKey:        this._getSetting('OPENAI_API_KEY')       || process.env.OPENAI_API_KEY       || '',
-      openaiModel:      this._getSetting('OPENAI_MODEL')         || process.env.OPENAI_MODEL         || 'gpt-4o',
+      openaiModel:      this._getSetting('OPENAI_MODEL')         || process.env.OPENAI_MODEL         || 'gpt-4o-mini',
       openrouterKey:    this._getSetting('OPENROUTER_API_KEY')   || process.env.OPENROUTER_API_KEY   || '',
       openrouterModel:  this._getSetting('OPENROUTER_MODEL')     || process.env.OPENROUTER_MODEL     || 'meta-llama/llama-3.3-70b-instruct:free',
       enableFallback:   (this._getSetting('ENABLE_FALLBACK')     || process.env.ENABLE_FALLBACK     || 'true') === 'true',
@@ -571,7 +678,7 @@ class ArticleRewriter {
 
     // Validate model IDs against known models — fix stale DB values
     this._cfg.anthropicModel = this._validateModelId('anthropic', this._cfg.anthropicModel, 'claude-haiku-4-5-20251001');
-    this._cfg.openaiModel = this._validateModelId('openai', this._cfg.openaiModel, 'gpt-4o');
+    this._cfg.openaiModel = this._validateModelId('openai', this._cfg.openaiModel, 'gpt-4o-mini');
     // OpenRouter models are fetched dynamically from their API,
     // so we cannot validate against AI_MODELS.openrouter (which is empty by design).
     // Trust whatever the user picked — OpenRouter API will return a clear error
@@ -715,11 +822,35 @@ class ArticleRewriter {
       publicationUrl: publicationUrl,
     };
     var prompt = buildPrompt(article, cluster || { articles: [article] }, promptSettings);
+    var self = this;
+
+    // Wraps a provider call with structure validation. If signals say a
+    // structure is required but the body markdown is missing it, retries
+    // the same provider once with a stronger nudge appended to the prompt.
+    async function callWithValidation(provName, key, model) {
+      var r = await self._callProviderStructured(provName, key, model, prompt);
+      if (r && r.signals) {
+        self.logger.info('rewriter', 'Signals: ' + JSON.stringify(r.signals));
+      }
+      var v = validateStructure(r.bodyMarkdown, r.signals);
+      if (v.valid) return r;
+      self.logger.warn('rewriter', 'Structure validation failed: ' + v.errors.join('; ') + ' — retrying once');
+      var nudge = prompt +
+        '\n\n# RETRY — STRUCTURE MISMATCH\n' +
+        'Your previous response set these signals to YES but the body markdown did not include the required structure(s):\n' +
+        v.errors.map(function (e) { return '- ' + e; }).join('\n') +
+        '\nFix this. Either change the relevant signal to "no" if the story does not actually warrant it, OR include the required structure (markdown table / numbered list / date-prefixed list) inside body_markdown. Respond with valid JSON in the same schema, with a fresh <signals> block.';
+      var retry = await self._callProviderStructured(provName, key, model, nudge);
+      if (retry && retry.signals) {
+        self.logger.info('rewriter', 'Signals (retry): ' + JSON.stringify(retry.signals));
+      }
+      return retry;
+    }
 
     // Try primary
     try {
       this.logger.info('rewriter', 'Calling ' + provider + ' with model ' + primaryModel + '...');
-      var result = await this._callProviderStructured(provider, primaryKey, primaryModel, prompt);
+      var result = await callWithValidation(provider, primaryKey, primaryModel);
       result.aiProvider = provider;
       result.aiModel = primaryModel;
 
@@ -737,7 +868,6 @@ class ArticleRewriter {
       // 3-provider fallback chain
       var allProviders = ['openrouter', 'anthropic', 'openai'];
       var fallbackProviders = allProviders.filter(function (p) { return p !== provider; });
-      var self = this;
       var lastError = primaryErr;
 
       for (var fi = 0; fi < fallbackProviders.length; fi++) {
@@ -747,7 +877,7 @@ class ArticleRewriter {
 
         self.logger.info('rewriter', 'Trying fallback: ' + fbProvider + ' / ' + fb.model + '...');
         try {
-          var fbResult = await self._callProviderStructured(fbProvider, fb.key, fb.model, prompt);
+          var fbResult = await callWithValidation(fbProvider, fb.key, fb.model);
           fbResult.aiProvider = fbProvider;
           fbResult.aiModel = fb.model;
           fbResult.usedFallback = true;

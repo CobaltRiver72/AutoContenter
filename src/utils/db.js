@@ -254,6 +254,42 @@ function runMigrations() {
       db.exec('ALTER TABLE drafts ADD COLUMN body_markdown TEXT DEFAULT NULL');
     } catch (e) { /* already exists */ }
 
+    // Master Prompt v2 — Step 1 signals (parallel_facts/steps/comparison/...)
+    // Stored as JSON object so we can audit what the model decided about
+    // structure for each rewrite. Used by validateStructure() to enforce
+    // table/list rendering when signals say so.
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN ai_signals TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    // Draft versioning — pointer to current version in draft_versions
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN current_version INTEGER DEFAULT 0');
+    } catch (e) { /* already exists */ }
+
+    // Draft versions — append-only history of every successful rewrite.
+    // version starts at 1, monotonically increasing per draft_id.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS draft_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        draft_id INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        rewritten_title TEXT,
+        rewritten_html TEXT,
+        rewritten_word_count INTEGER,
+        in_brief_json TEXT,
+        body_markdown TEXT,
+        faq_json TEXT,
+        ai_signals TEXT,
+        ai_model_used TEXT,
+        ai_provider TEXT,
+        ai_tokens_used INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(draft_id, version)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_draft_versions_draft ON draft_versions(draft_id, version DESC)');
+
     // Add featured_image column to drafts if it doesn't exist
     try {
       db.exec('ALTER TABLE drafts ADD COLUMN featured_image TEXT DEFAULT NULL');

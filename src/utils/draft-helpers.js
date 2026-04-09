@@ -846,6 +846,8 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
     // v2 structured fields (master prompt v2 only — null on legacy paths)
     var inBriefData = Array.isArray(result.inBrief) ? result.inBrief : null;
     var bodyMarkdownData = typeof result.bodyMarkdown === 'string' ? result.bodyMarkdown : null;
+    // v2 Step 1 signals (parallel_facts/steps/comparison/...)
+    var signalsData = result.signals && typeof result.signals === 'object' ? result.signals : null;
 
     // Validate AI output
     var validation = validateRewriteOutput(html, content);
@@ -862,35 +864,76 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
       logger.warn('draft-helpers', 'Draft ' + draftId + ' rewrite warnings: ' + validation.warnings.join('; '));
     }
 
-    db.prepare(
-      "UPDATE drafts SET" +
-      "  rewritten_html = ?," +
-      "  rewritten_title = ?," +
-      "  rewritten_word_count = ?," +
-      "  ai_model_used = ?," +
-      "  ai_provider = ?," +
-      "  ai_tokens_used = ?," +
-      "  faq_json = ?," +
-      "  in_brief_json = ?," +
-      "  body_markdown = ?," +
-      "  error_message = NULL," +
-      "  status = 'ready'," +
-      "  updated_at = datetime('now')" +
-      " WHERE id = ?"
-    ).run(
-      html,
-      title,
-      wordCount,
-      model,
-      provider,
-      tokensUsed,
-      faqData.length > 0 ? JSON.stringify(faqData) : null,
-      inBriefData && inBriefData.length > 0 ? JSON.stringify(inBriefData) : null,
-      bodyMarkdownData || null,
-      draftId
-    );
+    // ─── Versioning ────────────────────────────────────────────────────
+    // Append-only history. Snapshot the previous version to draft_versions
+    // before overwriting the drafts row. The first successful rewrite
+    // becomes version 1; subsequent rewrites bump from there.
+    var maxRow = db.prepare(
+      'SELECT COALESCE(MAX(version), 0) AS max_version FROM draft_versions WHERE draft_id = ?'
+    ).get(draftId);
+    var nextVersion = (maxRow && maxRow.max_version ? maxRow.max_version : 0) + 1;
 
-    logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ')');
+    var inBriefJsonStr = inBriefData && inBriefData.length > 0 ? JSON.stringify(inBriefData) : null;
+    var faqJsonStr = faqData.length > 0 ? JSON.stringify(faqData) : null;
+    var signalsJsonStr = signalsData ? JSON.stringify(signalsData) : null;
+
+    var txn = db.transaction(function () {
+      db.prepare(
+        "UPDATE drafts SET" +
+        "  rewritten_html = ?," +
+        "  rewritten_title = ?," +
+        "  rewritten_word_count = ?," +
+        "  ai_model_used = ?," +
+        "  ai_provider = ?," +
+        "  ai_tokens_used = ?," +
+        "  faq_json = ?," +
+        "  in_brief_json = ?," +
+        "  body_markdown = ?," +
+        "  ai_signals = ?," +
+        "  current_version = ?," +
+        "  error_message = NULL," +
+        "  status = 'ready'," +
+        "  updated_at = datetime('now')" +
+        " WHERE id = ?"
+      ).run(
+        html,
+        title,
+        wordCount,
+        model,
+        provider,
+        tokensUsed,
+        faqJsonStr,
+        inBriefJsonStr,
+        bodyMarkdownData || null,
+        signalsJsonStr,
+        nextVersion,
+        draftId
+      );
+
+      db.prepare(
+        "INSERT INTO draft_versions (" +
+        "  draft_id, version, rewritten_title, rewritten_html, rewritten_word_count," +
+        "  in_brief_json, body_markdown, faq_json, ai_signals," +
+        "  ai_model_used, ai_provider, ai_tokens_used" +
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        draftId,
+        nextVersion,
+        title,
+        html,
+        wordCount,
+        inBriefJsonStr,
+        bodyMarkdownData || null,
+        faqJsonStr,
+        signalsJsonStr,
+        model,
+        provider,
+        tokensUsed
+      );
+    });
+    txn();
+
+    logger.info('draft-helpers', 'Draft ' + draftId + ' rewrite complete (' + wordCount + ' words, ' + model + ', v' + nextVersion + ')');
   } catch (err) {
     // Track retry count and error on failure
     db.prepare(

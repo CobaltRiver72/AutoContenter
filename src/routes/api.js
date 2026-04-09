@@ -2424,6 +2424,139 @@ function createApiRouter(deps) {
     }
   });
 
+  // GET /api/drafts/:id/versions — List all versions for a draft
+  router.get('/drafts/:id/versions', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
+
+      var draft = db.prepare('SELECT id, current_version FROM drafts WHERE id = ?').get(id);
+      if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+
+      var versions = db.prepare(
+        'SELECT id, version, rewritten_title, rewritten_word_count, ai_model_used, ai_provider, ai_tokens_used, created_at' +
+        ' FROM draft_versions WHERE draft_id = ? ORDER BY version DESC'
+      ).all(id);
+
+      return res.json({
+        success: true,
+        draft_id: id,
+        current_version: draft.current_version || 0,
+        versions: versions,
+      });
+    } catch (err) {
+      logger.error('api', 'GET /drafts/' + req.params.id + '/versions: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to list versions' });
+    }
+  });
+
+  // GET /api/drafts/:id/versions/:version — Fetch a specific version
+  router.get('/drafts/:id/versions/:version', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
+      var version = parseInt(req.params.version, 10);
+      if (!version || version < 1) return res.status(400).json({ success: false, error: 'Invalid version' });
+
+      var row = db.prepare(
+        'SELECT * FROM draft_versions WHERE draft_id = ? AND version = ?'
+      ).get(id, version);
+
+      if (!row) return res.status(404).json({ success: false, error: 'Version not found' });
+
+      return res.json({ success: true, version: row });
+    } catch (err) {
+      logger.error('api', 'GET /drafts/' + req.params.id + '/versions/' + req.params.version + ': ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to fetch version' });
+    }
+  });
+
+  // POST /api/drafts/:id/versions/:version/restore — Restore an old version
+  // This copies the snapshot's content back into drafts AND creates a new
+  // version row (so the restore itself is also tracked in history).
+  router.post('/drafts/:id/versions/:version/restore', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
+      var version = parseInt(req.params.version, 10);
+      if (!version || version < 1) return res.status(400).json({ success: false, error: 'Invalid version' });
+
+      var draft = db.prepare('SELECT id FROM drafts WHERE id = ?').get(id);
+      if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+
+      var snapshot = db.prepare(
+        'SELECT * FROM draft_versions WHERE draft_id = ? AND version = ?'
+      ).get(id, version);
+      if (!snapshot) return res.status(404).json({ success: false, error: 'Version not found' });
+
+      var maxRow = db.prepare(
+        'SELECT COALESCE(MAX(version), 0) AS max_version FROM draft_versions WHERE draft_id = ?'
+      ).get(id);
+      var nextVersion = (maxRow && maxRow.max_version ? maxRow.max_version : 0) + 1;
+
+      var txn = db.transaction(function () {
+        db.prepare(
+          "UPDATE drafts SET" +
+          "  rewritten_html = ?," +
+          "  rewritten_title = ?," +
+          "  rewritten_word_count = ?," +
+          "  ai_model_used = ?," +
+          "  ai_provider = ?," +
+          "  ai_tokens_used = ?," +
+          "  faq_json = ?," +
+          "  in_brief_json = ?," +
+          "  body_markdown = ?," +
+          "  ai_signals = ?," +
+          "  current_version = ?," +
+          "  status = 'ready'," +
+          "  updated_at = datetime('now')" +
+          " WHERE id = ?"
+        ).run(
+          snapshot.rewritten_html,
+          snapshot.rewritten_title,
+          snapshot.rewritten_word_count,
+          snapshot.ai_model_used,
+          snapshot.ai_provider,
+          snapshot.ai_tokens_used,
+          snapshot.faq_json,
+          snapshot.in_brief_json,
+          snapshot.body_markdown,
+          snapshot.ai_signals,
+          nextVersion,
+          id
+        );
+
+        db.prepare(
+          "INSERT INTO draft_versions (" +
+          "  draft_id, version, rewritten_title, rewritten_html, rewritten_word_count," +
+          "  in_brief_json, body_markdown, faq_json, ai_signals," +
+          "  ai_model_used, ai_provider, ai_tokens_used" +
+          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+          id,
+          nextVersion,
+          snapshot.rewritten_title,
+          snapshot.rewritten_html,
+          snapshot.rewritten_word_count,
+          snapshot.in_brief_json,
+          snapshot.body_markdown,
+          snapshot.faq_json,
+          snapshot.ai_signals,
+          snapshot.ai_model_used,
+          snapshot.ai_provider,
+          snapshot.ai_tokens_used
+        );
+      });
+      txn();
+
+      logger.info('api', 'Draft ' + id + ' restored from v' + version + ' as v' + nextVersion);
+      return res.json({ success: true, restored_from: version, new_version: nextVersion });
+    } catch (err) {
+      logger.error('api', 'POST /drafts/' + req.params.id + '/versions/' + req.params.version + '/restore: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to restore version' });
+    }
+  });
+
   // PUT /api/drafts/:id/html — Save edited HTML
   router.put('/drafts/:id/html', function (req, res) {
     try {

@@ -20,7 +20,7 @@ var REQUIRED_VARS = [
 var DEFAULTS = {
   AI_PROVIDER: 'anthropic',
   AI_PRIMARY_MODEL: 'claude-haiku-4-5-20251001',
-  AI_FALLBACK_MODEL: 'gpt-4o',
+  AI_FALLBACK_MODEL: 'gpt-4o-mini',
   ENABLE_FALLBACK: 'true',
   MAX_TOKENS: '4096',
   TEMPERATURE: '0.7',
