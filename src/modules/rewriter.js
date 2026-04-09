@@ -28,6 +28,68 @@ function countWords(html) {
   return text ? text.split(' ').length : 0;
 }
 
+// ─── Source Content Cleaner ────────────────────────────────────────────────
+//
+// Strips noise from scraped/extracted source articles so the AI sees the
+// actual story body, not navigation, bylines, social-share strings, or
+// "Also Read" link clutter. Defensive — never throws; returns empty string
+// for falsy input.
+//
+function cleanSourceContent(text) {
+  if (!text || typeof text !== 'string') return '';
+  var out = text;
+
+  try {
+    // Strip "Also Read", "Read More", "Read Also" link/heading lines
+    out = out.replace(/(?:^|\n)\s*(?:also\s*read|read\s*more|read\s*also|recommended|trending|more\s*from)\s*[:\-–—].*?(?=\n|$)/gi, '\n');
+    out = out.replace(/(?:^|\n)\s*\[?\s*(?:also\s*read|read\s*more|read\s*also)\s*\]?[:\-–—]?[^\n]*/gi, '\n');
+
+    // Strip social share / follow strings
+    out = out.replace(/(?:share|tweet|whatsapp|facebook|telegram|copy\s*link|click\s*to\s*share)\s*(?:on|this|via)?[^\n]{0,80}/gi, '');
+    out = out.replace(/follow\s+us\s+on[^\n]{0,120}/gi, '');
+    out = out.replace(/subscribe\s+to[^\n]{0,120}/gi, '');
+
+    // Strip bylines and metadata lines like "By Author Name | Updated: ..."
+    out = out.replace(/(?:^|\n)\s*by\s+[A-Z][^\n]{0,80}(?:\||\bupdated\b|\bpublished\b)[^\n]{0,120}/gi, '\n');
+    out = out.replace(/(?:^|\n)\s*(?:last\s+)?updated\s*[:\-]\s*[^\n]{0,100}/gi, '\n');
+    out = out.replace(/(?:^|\n)\s*published\s*(?:on|at)?\s*[:\-]\s*[^\n]{0,100}/gi, '\n');
+
+    // Strip standalone author credit lines ("By John Doe")
+    out = out.replace(/(?:^|\n)\s*by\s+[A-Z][a-zA-Z'.\-\s]{2,40}\s*(?=\n|$)/g, '\n');
+
+    // Strip image captions and photo credits
+    out = out.replace(/(?:^|\n)\s*(?:photo|image|file\s*photo|representative\s*image|credit)\s*[:\-–—][^\n]{0,150}/gi, '\n');
+
+    // Strip ad/promo markers
+    out = out.replace(/(?:advertisement|sponsored|promoted)\s*(?:content)?/gi, '');
+
+    // Drop very short standalone lines (likely nav fragments) - keep only lines with > 30 chars
+    var lines = out.split('\n');
+    var kept = [];
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li].trim();
+      if (line.length === 0) {
+        kept.push('');
+        continue;
+      }
+      // Keep substantive lines, drop short nav/menu fragments
+      if (line.length >= 30 || /[.!?]/.test(line)) {
+        kept.push(line);
+      }
+    }
+    out = kept.join('\n');
+
+    // Collapse repeated blank lines
+    out = out.replace(/\n{3,}/g, '\n\n');
+    // Collapse repeated spaces
+    out = out.replace(/[ \t]{2,}/g, ' ');
+
+    return out.trim();
+  } catch (e) {
+    return text;
+  }
+}
+
 // ─── SEO Prompt Builder (used by automated pipeline) ──────────────────────
 
 function buildPrompt(article, cluster, settings) {
@@ -96,7 +158,9 @@ function buildPrompt(article, cluster, settings) {
 
   for (var i = 0; i < allArticles.length; i++) {
     var a = allArticles[i];
-    var content = a.extracted_content || a.content_markdown || '';
+    // Always prefer extracted_content (Readability-parsed clean text) over raw content_markdown
+    var rawContent = a.extracted_content || a.content_markdown || '';
+    var content = cleanSourceContent(rawContent);
     if (content && content.length > 3000) {
       content = content.substring(0, 3000) + '\n...[truncated]';
     }
@@ -105,76 +169,101 @@ function buildPrompt(article, cluster, settings) {
     sourceArticles += 'Title: ' + (a.extracted_title || a.title || 'Untitled') + '\n';
     sourceArticles += 'URL: ' + (a.url || '') + '\n';
     sourceArticles += 'Domain: ' + (a.domain || '') + '\n';
-    if (a.extracted_byline) {
-      sourceArticles += 'Byline: ' + a.extracted_byline + '\n';
-    }
     sourceArticles += 'Content:\n' + (content || '[Content not available]') + '\n';
   }
 
-  return 'You are a senior editor at a leading Indian digital news publication. You produce high-quality, SEO-optimized articles that rank on Google and get featured on Google Discover.\n\n' +
-  'TASK: Write a completely original, comprehensive news article by synthesizing facts from ALL source articles below. Do NOT paraphrase any single source. Combine facts, quotes, data, and context from multiple sources into a new, authoritative narrative.\n\n' +
+  // Publication identity — pulled from settings/config so each deployment can brand correctly
+  var publicationName = (s.publicationName && String(s.publicationName).trim()) || 'HDF News';
+  var publicationUrl  = (s.publicationUrl  && String(s.publicationUrl).trim())  || 'https://hdfnews.com';
+
+  var languageBlock = (targetLang === 'hi')
+    ? 'LANGUAGE: Write the ENTIRE article in Hindi (Devanagari script). All headings, paragraphs, FAQ questions and answers must be in Hindi. Keep only proper nouns, brand names, and technical terms in English where Hindi readers expect them. Do NOT mix English sentences into the body.'
+    : 'LANGUAGE: Write the ENTIRE article in English only. Do NOT include Hindi translations, Devanagari text, or Hindi sentences anywhere in the body, headings, or FAQ. Proper nouns and Indian-specific terms (₹, IST, city names) are fine.';
+
+  var keywordBlock = (s.targetKeyword && s.targetKeyword.trim())
+    ? 'TARGET KEYWORD: The editor has specified this exact target keyword: "' + s.targetKeyword.trim() + '". Use it as the primary keyword. Place it naturally in the H1/title, the first sentence, the meta description, the slug, at least 2 H2 subheadings, and the conclusion. Never keyword-stuff.'
+    : 'TARGET KEYWORD: Identify the best long-tail keyword to target (e.g., "OnePlus Nord 6 price in India April 2026"). Prefer date/event-specific keywords with intent signals.';
+
+  var customBlock = (s.customPrompt && s.customPrompt.trim())
+    ? '\nADDITIONAL INSTRUCTIONS FROM EDITOR:\n' + s.customPrompt.trim() + '\nFollow these additional instructions while also following all the above rules.\n'
+    : '';
+
+  return '' +
+  '# IDENTITY\n' +
+  'You are the senior staff writer and editor at ' + publicationName + ' (' + publicationUrl + '), a fast-moving Indian digital news publication. Every article you publish must read like the work of a careful, experienced human journalist — never like an AI summary.\n\n' +
+  '# MISSION\n' +
+  'Synthesize the SOURCE ARTICLES below into ONE original, factual, 600–800 word news story. Combine facts, quotes, data, and context from MULTIPLE sources into a new, authoritative narrative. Do NOT paraphrase any single source. Do NOT invent facts. Do NOT speculate beyond what the sources support.\n\n' +
   trendingContext +
-  'SEO REQUIREMENTS:\n' +
-  '1. HEADLINE: Write a compelling, click-worthy headline (55-65 characters). Include the primary keyword naturally. Use power words (Revealed, Confirmed, Breaking, Official, etc.).\n' +
-  '2. SLUG: URL-friendly slug (lowercase, hyphens, under 60 chars). Include primary keyword.\n' +
-  '3. EXCERPT: Google Discover-optimized summary (2 sentences, under 160 chars). Must entice clicks.\n' +
-  '4. META DESCRIPTION: Unique meta description (under 155 chars). Include primary keyword in first 60 chars.\n' +
-  ((s.targetKeyword && s.targetKeyword.trim())
-    ? '5. TARGET KEYWORD: The user has specified this target keyword: "' + s.targetKeyword.trim() + '". Use this EXACT keyword as the primary keyword. Optimize the title, meta description, slug, and content around this keyword. Place it naturally in the H1, first paragraph, at least 2 H2 subheadings, and the conclusion.\n\n'
-    : '5. TARGET KEYWORD: Identify the best long-tail keyword to target (e.g., "OnePlus Nord 6 price in India April 2026"). Prefer date/event-specific keywords with low competition.\n\n') +
-  (targetLang === 'hi'
-    ? 'LANGUAGE: Write the ENTIRE article in Hindi (Devanagari script). All headings, paragraphs, FAQ questions and answers must be in Hindi. Only keep proper nouns, brand names, and technical terms in English where Hindi readers would expect them. Do NOT mix English sentences into the article body.\n\n'
-    : 'LANGUAGE: Write the ENTIRE article in English only. Do NOT include Hindi translations, Devanagari text, or Hindi sentences anywhere in the body, headings, or FAQ. Proper nouns and Indian-specific terms (₹, IST, city names) are fine.\n\n') +
-  'CONTENT STRUCTURE (800-1200 words):\n' +
-  '1. Opening paragraph: Lead with the most newsworthy fact (who, what, when, where, why). Hook the reader in the first sentence. Include the target keyword naturally.\n' +
-  '2. Key Details section (H2): Expand on the core facts with data, quotes, and context.\n' +
-  '3. Analysis/Impact section (H2): What does this mean? Why does it matter to Indian readers?\n' +
-  '4. Additional Context section (H2): Background, history, comparisons, or expert opinions.\n' +
-  '5. What\'s Next section (H2): Future implications, upcoming events, or expected developments.\n' +
-  '6. Each H2 subheading should contain a keyword variation or related search query.\n' +
-  '7. Use short paragraphs (2-3 sentences each).\n' +
-  '8. Include bullet points or numbered lists where appropriate.\n' +
-  '9. Naturally mention Indian context (₹ prices, IST times, Indian cities/states, Hindi terms in parentheses where relevant).\n\n' +
-  'FAQ SECTION:\n' +
-  'Generate 5-7 FAQ questions and answers based on the article content. These should:\n' +
-  '- Target "People Also Ask" queries related to the topic\n' +
-  '- Include long-tail keyword variations\n' +
-  '- Be genuine questions a reader would ask\n' +
-  '- Have concise, factual answers (2-3 sentences each)\n' +
-  '- Where appropriate, include a Hindi translation of the question in parentheses\n\n' +
-  'KEYWORD PLACEMENT (target 15-20 natural mentions):\n' +
-  '- Title/H1, meta description, slug\n' +
-  '- First paragraph, last paragraph\n' +
-  '- At least 2 of the H2 subheadings\n' +
-  '- FAQ questions\n' +
-  '- Do NOT keyword-stuff — every mention must read naturally\n\n' +
-  'HTML OUTPUT RULES:\n' +
-  '- Output clean HTML (no <html>, <head>, <body> tags)\n' +
-  '- Start with the first <p> tag\n' +
-  '- Use <h2> for subheadings (NOT <h1>)\n' +
-  '- Use <strong> for emphasis, <ul>/<ol> for lists\n' +
-  '- For FAQ section: use <h2>Frequently Asked Questions</h2> then <div class="faq-item"><h3>Question?</h3><p>Answer.</p></div> pattern\n' +
-  '- Do NOT include inline styles or CSS\n' +
-  '- Do NOT include <script> tags\n\n' +
-  ((s.customPrompt && s.customPrompt.trim())
-    ? 'ADDITIONAL INSTRUCTIONS FROM EDITOR:\n' + s.customPrompt.trim() + '\nFollow these additional instructions while also following all the above requirements.\n\n'
-    : '') +
-  'SOURCE ARTICLES:\n' +
+  '# CONTENT FILTER (BEFORE YOU WRITE)\n' +
+  'The source content has been pre-cleaned, but you must still ignore any of the following if they slip through:\n' +
+  '- Bylines, author names, "By X", "Updated by Y"\n' +
+  '- Navigation labels, menu items, breadcrumbs\n' +
+  '- Social-share strings ("Share on WhatsApp", "Tweet this", "Follow us on…")\n' +
+  '- "Also Read" / "Read More" / "Recommended" / "Trending Now" links and headings\n' +
+  '- Subscribe / newsletter / paywall prompts\n' +
+  '- Photo credits, "Representative Image", "File Photo", caption metadata\n' +
+  '- Ad markers ("Advertisement", "Sponsored", "Promoted")\n' +
+  'Treat these as noise. They are NOT part of the story and must NOT appear in your output.\n\n' +
+  '# REQUIRED STRUCTURE (600–800 WORDS, EXACTLY THIS ORDER)\n' +
+  '1. **HEADLINE** — 55–70 chars. Sharp, factual, click-worthy without being clickbait. Includes the primary keyword naturally. Rewrite — never copy a source headline verbatim.\n' +
+  '2. **IN BRIEF** — A 2–3 bullet "TL;DR" at the very top of the article body, formatted as <h2>In Brief</h2><ul><li>…</li></ul>. Each bullet is one fact, max 20 words.\n' +
+  '3. **OPENING PARAGRAPH** — Lead with the most newsworthy fact (who/what/when/where/why). Hook the reader in the first sentence. Include the target keyword naturally.\n' +
+  '4. **BODY** — 3–5 short H2 sections expanding the story: key details, context/background, analysis/impact for Indian readers, what\'s next. Each H2 subheading should contain a keyword variation or a related search query. Use short paragraphs (2–3 sentences each). Use <ul>/<ol> lists where appropriate.\n' +
+  '5. **FAQ** — Exactly 5–7 Q/A pairs, formatted as a JSON array (see OUTPUT FORMAT). Questions must mirror real "People Also Ask" queries. Answers are 2–3 sentences, factual, sourced from the article body.\n\n' +
+  '# SEMANTIC SEO RULES\n' +
+  '- Place the target keyword in: title/H1, first paragraph, meta description, slug, at least 2 H2 subheadings, FAQ questions, conclusion.\n' +
+  '- Use 3–6 LSI / related keywords throughout the body — never the same phrase twice in a row.\n' +
+  '- Match search intent (informational vs. transactional vs. navigational) — most news is informational; write accordingly.\n' +
+  '- Internal-link opportunity: do not invent links, but write the body so it would naturally accept 1–2 internal links to related ' + publicationName + ' coverage.\n' +
+  '- Cite specific numbers, dates, prices (₹), times (IST), and proper nouns wherever the sources support them.\n\n' +
+  '# TONE\n' +
+  '- Indian English news register: clear, neutral, confident.\n' +
+  '- No filler ("In today\'s fast-paced world…"), no AI tells ("As an AI…", "It\'s worth noting that…"), no hedging clichés.\n' +
+  '- Active voice. Concrete subjects. Short sentences.\n' +
+  '- Indian context (₹ prices, IST times, Indian cities/states) where relevant.\n\n' +
+  '# HEADLINE REWRITING RULES\n' +
+  '- Never reuse a source headline word-for-word.\n' +
+  '- Keep it factual — no exaggeration, no fake urgency, no ALL CAPS.\n' +
+  '- Front-load the most important keyword.\n' +
+  '- Test it against this sniff: would a serious news reader click and trust it? If not, rewrite.\n\n' +
+  languageBlock + '\n\n' +
+  keywordBlock + '\n\n' +
+  '# 10 ABSOLUTE RULES — NEVER BREAK THESE\n' +
+  '1. NEVER fabricate facts, names, numbers, dates, quotes, or events not present in the sources.\n' +
+  '2. NEVER copy more than 6 consecutive words from any single source. Synthesize.\n' +
+  '3. NEVER include "As an AI", "I cannot", "I am unable", or any meta-commentary about being a language model.\n' +
+  '4. NEVER include bylines, author names, dates of publication, or "Updated on…" lines from the sources.\n' +
+  '5. NEVER include "Also Read", "Read More", social-share text, or navigation fragments.\n' +
+  '6. NEVER include <script> tags, inline styles, <html>/<head>/<body> tags, or any non-content markup.\n' +
+  '7. NEVER drop below 600 words or exceed 800 words in the article body.\n' +
+  '8. NEVER produce an article in a language other than the one specified above.\n' +
+  '9. NEVER use clickbait punctuation (!!!, ???) or all-caps words for emphasis.\n' +
+  '10. NEVER skip the In Brief block or the FAQ section — both are mandatory.\n\n' +
+  '# HTML OUTPUT RULES (for the "content" field)\n' +
+  '- Output clean HTML only — no <html>, <head>, or <body> wrappers.\n' +
+  '- Start with <h2>In Brief</h2><ul>…</ul>, then the opening <p>, then body H2 sections.\n' +
+  '- Use <h2> for section subheadings (NOT <h1> — the title is rendered as H1 by the CMS).\n' +
+  '- Use <strong> for emphasis, <ul>/<ol> for lists, <blockquote> for source quotes.\n' +
+  '- Do NOT include the FAQ inside the "content" field — emit it as the structured "faq" array (the CMS renders it separately).\n' +
+  '- Do NOT include inline CSS or <script>.\n' +
+  customBlock + '\n' +
+  '# SOURCE ARTICLES\n' +
   sourceArticles + '\n\n' +
-  'OUTPUT FORMAT (respond in valid JSON only, no markdown code fences):\n' +
+  '# OUTPUT FORMAT\n' +
+  'Respond with VALID JSON ONLY. No markdown code fences. No prose before or after the JSON. The schema is:\n' +
   '{\n' +
-  '  "title": "SEO-optimized headline",\n' +
-  '  "slug": "url-friendly-slug",\n' +
+  '  "title": "SEO-optimized headline (55-70 chars)",\n' +
+  '  "slug": "url-friendly-slug-under-60-chars",\n' +
   '  "excerpt": "Google Discover summary under 160 chars",\n' +
-  '  "meta_description": "Meta description under 155 chars",\n' +
+  '  "meta_description": "Meta description under 155 chars, primary keyword in first 60 chars",\n' +
   '  "target_keyword": "primary long-tail keyword",\n' +
-  '  "related_keywords": ["keyword 2", "keyword 3", "keyword 4"],\n' +
-  '  "content": "<p>Full article HTML with H2s, lists, FAQ section...</p>",\n' +
+  '  "related_keywords": ["lsi keyword 2", "lsi keyword 3", "lsi keyword 4"],\n' +
+  '  "content": "<h2>In Brief</h2><ul><li>...</li></ul><p>Opening paragraph...</p><h2>Section heading</h2><p>...</p>",\n' +
   '  "faq": [\n' +
   '    {"question": "Q1?", "answer": "A1."},\n' +
   '    {"question": "Q2?", "answer": "A2."}\n' +
   '  ],\n' +
-  '  "word_count": 850\n' +
+  '  "word_count": 720\n' +
   '}';
 }
 
@@ -418,6 +507,17 @@ class ArticleRewriter {
       throw new Error(errMsg);
     }
 
+    // Resolve publication identity (used by master prompt)
+    var publicationName = opts.publicationName
+      || this._getSetting('PUBLICATION_NAME')
+      || process.env.PUBLICATION_NAME
+      || 'HDF News';
+    var publicationUrl  = opts.publicationUrl
+      || this._getSetting('PUBLICATION_URL')
+      || this._getSetting('WP_URL')
+      || process.env.WP_URL
+      || 'https://hdfnews.com';
+
     // Build the SEO prompt from article + cluster + user settings
     var promptSettings = {
       targetKeyword: opts.targetKeyword || '',
@@ -425,6 +525,8 @@ class ArticleRewriter {
       language: opts.language || 'en+hi',
       schemaTypes: opts.schemaTypes || 'NewsArticle,FAQPage,BreadcrumbList',
       customPrompt: opts.customPrompt || '',
+      publicationName: publicationName,
+      publicationUrl: publicationUrl,
     };
     var prompt = buildPrompt(article, cluster || { articles: [article] }, promptSettings);
 
