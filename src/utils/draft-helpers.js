@@ -758,23 +758,28 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
       throw new Error('No AI rewriter configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in Settings.');
     }
 
-    // Build a pseudo-article object for the rewriter
+    // Build a pseudo-article object for the rewriter.
+    // IMPORTANT: pass extracted_content (Readability-parsed) as the primary
+    // source — buildPrompt's source-loop and cleanSourceContent both prefer
+    // it over content_markdown. Falling back to content_markdown only when
+    // extraction has not yet populated extracted_content.
     var articleObj = {
       title: draft.extracted_title || draft.source_title || 'Untitled',
-      content_markdown: content,
       url: draft.source_url,
       domain: draft.source_domain,
+      language: draft.target_language === 'hi' ? 'hi' : 'en',
+      extracted_content: draft.extracted_content || '',
+      extracted_title: draft.extracted_title || draft.source_title || '',
+      extracted_byline: draft.extracted_byline || '',
+      content_markdown: content,
     };
 
-    // Build a pseudo-cluster with custom instructions
+    // Build a pseudo-cluster (single-article) so buildPrompt() runs through
+    // the same code path as the auto pipeline.
     var clusterObj = {
       topic: draft.target_keyword || draft.extracted_title || draft.source_title || 'News',
+      trends_boosted: false,
       articles: [articleObj],
-      customPrompt: customPrompt || '',
-      targetDomain: draft.target_domain || '',
-      targetPlatform: draft.target_platform || 'blogspot',
-      targetLanguage: draft.target_language || 'en+hi',
-      schemaTypes: draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList',
     };
 
     // Per-call AI overrides (provider, model) + draft settings
@@ -785,20 +790,17 @@ async function rewriteDraftContent(draftId, customPrompt, deps, aiOptions) {
     opts.schemaTypes = opts.schemaTypes || draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList';
     opts.customPrompt = opts.customPrompt || draft.custom_ai_instructions || customPrompt || '';
 
-    // Use rewriteSimple for draft content (returns HTML), falling back to rewrite (returns structured JSON)
-    var result;
-    if (typeof rewriter.rewriteSimple === 'function') {
-      result = await rewriter.rewriteSimple(content, opts.customPrompt || null, opts);
-    } else {
-      result = await rewriter.rewrite(articleObj, clusterObj, opts);
-    }
+    // ALWAYS use rewrite() so the master system prompt + cleanSourceContent
+    // pipeline runs. The legacy rewriteSimple() path bypassed buildPrompt
+    // entirely and used a tiny hardcoded system prompt — that caused drafts
+    // rewritten from the dashboard to ignore the master prompt rules.
+    var result = await rewriter.rewrite(articleObj, clusterObj, opts);
 
-    // Handle both response formats
-    var html = result.rewrittenContent || result.html || result.content || '';
+    var html = result.content || result.rewrittenContent || result.html || '';
     var title = result.title || draft.extracted_title || draft.source_title || '';
     var wordCount = result.wordCount || result.word_count || 0;
-    var model = result.model || result.aiModel || 'unknown';
-    var provider = result.provider || result.aiProvider || opts.provider || '';
+    var model = result.aiModel || result.model || 'unknown';
+    var provider = result.aiProvider || result.provider || opts.provider || '';
     var tokensUsed = result.tokensUsed || 0;
     var faqData = result.faq || result.faqs || [];
 

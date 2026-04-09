@@ -976,7 +976,8 @@ function createApiRouter(deps) {
       }
 
       var article = req.body.article;
-      return rewriter.rewrite(article)
+      var cluster = { topic: article.title || 'Test', trends_boosted: false, articles: [article] };
+      return rewriter.rewrite(article, cluster)
         .then(function (result) {
           res.json({ success: true, result: result });
         })
