@@ -619,8 +619,9 @@ class ArticleRewriter {
 
     this.stats = {
       totalRewrites: 0,
-      claudeCount: 0,
+      anthropicCount: 0,
       openaiCount: 0,
+      openrouterCount: 0,
       lastRewriteAt: null,
       totalTokens: 0,
     };
@@ -820,7 +821,6 @@ class ArticleRewriter {
       enableFallback: this._cfg.enableFallback,
       maxTokens: this._cfg.maxTokens,
       temperature: this._cfg.temperature,
-      models: AI_MODELS,
     };
   }
 
@@ -921,6 +921,9 @@ class ArticleRewriter {
       result.aiModel = primaryModel;
 
       this.stats.totalRewrites++;
+      if (provider === 'anthropic') this.stats.anthropicCount++;
+      else if (provider === 'openai') this.stats.openaiCount++;
+      else if (provider === 'openrouter') this.stats.openrouterCount++;
       this.stats.lastRewriteAt = new Date().toISOString();
       this.stats.totalTokens += result.tokensUsed || 0;
 
@@ -958,6 +961,9 @@ class ArticleRewriter {
           fbResult.usedFallback = true;
 
           self.stats.totalRewrites++;
+          if (fbProvider === 'anthropic') self.stats.anthropicCount++;
+          else if (fbProvider === 'openai') self.stats.openaiCount++;
+          else if (fbProvider === 'openrouter') self.stats.openrouterCount++;
           self.stats.lastRewriteAt = new Date().toISOString();
           self.stats.totalTokens += fbResult.tokensUsed || 0;
 
@@ -1212,8 +1218,9 @@ class ArticleRewriter {
   getStatus() {
     return {
       totalRewrites: this.stats.totalRewrites,
-      claudeCount: this.stats.claudeCount,
-      openaiCount: this.stats.openaiCount,
+      anthropicCount: this.stats.anthropicCount || 0,
+      openaiCount: this.stats.openaiCount || 0,
+      openrouterCount: this.stats.openrouterCount || 0,
       lastRewriteAt: this.stats.lastRewriteAt,
       totalTokens: this.stats.totalTokens,
     };
@@ -1228,6 +1235,31 @@ class ArticleRewriter {
 // ─── Dynamic OpenRouter Free Model Fetcher ─────────────────────────────
 // Fetches the real, currently-available list of free models from OpenRouter's
 // public /models endpoint. Cached for 1 hour to avoid hammering their API.
+
+// Detect reasoning models by ID keywords. Reasoning models consume
+// extra output tokens for their internal <think> phase and need
+// larger max_tokens budgets + special response handling.
+function isReasoningModel(id) {
+  if (!id) return false;
+  var lower = id.toLowerCase();
+  var reasoningPatterns = [
+    'deepseek-r1',
+    'deepseek/r1',
+    '/r1:',
+    '/r1-',
+    'qwq',
+    'nemotron',
+    'minimax-m2',
+    'nousresearch/deephermes',
+    'openai/o1',
+    'openai/o3',
+    'openai/o4',
+  ];
+  for (var i = 0; i < reasoningPatterns.length; i++) {
+    if (lower.indexOf(reasoningPatterns[i]) !== -1) return true;
+  }
+  return false;
+}
 
 var _openrouterModelCache = { models: null, fetchedAt: 0 };
 var OPENROUTER_CACHE_MS = 60 * 60 * 1000; // 1 hour
@@ -1273,11 +1305,14 @@ async function fetchOpenRouterFreeModels(forceRefresh) {
       var name = m.name || m.id;
       // Strip provider prefix from name for cleaner display
       var displayName = name.replace(/^[^:]+:\s*/, '');
+      var modelType = isReasoningModel(m.id) ? 'reasoning' : 'standard';
+      var displayLabel = displayName + (ctxLabel ? ' (' + ctxLabel + ')' : '');
+      if (modelType === 'reasoning') displayLabel += ' — reasoning';
       return {
         id: m.id,
-        name: displayName + (ctxLabel ? ' (' + ctxLabel + ')' : ''),
+        name: displayLabel,
         tier: 'Free',
-        type: 'standard',
+        type: modelType,
         contextLength: ctx,
       };
     });
