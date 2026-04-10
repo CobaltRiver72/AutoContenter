@@ -30,6 +30,15 @@ class FuelModule extends EventEmitter {
       citiesOk: 0,
       citiesFail: 0,
     };
+
+    this.postCreator = null;
+  }
+
+  /**
+   * Set the post creator instance (called from index.js after wiring).
+   */
+  setPostCreator(creator) {
+    this.postCreator = creator;
   }
 
   /**
@@ -52,6 +61,16 @@ class FuelModule extends EventEmitter {
         this.runAutofill().catch(err => {
           this.logger.error(MODULE, 'Autofill cron failed: ' + err.message);
         });
+      }, { timezone: tz }));
+
+      // 06:30 IST — Generate posts after fetch completes
+      this._cronJobs.push(cron.schedule('30 6 * * *', () => {
+        this.logger.info(MODULE, 'Post generation cron triggered');
+        if (this.postCreator) {
+          this.postCreator.runPostGeneration('petrol')
+            .then(() => this.postCreator.runPostGeneration('diesel'))
+            .catch(err => this.logger.error(MODULE, 'Post generation cron failed: ' + err.message));
+        }
       }, { timezone: tz }));
 
       this.enabled = true;

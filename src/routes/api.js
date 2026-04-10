@@ -78,7 +78,8 @@ function createApiRouter(deps) {
   router.get('/health', function (req, res) {
     try {
       var modules = [];
-      var sources = [firehose, trends, buffer, similarity, extractor, scheduler, infranodus];
+      var { fuel, metals } = req.app.locals.modules || {};
+      var sources = [firehose, trends, buffer, similarity, extractor, scheduler, infranodus, fuel, metals].filter(Boolean);
       for (var i = 0; i < sources.length; i++) {
         if (sources[i] && typeof sources[i].getHealth === 'function') {
           modules.push(sources[i].getHealth());
@@ -803,6 +804,90 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST GENERATION + WP ROUTES ───────────────────────────────────────
+
+  router.post('/fuel/generate-posts', function (req, res) {
+    try {
+      var fuelPosts = req.app.locals.modules.fuelPosts;
+      if (!fuelPosts) return res.status(503).json({ error: 'Fuel post creator not loaded' });
+      var fuelType = (req.body && req.body.fuelType) || 'both';
+      var results = {};
+
+      var chain = Promise.resolve();
+      if (fuelType === 'petrol' || fuelType === 'both') {
+        chain = chain.then(function() {
+          return fuelPosts.runPostGeneration('petrol').then(function(r) { results.petrol = r; });
+        });
+      }
+      if (fuelType === 'diesel' || fuelType === 'both') {
+        chain = chain.then(function() {
+          return fuelPosts.runPostGeneration('diesel').then(function(r) { results.diesel = r; });
+        });
+      }
+
+      chain.then(function() {
+        logger.info('api', 'Fuel post generation complete: ' + JSON.stringify(results));
+      }).catch(function(err) {
+        logger.error('api', 'Fuel post generation failed: ' + err.message);
+      });
+
+      res.json({ ok: true, message: 'Post generation started in background', results: results });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/metals/generate-posts', function (req, res) {
+    try {
+      var metalsPosts = req.app.locals.modules.metalsPosts;
+      if (!metalsPosts) return res.status(503).json({ error: 'Metals post creator not loaded' });
+      var metalType = (req.body && req.body.metalType) || 'all';
+      var results = {};
+      var types = metalType === 'all' ? ['gold', 'silver', 'platinum'] : [metalType];
+
+      var chain = Promise.resolve();
+      types.forEach(function(mt) {
+        chain = chain.then(function() {
+          return metalsPosts.runPostGeneration(mt).then(function(r) { results[mt] = r; });
+        });
+      });
+
+      chain.then(function() {
+        logger.info('api', 'Metals post generation complete: ' + JSON.stringify(results));
+      }).catch(function(err) {
+        logger.error('api', 'Metals post generation failed: ' + err.message);
+      });
+
+      res.json({ ok: true, message: 'Post generation started in background', results: results });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/wp/test', function (req, res) {
+    try {
+      var wpPub = req.app.locals.modules.wpPublisher;
+      if (!wpPub) return res.json({ ok: false, error: 'WP Publisher not loaded' });
+      wpPub.testConnection().then(function(result) {
+        res.json(result);
+      }).catch(function(err) {
+        res.json({ ok: false, error: err.message });
+      });
+    } catch (err) {
+      res.json({ ok: false, error: err.message });
+    }
+  });
+
+  router.get('/wp/health', function (req, res) {
+    try {
+      var wpPub = req.app.locals.modules.wpPublisher;
+      if (!wpPub) return res.json({ module: 'wp-publisher', status: 'not loaded', ready: false });
+      res.json(wpPub.getHealth());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ─── GET /api/settings ────────────────────────────────────────────────────
 
   router.get('/settings', function (req, res) {
@@ -878,6 +963,7 @@ function createApiRouter(deps) {
         'TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES',
         'PORT',
         'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY',
+        'WP_SITE_URL',
       ];
 
       var BLOCKED_KEYS = [
@@ -936,11 +1022,18 @@ function createApiRouter(deps) {
       loadRuntimeOverrides(db);
 
       // Re-initialize publisher if any WP credentials changed
-      var wpKeys = ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_POST_STATUS', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY'];
+      var wpKeys = ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_POST_STATUS', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_SITE_URL'];
       var hasWpChange = validEntries.some(function (e) { return wpKeys.indexOf(e[0]) !== -1; });
       if (hasWpChange && publisher && typeof publisher.reinit === 'function') {
         publisher.reinit();
         logger.info('api', 'Publisher re-initialized after WP settings change');
+      }
+      // Also re-init the fuel/metals WP publisher
+      if (hasWpChange) {
+        var wpPub = req.app.locals.modules.wpPublisher;
+        if (wpPub && typeof wpPub.init === 'function') {
+          wpPub.init().catch(function(e) { logger.warn('api', 'wpPublisher re-init failed: ' + e.message); });
+        }
       }
 
       logger.info('api', 'Settings updated', { keys: validEntries.map(function (e) { return e[0]; }) });

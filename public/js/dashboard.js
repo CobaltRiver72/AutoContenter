@@ -282,7 +282,7 @@
       case 'ready': loadReady(); break;
       case 'failed': loadFailedDrafts(); break;
       case 'published': loadPublished(); break;
-      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); break;
+      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
@@ -5357,6 +5357,82 @@
       .catch(function() {
         if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = '#ef4444'; }
       });
+  }
+
+  // ─── Post Generation Triggers ──────────────────────────────────────────
+
+  function triggerFuelPosts() {
+    if (!confirm('Generate/update all fuel WordPress posts?')) return;
+    var btn = $('fuelPostsBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating...'; }
+    fetchApi('/api/fuel/generate-posts', { method: 'POST', body: { fuelType: 'both' } })
+      .then(function(data) {
+        if (data.ok) {
+          showToast('Fuel post generation started in background', 'success');
+        } else {
+          showToast('Error: ' + (data.error || 'Unknown'), 'error');
+        }
+      })
+      .catch(function(err) { showToast('Error: ' + err.message, 'error'); })
+      .finally(function() { if (btn) { btn.disabled = false; btn.textContent = '📝 Generate Posts'; } });
+  }
+
+  function triggerMetalsPosts() {
+    if (!confirm('Generate/update all metals WordPress posts?')) return;
+    var btn = $('metalsPostsBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating...'; }
+    fetchApi('/api/metals/generate-posts', { method: 'POST', body: { metalType: 'all' } })
+      .then(function(data) {
+        if (data.ok) {
+          showToast('Metals post generation started in background', 'success');
+        } else {
+          showToast('Error: ' + (data.error || 'Unknown'), 'error');
+        }
+      })
+      .catch(function(err) { showToast('Error: ' + err.message, 'error'); })
+      .finally(function() { if (btn) { btn.disabled = false; btn.textContent = '📝 Generate Posts'; } });
+  }
+
+  function testWPConnection() {
+    var el = $('wp-test-result');
+    if (el) { el.textContent = 'Testing...'; el.style.color = '#888'; }
+    fetchApi('/api/wp/test', { method: 'POST' })
+      .then(function(data) {
+        if (el) {
+          el.textContent = data.ok ? '✅ Connected to ' + data.site : '❌ ' + (data.error || 'Failed');
+          el.style.color = data.ok ? '#10b981' : '#ef4444';
+        }
+      })
+      .catch(function(err) {
+        if (el) { el.textContent = '❌ ' + err.message; el.style.color = '#ef4444'; }
+      });
+  }
+
+  function saveWPPublishingSettings() {
+    var siteUrl = $('wp-site-url');
+    var username = $('wp-pub-username');
+    var password = $('wp-pub-password');
+    var updates = {};
+    if (siteUrl && siteUrl.value && siteUrl.value.indexOf('••') === -1) updates.WP_SITE_URL = siteUrl.value;
+    if (username && username.value && username.value.indexOf('••') === -1) updates.WP_USERNAME = username.value;
+    if (password && password.value && password.value.indexOf('••') === -1) updates.WP_APP_PASSWORD = password.value;
+    if (!Object.keys(updates).length) { showToast('No changes to save', 'info'); return; }
+    fetchApi('/api/settings', { method: 'PUT', body: updates })
+      .then(function() { showToast('WordPress settings saved', 'success'); })
+      .catch(function(err) { showToast('Save failed: ' + err.message, 'error'); });
+  }
+
+  function loadWPPublishingSettings() {
+    fetchApi('/api/settings').then(function(data) {
+      var s = data.settings || {};
+      var el;
+      el = $('wp-site-url');
+      if (el && s.WP_SITE_URL) el.value = s.WP_SITE_URL;
+      el = $('wp-pub-username');
+      if (el && s.WP_USERNAME) el.placeholder = s.WP_USERNAME;
+      el = $('wp-pub-password');
+      if (el && s.WP_APP_PASSWORD) el.placeholder = s.WP_APP_PASSWORD;
+    }).catch(function() {});
   }
 
   // ─── Sources Analytics Page ───────────────────────────────────────────────

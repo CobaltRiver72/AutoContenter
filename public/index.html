@@ -103,6 +103,8 @@
           <div class="health-card" id="health-publisher"><div class="health-dot"></div><div class="health-label">Publisher</div><div class="health-detail">--</div></div>
           <div class="health-card" id="health-scheduler"><div class="health-dot"></div><div class="health-label">Scheduler</div><div class="health-detail">--</div></div>
           <div class="health-card" id="health-infranodus"><div class="health-dot"></div><div class="health-label">InfraNodus</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-fuel"><div class="health-dot"></div><div class="health-label">Fuel</div><div class="health-detail">--</div></div>
+          <div class="health-card" id="health-metals"><div class="health-dot"></div><div class="health-label">Metals</div><div class="health-detail">--</div></div>
         </div>
 
         <div class="stats-grid" id="statsGrid">
@@ -451,6 +453,31 @@
           <button class="btn btn-purple btn-full" id="saveFuelMetalsSettingsBtn" style="margin-top:15px;" onclick="saveFuelMetalsSettings()">Save Fuel & Metals Keys</button>
         </div>
 
+        <!-- WordPress Publishing (Fuel/Metals) -->
+        <div class="settings-form" id="wp-publishing-settings-section">
+          <div class="settings-group">
+            <div class="settings-group-title">WordPress Publishing (Fuel & Metals Posts)</div>
+            <small style="color:#888;display:block;margin-bottom:12px;">WordPress REST API credentials for fuel/metals post publishing. Create an Application Password in WordPress under Users → Your Profile → Application Passwords.</small>
+            <div class="settings-row">
+              <label class="settings-label">Site URL</label>
+              <input type="url" id="wp-site-url" placeholder="https://hdfnews.com" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Username</label>
+              <input type="text" id="wp-pub-username" placeholder="autopub" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">App Password</label>
+              <input type="password" id="wp-pub-password" placeholder="xxxx xxxx xxxx xxxx" />
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <button class="btn btn-sm btn-secondary" onclick="testWPConnection()">🔗 Test Connection</button>
+              <button class="btn btn-purple" onclick="saveWPPublishingSettings()">💾 Save</button>
+            </div>
+            <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
+          </div>
+        </div>
+
         <!-- Other Settings (dynamically rendered) -->
         <div id="settingsForm" class="settings-form">
           <p class="placeholder-text">Loading...</p>
@@ -618,6 +645,7 @@
           <h2 class="page-title">Fuel Price Tracker</h2>
           <div class="page-actions">
             <button class="btn btn-sm btn-purple" id="fuelFetchBtn" onclick="triggerFuelFetch()">⚡ Fetch All Prices</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="fuelPostsBtn" onclick="triggerFuelPosts()">📝 Generate Posts</button>
             <button class="btn btn-sm btn-ghost" onclick="loadFuelPage()">↻ Refresh</button>
           </div>
         </div>
@@ -674,6 +702,7 @@
           <h2 class="page-title">Metals Price Tracker</h2>
           <div class="page-actions">
             <button class="btn btn-sm btn-purple" onclick="triggerMetalsFetch()">⚡ Fetch All Prices</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="metalsPostsBtn" onclick="triggerMetalsPosts()">📝 Generate Posts</button>
             <button class="btn btn-sm btn-ghost" onclick="loadMetalsPage()">↻ Refresh</button>
           </div>
         </div>

@@ -28,6 +28,15 @@ class MetalsModule extends EventEmitter {
       totalFetched: 0,
       lastFetchAt: null,
     };
+
+    this.postCreator = null;
+  }
+
+  /**
+   * Set the post creator instance (called from index.js after wiring).
+   */
+  setPostCreator(creator) {
+    this.postCreator = creator;
   }
 
   /**
@@ -49,6 +58,17 @@ class MetalsModule extends EventEmitter {
         this.runAutofill().catch(err => {
           this.logger.error(MODULE, 'Metals autofill cron failed: ' + err.message);
         });
+      }, { timezone: tz }));
+
+      // 07:30 IST — Generate posts after fetch + autofill
+      this._cronJobs.push(cron.schedule('30 7 * * *', () => {
+        this.logger.info(MODULE, 'Post generation cron triggered');
+        if (this.postCreator) {
+          this.postCreator.runPostGeneration('gold')
+            .then(() => this.postCreator.runPostGeneration('silver'))
+            .then(() => this.postCreator.runPostGeneration('platinum'))
+            .catch(err => this.logger.error(MODULE, 'Post generation cron failed: ' + err.message));
+        }
       }, { timezone: tz }));
 
       this.enabled = true;
