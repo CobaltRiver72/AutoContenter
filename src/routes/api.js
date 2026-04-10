@@ -520,6 +520,128 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/sources/stats ───────────────────────────────────────────────
+  // Per-domain article statistics for the Sources analytics page.
+
+  router.get('/sources/stats', function (req, res) {
+    try {
+      // ── 1. Per-domain summary ──────────────────────────────────────────────
+      var domainRows = db.prepare(`
+        SELECT
+          domain,
+          COUNT(*)                                                AS total,
+          SUM(CASE WHEN language = 'en' THEN 1 ELSE 0 END)       AS en_count,
+          SUM(CASE WHEN language = 'hi' THEN 1 ELSE 0 END)       AS hi_count,
+          SUM(CASE WHEN language NOT IN ('en','hi') AND language IS NOT NULL
+                   THEN 1 ELSE 0 END)                            AS other_count,
+          SUM(CASE WHEN language IS NULL THEN 1 ELSE 0 END)      AS unknown_count,
+          SUM(CASE WHEN cluster_id IS NOT NULL THEN 1 ELSE 0 END) AS clustered_count,
+          SUM(CASE WHEN trends_matched > 0 THEN 1 ELSE 0 END)    AS trending_count,
+          MIN(authority_tier)                                     AS best_tier,
+          MAX(received_at)                                        AS last_seen,
+          MIN(received_at)                                        AS first_seen,
+          GROUP_CONCAT(DISTINCT page_category)                   AS categories
+        FROM articles
+        GROUP BY domain
+        ORDER BY total DESC
+        LIMIT 100
+      `).all();
+
+      // ── 2. Draft conversion per domain ────────────────────────────────────
+      var draftRows = db.prepare(`
+        SELECT source_domain AS domain, COUNT(*) AS draft_count
+        FROM drafts
+        WHERE source_domain IS NOT NULL AND source_domain != ''
+        GROUP BY source_domain
+      `).all();
+      var draftMap = {};
+      draftRows.forEach(function(r) { draftMap[r.domain] = r.draft_count; });
+
+      // ── 3. Articles per day per domain — last 7 days (top 10 domains only) ─
+      var topDomains = domainRows.slice(0, 10).map(function(r) { return r.domain; });
+      var sparklineRows = [];
+      if (topDomains.length > 0) {
+        var placeholders = topDomains.map(function() { return '?'; }).join(',');
+        sparklineRows = db.prepare(`
+          SELECT
+            domain,
+            DATE(received_at) AS day,
+            COUNT(*)          AS count
+          FROM articles
+          WHERE received_at >= DATE('now', '-7 days')
+            AND domain IN (` + placeholders + `)
+          GROUP BY domain, day
+          ORDER BY domain, day
+        `).all(topDomains);
+      }
+
+      // ── 4. Language totals ────────────────────────────────────────────────
+      var langTotals = db.prepare(`
+        SELECT
+          COALESCE(language, 'unknown') AS language,
+          COUNT(*) AS count
+        FROM articles
+        GROUP BY language
+        ORDER BY count DESC
+      `).all();
+
+      // ── 5. Category totals ────────────────────────────────────────────────
+      var categoryTotals = db.prepare(`
+        SELECT
+          COALESCE(page_category, 'uncategorized') AS category,
+          COUNT(*) AS count
+        FROM articles
+        GROUP BY page_category
+        ORDER BY count DESC
+        LIMIT 20
+      `).all();
+
+      // ── 6. Stale domains (no article in last 24h) ─────────────────────────
+      var staleDomains = db.prepare(`
+        SELECT domain, MAX(received_at) AS last_seen, COUNT(*) AS total
+        FROM articles
+        GROUP BY domain
+        HAVING last_seen < datetime('now', '-24 hours')
+        ORDER BY last_seen DESC
+        LIMIT 20
+      `).all();
+
+      // ── 7. New domains today ──────────────────────────────────────────────
+      var newToday = db.prepare(`
+        SELECT domain, MIN(received_at) AS first_seen, COUNT(*) AS count
+        FROM articles
+        GROUP BY domain
+        HAVING DATE(first_seen) = DATE('now')
+        ORDER BY first_seen DESC
+      `).all();
+
+      // Attach draft counts to domain rows
+      domainRows.forEach(function(r) {
+        r.draft_count = draftMap[r.domain] || 0;
+        r.draft_rate = r.total > 0 ? Math.round((r.draft_count / r.total) * 100) : 0;
+        r.cluster_rate = r.total > 0 ? Math.round((r.clustered_count / r.total) * 100) : 0;
+      });
+
+      res.json({
+        domains: domainRows,
+        sparklines: sparklineRows,
+        langTotals: langTotals,
+        categoryTotals: categoryTotals,
+        staleDomains: staleDomains,
+        newToday: newToday,
+        summary: {
+          totalDomains: domainRows.length,
+          totalArticles: domainRows.reduce(function(s, r) { return s + r.total; }, 0),
+          staleDomainCount: staleDomains.length,
+          newDomainCount: newToday.length,
+        }
+      });
+    } catch (err) {
+      logger.error('api', 'Failed to fetch sources stats', err.message);
+      res.status(500).json({ error: 'Failed to fetch sources stats' });
+    }
+  });
+
   // ─── GET /api/settings ────────────────────────────────────────────────────
 
   router.get('/settings', function (req, res) {

@@ -284,6 +284,7 @@
       case 'published': loadPublished(); break;
       case 'settings': loadSettings(); loadAISettings(); break;
       case 'logs': loadLogs(); break;
+      case 'sources': loadSourcesPage(); break;
     }
 
     // Close sidebar on mobile
@@ -5102,6 +5103,183 @@
     // Pre-fetch OpenRouter models so the editor's model picker works even
     // before the user visits the Settings page. Cached server-side for 1h.
     __loadOpenRouterModels();
+  }
+
+  // ─── Sources Analytics Page ───────────────────────────────────────────────
+
+  var _sourcesData = null;
+  var _sourcesSortKey = 'total';
+  var _sourcesSortDir = -1;
+
+  function loadSourcesPage() {
+    fetchApi('/api/sources/stats')
+      .then(function(data) {
+        _sourcesData = data;
+        renderSourcesSummary(data.summary);
+        renderSourcesLangChart(data.langTotals);
+        renderSourcesCatChart(data.categoryTotals);
+        renderSourcesTable(data.domains, data.sparklines);
+        renderSourcesStaleList(data.staleDomains);
+        renderSourcesNewList(data.newToday);
+      })
+      .catch(function(err) {
+        console.error('Sources stats failed:', err);
+      });
+  }
+
+  function renderSourcesSummary(s) {
+    var set = function(id, val) { var el = $(id); if (el) el.textContent = val; };
+    set('src-total-domains',  s.totalDomains.toLocaleString());
+    set('src-total-articles', s.totalArticles.toLocaleString());
+    set('src-stale-domains',  s.staleDomainCount);
+    set('src-new-today',      s.newDomainCount);
+  }
+
+  function renderSourcesLangChart(langTotals) {
+    var canvas = document.getElementById('sources-lang-chart');
+    if (!canvas || !window.Chart) return;
+    if (canvas._chartInstance) canvas._chartInstance.destroy();
+    var labels = langTotals.map(function(r) { return (r.language || 'unknown').toUpperCase(); });
+    var values = langTotals.map(function(r) { return r.count; });
+    var colors = ['#4a7aff','#10b981','#f59e0b','#ef4444','#8b5cf6','#6b7280'];
+    canvas._chartInstance = new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{ data: values, backgroundColor: colors.slice(0, labels.length), borderWidth: 0 }]
+      },
+      options: { plugins: { legend: { position: 'right' } }, maintainAspectRatio: false }
+    });
+  }
+
+  function renderSourcesCatChart(catTotals) {
+    var canvas = document.getElementById('sources-cat-chart');
+    if (!canvas || !window.Chart) return;
+    if (canvas._chartInstance) canvas._chartInstance.destroy();
+    var top10 = catTotals.slice(0, 10);
+    var labels = top10.map(function(r) { return r.category; });
+    var values = top10.map(function(r) { return r.count; });
+    canvas._chartInstance = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{ label: 'Articles', data: values, backgroundColor: '#4a7aff', borderRadius: 4 }]
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        maintainAspectRatio: false,
+        scales: { x: { grid: { color: 'rgba(255,255,255,0.05)' } }, y: { grid: { display: false } } }
+      }
+    });
+  }
+
+  function renderSourcesTable(domains, sparklines) {
+    var sparkMap = {};
+    (sparklines || []).forEach(function(r) {
+      if (!sparkMap[r.domain]) sparkMap[r.domain] = {};
+      sparkMap[r.domain][r.day] = r.count;
+    });
+    var days = [];
+    for (var i = 6; i >= 0; i--) {
+      var d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+
+    var sorted = (domains || []).slice().sort(function(a, b) {
+      var av = a[_sourcesSortKey] || 0;
+      var bv = b[_sourcesSortKey] || 0;
+      if (typeof av === 'string') return _sourcesSortDir * av.localeCompare(bv);
+      return _sourcesSortDir * (bv - av);
+    });
+
+    var search = ($('sources-domain-search') || {}).value || '';
+    if (search) {
+      sorted = sorted.filter(function(r) { return r.domain.toLowerCase().includes(search.toLowerCase()); });
+    }
+
+    var tbody = $('sources-domain-tbody');
+    if (!tbody) return;
+    if (!sorted.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#888;">No data yet</td></tr>';
+      return;
+    }
+
+    var rows = sorted.map(function(r) {
+      var lastMs = r.last_seen ? Date.now() - new Date(r.last_seen).getTime() : Infinity;
+      var lastLabel = r.last_seen ? timeAgo(r.last_seen) : 'never';
+      var freshColor = lastMs < 3600000 ? '#10b981' : lastMs < 86400000 ? '#f59e0b' : '#ef4444';
+
+      var spark = '';
+      if (sparkMap[r.domain]) {
+        var vals = days.map(function(d) { return sparkMap[r.domain][d] || 0; });
+        var maxV = Math.max.apply(null, vals) || 1;
+        var bars = vals.map(function(v, i) {
+          var h = Math.max(2, Math.round((v / maxV) * 24));
+          var x = i * 9;
+          var y = 24 - h;
+          return '<rect x="' + x + '" y="' + y + '" width="7" height="' + h + '" fill="#4a7aff" rx="1"/>';
+        }).join('');
+        spark = '<svg width="63" height="24" style="display:block">' + bars + '</svg>';
+      } else {
+        spark = '<span style="color:#555;font-size:11px;">—</span>';
+      }
+
+      var cats = (r.categories || '').split(',').filter(Boolean).slice(0, 3)
+        .map(function(c) { return '<span style="background:var(--bg3);border-radius:4px;padding:1px 5px;font-size:11px;margin-right:2px;">' + escapeHtml(c) + '</span>'; }).join('');
+
+      return '<tr>' +
+        '<td><a href="https://' + escapeHtml(r.domain) + '" target="_blank" style="color:var(--accent)">' + escapeHtml(r.domain) + '</a></td>' +
+        '<td><strong>' + r.total.toLocaleString() + '</strong></td>' +
+        '<td style="color:#4a7aff">' + (r.en_count || 0).toLocaleString() + '</td>' +
+        '<td style="color:#10b981">' + (r.hi_count || 0).toLocaleString() + '</td>' +
+        '<td>' + (r.cluster_rate || 0) + '%</td>' +
+        '<td>' + (r.draft_rate || 0) + '%</td>' +
+        '<td>' + (cats || '<span style="color:#555">—</span>') + '</td>' +
+        '<td style="color:' + freshColor + '">' + lastLabel + '</td>' +
+        '<td>' + spark + '</td>' +
+        '</tr>';
+    }).join('');
+    tbody.innerHTML = rows;
+  }
+
+  function filterSourcesTable(val) {
+    if (_sourcesData) renderSourcesTable(_sourcesData.domains, _sourcesData.sparklines);
+  }
+
+  function sortSourcesTable(key) {
+    if (_sourcesSortKey === key) {
+      _sourcesSortDir *= -1;
+    } else {
+      _sourcesSortKey = key;
+      _sourcesSortDir = -1;
+    }
+    if (_sourcesData) renderSourcesTable(_sourcesData.domains, _sourcesData.sparklines);
+  }
+
+  function renderSourcesStaleList(stale) {
+    var el = $('sources-stale-list');
+    if (!el) return;
+    if (!stale || !stale.length) { el.innerHTML = '<p style="color:#888">All domains active ✓</p>'; return; }
+    el.innerHTML = stale.map(function(r) {
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">' +
+        '<span style="color:var(--text)">' + escapeHtml(r.domain) + '</span>' +
+        '<span style="color:#ef4444;font-size:12px;">' + timeAgo(r.last_seen) + ' ago · ' + r.total + ' total</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderSourcesNewList(newDomains) {
+    var el = $('sources-new-list');
+    if (!el) return;
+    if (!newDomains || !newDomains.length) { el.innerHTML = '<p style="color:#888">No new domains today</p>'; return; }
+    el.innerHTML = newDomains.map(function(r) {
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">' +
+        '<span style="color:var(--text)">' + escapeHtml(r.domain) + '</span>' +
+        '<span style="color:#10b981;font-size:12px;">' + r.count + ' articles</span>' +
+        '</div>';
+    }).join('');
   }
 
   // Wait for DOM

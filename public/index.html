@@ -47,6 +47,9 @@
       <a href="#logs" class="nav-link" data-page="logs">
         <span class="nav-icon">&#9783;</span> Logs
       </a>
+      <a href="#sources" class="nav-link" data-page="sources">
+        📡 Sources
+      </a>
     </nav>
     <div class="sidebar-footer">
       <a href="/logout" class="nav-link logout-link">
@@ -502,6 +505,78 @@
           <p class="placeholder-text">Loading...</p>
         </div>
         <div id="logsPagination" class="pagination"></div>
+      </section>
+
+      <!-- ═══════════════════════════ SOURCES PAGE ══════════════════════════ -->
+      <section class="page hidden" id="page-sources">
+        <div class="page-header">
+          <h2 class="page-title">Sources Analytics</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm btn-ghost" id="sourcesRefreshBtn" onclick="loadSourcesPage()">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Summary cards row -->
+        <div class="stats-grid" id="sources-summary-cards" style="margin-bottom:20px;">
+          <div class="stat-card"><div class="stat-value" id="src-total-domains">—</div><div class="stat-label">Total Domains</div></div>
+          <div class="stat-card"><div class="stat-value" id="src-total-articles">—</div><div class="stat-label">Total Articles</div></div>
+          <div class="stat-card"><div class="stat-value" id="src-stale-domains">—</div><div class="stat-label">Stale (24h+)</div></div>
+          <div class="stat-card"><div class="stat-value" id="src-new-today">—</div><div class="stat-label">New Domains Today</div></div>
+        </div>
+
+        <!-- Two-column charts row -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+          <div class="card">
+            <div class="card-title">Language Split</div>
+            <canvas id="sources-lang-chart" height="200"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-title">Top Categories</div>
+            <canvas id="sources-cat-chart" height="200"></canvas>
+          </div>
+        </div>
+
+        <!-- Domain table with search -->
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>All Domains</span>
+            <input type="text" id="sources-domain-search" placeholder="Filter domains..."
+              style="padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg2); color:var(--text); font-size:13px; width:220px;"
+              oninput="filterSourcesTable(this.value)">
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table" id="sources-domain-table">
+              <thead>
+                <tr>
+                  <th onclick="sortSourcesTable('domain')">Domain ↕</th>
+                  <th onclick="sortSourcesTable('total')">Articles ↕</th>
+                  <th>🇬🇧 EN</th>
+                  <th>🇮🇳 HI</th>
+                  <th onclick="sortSourcesTable('cluster_rate')">Cluster % ↕</th>
+                  <th onclick="sortSourcesTable('draft_rate')">Draft % ↕</th>
+                  <th>Categories</th>
+                  <th onclick="sortSourcesTable('last_seen')">Last Seen ↕</th>
+                  <th>7-day trend</th>
+                </tr>
+              </thead>
+              <tbody id="sources-domain-tbody">
+                <tr><td colspan="9" style="text-align:center; color:#888;">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Stale domains + new domains row -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <div class="card">
+            <div class="card-title">🕸️ Stale Domains (silent 24h+)</div>
+            <div id="sources-stale-list" style="font-size:13px;"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">🆕 New Domains Today</div>
+            <div id="sources-new-list" style="font-size:13px;"></div>
+          </div>
+        </div>
       </section>
 
     </main>
