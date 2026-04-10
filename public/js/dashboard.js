@@ -282,9 +282,11 @@
       case 'ready': loadReady(); break;
       case 'failed': loadFailedDrafts(); break;
       case 'published': loadPublished(); break;
-      case 'settings': loadSettings(); loadAISettings(); break;
+      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
+      case 'fuel': loadFuelPage(); break;
+      case 'metals': loadMetalsPage(); break;
     }
 
     // Close sidebar on mobile
@@ -5103,6 +5105,258 @@
     // Pre-fetch OpenRouter models so the editor's model picker works even
     // before the user visits the Settings page. Cached server-side for 1h.
     __loadOpenRouterModels();
+  }
+
+  // ─── Fuel Page ──────────────────────────────────────────────────────────
+
+  var _fuelCitiesData = [];
+  var _fuelStatesData = [];
+
+  function loadFuelPage() {
+    fetchApi('/api/fuel/summary').then(function(data) {
+      var set = function(id, val) { var el = $(id); if (el) el.textContent = val; };
+      set('fuel-total-cities', data.total || 0);
+      set('fuel-fetched-today', data.fetched || 0);
+      set('fuel-missing-today', data.missing || 0);
+      set('fuel-last-fetch', data.lastFetchAt ? timeAgo(data.lastFetchAt) : 'Never');
+    });
+
+    fetchApi('/api/fuel/states').then(function(data) {
+      _fuelStatesData = data.data || [];
+      var tbody = $('fuel-states-tbody');
+      if (!tbody) return;
+      var sel = $('fuel-state-filter');
+      if (sel && sel.options.length <= 1) {
+        _fuelStatesData.forEach(function(s) {
+          var o = document.createElement('option');
+          o.value = s.state; o.textContent = s.state;
+          sel.appendChild(o);
+        });
+      }
+      tbody.innerHTML = _fuelStatesData.map(function(s) {
+        return '<tr><td>' + escapeHtml(s.state) + '</td><td>' + s.total_cities +
+          '</td><td style="color:#10b981">' + (s.fetched || 0) +
+          '</td><td>' + (s.avg_petrol ? '₹' + s.avg_petrol : '—') +
+          '</td><td>' + (s.avg_diesel ? '₹' + s.avg_diesel : '—') + '</td></tr>';
+      }).join('');
+    });
+
+    fetchApi('/api/fuel/cities').then(function(data) {
+      _fuelCitiesData = data.data || [];
+      renderFuelCities(_fuelCitiesData);
+    });
+
+    fetchApi('/api/fuel/history?city=Delhi&days=30').then(function(data) {
+      renderFuelNationalChart(data);
+    }).catch(function() {});
+  }
+
+  function renderFuelCities(cities) {
+    var tbody = $('fuel-cities-tbody');
+    if (!tbody) return;
+    if (!cities.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">No data</td></tr>'; return; }
+    tbody.innerHTML = cities.map(function(c) {
+      var pColor = c.petrol > 0 ? 'var(--text)' : '#ef4444';
+      var dColor = c.diesel > 0 ? 'var(--text)' : '#ef4444';
+      return '<tr><td><strong>' + escapeHtml(c.city_name) + '</strong></td>' +
+        '<td>' + escapeHtml(c.state) + '</td>' +
+        '<td style="color:' + pColor + '">' + (c.petrol ? '₹' + Number(c.petrol).toFixed(2) : '—') + '</td>' +
+        '<td style="color:' + dColor + '">' + (c.diesel ? '₹' + Number(c.diesel).toFixed(2) : '—') + '</td>' +
+        '<td><span style="font-size:11px;background:var(--bg3);padding:2px 6px;border-radius:4px;">' + (c.source || '—') + '</span></td>' +
+        '<td style="font-size:12px;color:#888">' + (c.price_date || '—') + '</td></tr>';
+    }).join('');
+  }
+
+  function filterFuelCities() {
+    var state = ($('fuel-state-filter') || {}).value || '';
+    var search = ($('fuel-city-search') || {}).value || '';
+    var filtered = _fuelCitiesData.filter(function(c) {
+      if (state && c.state !== state) return false;
+      if (search && c.city_name.toLowerCase().indexOf(search.toLowerCase()) === -1) return false;
+      return true;
+    });
+    renderFuelCities(filtered);
+  }
+
+  function renderFuelNationalChart(data) {
+    var canvas = document.getElementById('fuel-national-chart');
+    if (!canvas || !window.Chart) return;
+    if (canvas._chartInstance) canvas._chartInstance.destroy();
+    canvas._chartInstance = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: data.labels || [],
+        datasets: [
+          { label: 'Petrol', data: data.petrol || [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.3, fill: true },
+          { label: 'Diesel', data: data.diesel || [], borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.3, fill: true },
+        ]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+  }
+
+  function triggerFuelFetch() {
+    var btn = $('fuelFetchBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Fetching...'; }
+    fetchApi('/api/fuel/fetch', { method: 'POST' })
+      .then(function() { showToast('Fuel fetch started', 'info'); })
+      .catch(function(err) { showToast('Fetch failed: ' + err.message, 'error'); })
+      .finally(function() {
+        if (btn) { btn.disabled = false; btn.textContent = '⚡ Fetch All Prices'; }
+      });
+  }
+
+  // ─── Metals Page ────────────────────────────────────────────────────────
+
+  var _currentMetal = 'gold';
+  var _metalsCitiesData = [];
+
+  function loadMetalsPage() {
+    fetchMetalsData(_currentMetal);
+  }
+
+  function switchMetal(metal) {
+    _currentMetal = metal;
+    ['gold','silver','platinum'].forEach(function(m) {
+      var btn = $('metal-btn-' + m);
+      if (!btn) return;
+      if (m === metal) {
+        btn.style.background = m === 'gold' ? '#f59e0b' : m === 'silver' ? '#9ca3af' : '#a78bfa';
+        btn.style.color = '#000';
+        btn.className = 'btn btn-sm';
+      } else {
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.className = 'btn btn-sm btn-ghost';
+      }
+    });
+    fetchMetalsData(metal);
+  }
+
+  function fetchMetalsData(metal) {
+    fetchApi('/api/metals/summary').then(function(data) {
+      var set = function(id, val) { var el = $(id); if (el) el.textContent = val; };
+      var metalData = data[metal] || data;
+      set('metals-total-cities', metalData.total || data.total || 0);
+      set('metals-fetched-today', metalData.fetched || data.fetched || 0);
+      set('metals-avg-price', metalData.avgPrice ? '₹' + Number(metalData.avgPrice).toLocaleString() : '—');
+      set('metals-last-fetch', data.lastFetchAt ? timeAgo(data.lastFetchAt) : 'Never');
+    });
+
+    fetchApi('/api/metals/cities?metal=' + metal).then(function(data) {
+      _metalsCitiesData = data.data || [];
+      var tbody = $('metals-cities-tbody');
+      if (!tbody) return;
+      if (!_metalsCitiesData.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888">No data</td></tr>'; return; }
+      tbody.innerHTML = _metalsCitiesData.filter(function(c) {
+        return c.price_24k > 0 || c.price_1g > 0;
+      }).slice(0, 50).map(function(c) {
+        return '<tr><td><strong>' + escapeHtml(c.city_name) + '</strong></td>' +
+          '<td>' + (c.price_24k ? '₹' + Number(c.price_24k).toLocaleString() : '—') + '</td>' +
+          '<td>' + (c.price_22k ? '₹' + Number(c.price_22k).toLocaleString() : '—') + '</td>' +
+          '<td>' + (c.price_18k ? '₹' + Number(c.price_18k).toLocaleString() : '—') + '</td>' +
+          '<td>' + (c.price_1g ? '₹' + Number(c.price_1g).toFixed(2) : '—') + '</td></tr>';
+      }).join('');
+    });
+
+    var chartTitle = $('metals-chart-title');
+    if (chartTitle) chartTitle.textContent = metal.charAt(0).toUpperCase() + metal.slice(1) + ' National Trend (30d)';
+
+    fetchApi('/api/metals/history?city=Delhi&metal=' + metal + '&days=30').then(function(data) {
+      var canvas = document.getElementById('metals-national-chart');
+      if (!canvas || !window.Chart) return;
+      if (canvas._chartInstance) canvas._chartInstance.destroy();
+      var priceKey = metal === 'gold' ? 'price_24k' : 'price_1g';
+      var label = metal === 'gold' ? '24K per 10g' : 'Per gram';
+      var color = metal === 'gold' ? '#f59e0b' : metal === 'silver' ? '#9ca3af' : '#a78bfa';
+      canvas._chartInstance = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: data.labels || [],
+          datasets: [{
+            label: label,
+            data: data[priceKey] || [],
+            borderColor: color,
+            backgroundColor: color + '22',
+            tension: 0.3, fill: true
+          }]
+        },
+        options: {
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.05)' } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' } }
+          }
+        }
+      });
+    }).catch(function() {});
+  }
+
+  function triggerMetalsFetch() {
+    fetchApi('/api/metals/fetch', { method: 'POST' })
+      .then(function() { showToast('Metals fetch started', 'info'); })
+      .catch(function(err) { showToast('Fetch failed: ' + err.message, 'error'); });
+  }
+
+  // ─── Fuel & Metals Settings ─────────────────────────────────────────────
+
+  function loadFuelMetalsSettings() {
+    fetchApi('/api/settings').then(function(data) {
+      var s = data.settings || {};
+      var el;
+      el = $('fuel-rapidapi-key');
+      if (el && s.FUEL_RAPIDAPI_KEY) el.placeholder = s.FUEL_RAPIDAPI_KEY;
+      el = $('metals-rapidapi-key');
+      if (el && s.METALS_RAPIDAPI_KEY) el.placeholder = s.METALS_RAPIDAPI_KEY;
+    }).catch(function() {});
+  }
+
+  function saveFuelMetalsSettings() {
+    var fuelKey = $('fuel-rapidapi-key');
+    var metalsKey = $('metals-rapidapi-key');
+    var updates = {};
+    if (fuelKey && fuelKey.value && fuelKey.value.indexOf('••') === -1) {
+      updates.FUEL_RAPIDAPI_KEY = fuelKey.value;
+    }
+    if (metalsKey && metalsKey.value && metalsKey.value.indexOf('••') === -1) {
+      updates.METALS_RAPIDAPI_KEY = metalsKey.value;
+    }
+    if (!Object.keys(updates).length) { showToast('No changes to save', 'info'); return; }
+    fetchApi('/api/settings', { method: 'PUT', body: updates })
+      .then(function() { showToast('API keys saved', 'success'); })
+      .catch(function(err) { showToast('Save failed: ' + err.message, 'error'); });
+  }
+
+  function testFuelApi() {
+    var statusEl = $('fuel-key-status');
+    if (statusEl) statusEl.textContent = 'Testing...';
+    fetchApi('/api/fuel/summary')
+      .then(function(data) {
+        if (statusEl) { statusEl.textContent = 'Connected — ' + (data.total || 0) + ' cities'; statusEl.style.color = '#10b981'; }
+      })
+      .catch(function() {
+        if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = '#ef4444'; }
+      });
+  }
+
+  function testMetalsApi() {
+    var statusEl = $('metals-key-status');
+    if (statusEl) statusEl.textContent = 'Testing...';
+    fetchApi('/api/metals/summary')
+      .then(function(data) {
+        if (statusEl) { statusEl.textContent = 'Connected — ' + (data.total || 0) + ' cities'; statusEl.style.color = '#10b981'; }
+      })
+      .catch(function() {
+        if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = '#ef4444'; }
+      });
   }
 
   // ─── Sources Analytics Page ───────────────────────────────────────────────

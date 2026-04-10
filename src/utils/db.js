@@ -418,6 +418,94 @@ function runMigrations() {
       }
     })();
 
+    // ═══════════════════════════════════════════════════════════════════
+    // FUEL MODULE TABLES
+    // ═══════════════════════════════════════════════════════════════════
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fuel_cities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        city_name TEXT NOT NULL,
+        state TEXT NOT NULL,
+        is_ut INTEGER DEFAULT 0,
+        region TEXT,
+        api3_city TEXT,
+        is_top_city INTEGER DEFAULT 0,
+        is_enabled INTEGER DEFAULT 1,
+        has_post INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(city_name, state)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_fuel_cities_state ON fuel_cities(state);
+      CREATE INDEX IF NOT EXISTS idx_fuel_cities_enabled ON fuel_cities(is_enabled);
+
+      CREATE TABLE IF NOT EXISTS fuel_prices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        city TEXT NOT NULL,
+        state TEXT NOT NULL,
+        petrol REAL,
+        diesel REAL,
+        price_date TEXT NOT NULL,
+        source TEXT DEFAULT 'api3',
+        fetched_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(city, price_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_fuel_prices_city ON fuel_prices(city);
+      CREATE INDEX IF NOT EXISTS idx_fuel_prices_date ON fuel_prices(price_date);
+      CREATE INDEX IF NOT EXISTS idx_fuel_prices_state_date ON fuel_prices(state, price_date);
+      CREATE INDEX IF NOT EXISTS idx_fuel_prices_city_date ON fuel_prices(city, price_date);
+
+      CREATE TABLE IF NOT EXISTS fuel_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        log_type TEXT DEFAULT 'info',
+        source TEXT,
+        message TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      -- ═══════════════════════════════════════════════════════════════════
+      -- METALS MODULE TABLES
+      -- ═══════════════════════════════════════════════════════════════════
+
+      CREATE TABLE IF NOT EXISTS metals_cities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        city_name TEXT NOT NULL,
+        state TEXT NOT NULL,
+        api1_name TEXT,
+        is_active INTEGER DEFAULT 1,
+        UNIQUE(city_name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_metals_cities_state ON metals_cities(state);
+
+      CREATE TABLE IF NOT EXISTS metals_prices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        city TEXT NOT NULL,
+        metal_type TEXT NOT NULL,
+        price_24k REAL,
+        price_22k REAL,
+        price_18k REAL,
+        price_1g REAL,
+        price_date TEXT NOT NULL,
+        source TEXT DEFAULT 'api1',
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(city, metal_type, price_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_metals_prices_city ON metals_prices(city);
+      CREATE INDEX IF NOT EXISTS idx_metals_prices_date ON metals_prices(price_date);
+      CREATE INDEX IF NOT EXISTS idx_metals_prices_metal_date ON metals_prices(metal_type, price_date);
+      CREATE INDEX IF NOT EXISTS idx_metals_prices_city_metal ON metals_prices(city, metal_type);
+
+      CREATE TABLE IF NOT EXISTS metals_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+
     // One-time fix: clean known-wrong model IDs from settings
     var wrongModelIds = {
       'claude-opus-4-6-20250610': 'claude-opus-4-6',

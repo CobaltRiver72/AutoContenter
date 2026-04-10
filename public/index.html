@@ -50,6 +50,12 @@
       <a href="#sources" class="nav-link" data-page="sources">
         📡 Sources
       </a>
+      <a href="#fuel" class="nav-link" data-page="fuel">
+        ⛽ Fuel
+      </a>
+      <a href="#metals" class="nav-link" data-page="metals">
+        🥇 Metals
+      </a>
     </nav>
     <div class="sidebar-footer">
       <a href="/logout" class="nav-link logout-link">
@@ -418,6 +424,33 @@
           </div>
         </div>
 
+        <!-- Fuel & Metals API Keys -->
+        <div class="settings-form" id="fuel-metals-settings-section">
+          <div class="settings-group">
+            <div class="settings-group-title">Fuel Price API (RapidAPI)</div>
+            <div class="settings-row">
+              <label class="settings-label">RapidAPI Key</label>
+              <div style="display:flex; gap:8px;">
+                <input type="password" id="fuel-rapidapi-key" placeholder="Your RapidAPI key for fuel prices" style="flex:1;" />
+                <button class="btn btn-sm btn-secondary" onclick="testFuelApi()">Ping</button>
+              </div>
+              <small id="fuel-key-status" style="color:#888; font-size:11px; display:block; margin-top:4px;"></small>
+            </div>
+          </div>
+          <div class="settings-group">
+            <div class="settings-group-title">Metals Price API (RapidAPI)</div>
+            <div class="settings-row">
+              <label class="settings-label">RapidAPI Key</label>
+              <div style="display:flex; gap:8px;">
+                <input type="password" id="metals-rapidapi-key" placeholder="Your RapidAPI key for metals prices" style="flex:1;" />
+                <button class="btn btn-sm btn-secondary" onclick="testMetalsApi()">Ping</button>
+              </div>
+              <small id="metals-key-status" style="color:#888; font-size:11px; display:block; margin-top:4px;"></small>
+            </div>
+          </div>
+          <button class="btn btn-purple btn-full" id="saveFuelMetalsSettingsBtn" style="margin-top:15px;" onclick="saveFuelMetalsSettings()">Save Fuel & Metals Keys</button>
+        </div>
+
         <!-- Other Settings (dynamically rendered) -->
         <div id="settingsForm" class="settings-form">
           <p class="placeholder-text">Loading...</p>
@@ -575,6 +608,105 @@
           <div class="card">
             <div class="card-title">🆕 New Domains Today</div>
             <div id="sources-new-list" style="font-size:13px;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ FUEL PAGE ══════════════════════════ -->
+      <section class="page hidden" id="page-fuel">
+        <div class="page-header">
+          <h2 class="page-title">Fuel Price Tracker</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm btn-purple" id="fuelFetchBtn" onclick="triggerFuelFetch()">⚡ Fetch All Prices</button>
+            <button class="btn btn-sm btn-ghost" onclick="loadFuelPage()">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Summary cards -->
+        <div class="stats-grid" style="margin-bottom:20px;">
+          <div class="stat-card"><div class="stat-value" id="fuel-total-cities">—</div><div class="stat-label">Total Cities</div></div>
+          <div class="stat-card"><div class="stat-value" id="fuel-fetched-today">—</div><div class="stat-label">Fetched Today</div></div>
+          <div class="stat-card"><div class="stat-value" id="fuel-missing-today">—</div><div class="stat-label">Missing</div></div>
+          <div class="stat-card"><div class="stat-value" id="fuel-last-fetch">—</div><div class="stat-label">Last Fetch</div></div>
+        </div>
+
+        <!-- State-level overview + chart -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+          <div class="card">
+            <div class="card-title">National Average Trend (30d)</div>
+            <canvas id="fuel-national-chart" height="220"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-title">States Overview</div>
+            <div style="overflow-y:auto; max-height:300px;">
+              <table class="data-table" id="fuel-states-table">
+                <thead><tr><th>State</th><th>Cities</th><th>Fetched</th><th>Avg Petrol</th><th>Avg Diesel</th></tr></thead>
+                <tbody id="fuel-states-tbody"><tr><td colspan="5" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- City table with search -->
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>All Cities — Today's Prices</span>
+            <div style="display:flex;gap:8px;">
+              <select id="fuel-state-filter" onchange="filterFuelCities()" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;">
+                <option value="">All States</option>
+              </select>
+              <input type="text" id="fuel-city-search" placeholder="Search city..." oninput="filterFuelCities()"
+                style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;width:180px;">
+            </div>
+          </div>
+          <div style="overflow-x:auto;max-height:500px;overflow-y:auto;">
+            <table class="data-table">
+              <thead><tr><th>City</th><th>State</th><th>Petrol (₹)</th><th>Diesel (₹)</th><th>Source</th><th>Date</th></tr></thead>
+              <tbody id="fuel-cities-tbody"><tr><td colspan="6" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ METALS PAGE ══════════════════════════ -->
+      <section class="page hidden" id="page-metals">
+        <div class="page-header">
+          <h2 class="page-title">Metals Price Tracker</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm btn-purple" onclick="triggerMetalsFetch()">⚡ Fetch All Prices</button>
+            <button class="btn btn-sm btn-ghost" onclick="loadMetalsPage()">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Metal type selector -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <button class="btn btn-sm" id="metal-btn-gold" onclick="switchMetal('gold')" style="background:#f59e0b;color:#000;">Gold</button>
+          <button class="btn btn-sm btn-ghost" id="metal-btn-silver" onclick="switchMetal('silver')">Silver</button>
+          <button class="btn btn-sm btn-ghost" id="metal-btn-platinum" onclick="switchMetal('platinum')">Platinum</button>
+        </div>
+
+        <!-- Summary cards -->
+        <div class="stats-grid" style="margin-bottom:20px;">
+          <div class="stat-card"><div class="stat-value" id="metals-total-cities">—</div><div class="stat-label">Total Cities</div></div>
+          <div class="stat-card"><div class="stat-value" id="metals-fetched-today">—</div><div class="stat-label">Fetched Today</div></div>
+          <div class="stat-card"><div class="stat-value" id="metals-avg-price">—</div><div class="stat-label">National Avg (10g)</div></div>
+          <div class="stat-card"><div class="stat-value" id="metals-last-fetch">—</div><div class="stat-label">Last Fetch</div></div>
+        </div>
+
+        <!-- Chart + top cities -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+          <div class="card">
+            <div class="card-title" id="metals-chart-title">Gold National Trend (30d)</div>
+            <canvas id="metals-national-chart" height="220"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-title">Price by City</div>
+            <div style="overflow-y:auto; max-height:300px;">
+              <table class="data-table">
+                <thead><tr><th>City</th><th>24K</th><th>22K</th><th>18K</th><th>1g</th></tr></thead>
+                <tbody id="metals-cities-tbody"><tr><td colspan="5" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>

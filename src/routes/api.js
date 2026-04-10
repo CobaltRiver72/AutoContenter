@@ -642,6 +642,167 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── FUEL MODULE ROUTES ─────────────────────────────────────────────────
+
+  router.get('/fuel/summary', function (req, res) {
+    try {
+      var fuel = req.app.locals.modules.fuel;
+      if (!fuel) return res.status(503).json({ error: 'Fuel module not loaded' });
+      res.json(fuel.getTodaySummary());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/fuel/cities', function (req, res) {
+    try {
+      var state = req.query.state || null;
+      var sql = `
+        SELECT fc.*, fp.petrol, fp.diesel, fp.price_date, fp.source
+        FROM fuel_cities fc
+        LEFT JOIN fuel_prices fp ON fc.city_name = fp.city AND fp.price_date = date('now')
+        WHERE fc.is_enabled = 1
+      `;
+      var params = [];
+      if (state) { sql += ' AND fc.state = ?'; params.push(state); }
+      sql += ' ORDER BY fc.state, fc.city_name';
+      var stmt = db.prepare(sql);
+      res.json({ data: params.length ? stmt.all(params[0]) : stmt.all() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/fuel/states', function (req, res) {
+    try {
+      var rows = db.prepare(`
+        SELECT fc.state,
+          COUNT(DISTINCT fc.city_name) as total_cities,
+          COUNT(DISTINCT CASE WHEN fp.petrol > 0 THEN fc.city_name END) as fetched,
+          ROUND(AVG(fp.petrol), 2) as avg_petrol,
+          ROUND(AVG(fp.diesel), 2) as avg_diesel
+        FROM fuel_cities fc
+        LEFT JOIN fuel_prices fp ON fc.city_name = fp.city AND fp.price_date = date('now')
+        WHERE fc.is_enabled = 1
+        GROUP BY fc.state ORDER BY fc.state
+      `).all();
+      res.json({ data: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/fuel/history', function (req, res) {
+    try {
+      var city = req.query.city;
+      var days = Math.min(parseInt(req.query.days) || 30, 365);
+      if (!city) return res.status(400).json({ error: 'city required' });
+
+      var fuel = req.app.locals.modules.fuel;
+      var rows = fuel.getCityHistory(city, days);
+      res.json({
+        labels: rows.map(function(r) { return r.price_date; }),
+        petrol: rows.map(function(r) { return r.petrol; }),
+        diesel: rows.map(function(r) { return r.diesel; }),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/fuel/fetch', function (req, res) {
+    try {
+      var fuel = req.app.locals.modules.fuel;
+      if (!fuel) return res.status(503).json({ error: 'Fuel module not loaded' });
+      fuel.runDailyFetch().catch(function(err) {
+        logger.error('api', 'Manual fuel fetch failed: ' + err.message);
+      });
+      res.json({ success: true, message: 'Fetch started in background' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/fuel/compare', function (req, res) {
+    try {
+      var state = req.query.state;
+      if (!state) return res.status(400).json({ error: 'state required' });
+      var fuel = req.app.locals.modules.fuel;
+      var rows = fuel.getStateCitiesToday(state);
+      res.json({ data: rows.slice(0, 10) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── METALS MODULE ROUTES ───────────────────────────────────────────────
+
+  router.get('/metals/summary', function (req, res) {
+    try {
+      var metals = req.app.locals.modules.metals;
+      if (!metals) return res.status(503).json({ error: 'Metals module not loaded' });
+      res.json(metals.getTodaySummary());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/metals/cities', function (req, res) {
+    try {
+      var metal = req.query.metal || 'gold';
+      var state = req.query.state || null;
+      var sql = `
+        SELECT mc.city_name, mc.state, mp.price_24k, mp.price_22k, mp.price_18k,
+               mp.price_1g, mp.price_date, mp.source
+        FROM metals_cities mc
+        LEFT JOIN metals_prices mp ON mc.city_name = mp.city
+          AND mp.metal_type = ? AND mp.price_date = date('now')
+        WHERE mc.is_active = 1
+      `;
+      var params = [metal];
+      if (state) { sql += ' AND mc.state = ?'; params.push(state); }
+      sql += ' ORDER BY mc.state, mc.city_name';
+      res.json({ data: db.prepare(sql).all.apply(db.prepare(sql), params) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/metals/history', function (req, res) {
+    try {
+      var city = req.query.city;
+      var metal = req.query.metal || 'gold';
+      var days = Math.min(parseInt(req.query.days) || 30, 365);
+      if (!city) return res.status(400).json({ error: 'city required' });
+
+      var metals = req.app.locals.modules.metals;
+      var rows = metals.getCityHistory(city, metal, days);
+      res.json({
+        city: city, metal: metal,
+        labels: rows.map(function(r) { return r.price_date; }),
+        price_24k: rows.map(function(r) { return r.price_24k; }),
+        price_22k: rows.map(function(r) { return r.price_22k; }),
+        price_18k: rows.map(function(r) { return r.price_18k; }),
+        price_1g: rows.map(function(r) { return r.price_1g; }),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/metals/fetch', function (req, res) {
+    try {
+      var metals = req.app.locals.modules.metals;
+      if (!metals) return res.status(503).json({ error: 'Metals module not loaded' });
+      metals.runDailyFetch().catch(function(err) {
+        logger.error('api', 'Manual metals fetch failed: ' + err.message);
+      });
+      res.json({ success: true, message: 'Metals fetch started in background' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ─── GET /api/settings ────────────────────────────────────────────────────
 
   router.get('/settings', function (req, res) {
@@ -658,7 +819,8 @@ function createApiRouter(deps) {
         'FIREHOSE_TOKEN', 'FIREHOSE_MANAGEMENT_KEY',
         'WP_APP_PASSWORD', 'WP_USERNAME',
         'DASHBOARD_PASSWORD', 'DASHBOARD_PASSWORD_HASH',
-        'INFRANODUS_API_KEY', 'SESSION_SECRET'
+        'INFRANODUS_API_KEY', 'SESSION_SECRET',
+        'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY'
       ];
 
       var safeSettings = {};
@@ -715,6 +877,7 @@ function createApiRouter(deps) {
         'INFRANODUS_ENABLED', 'INFRANODUS_API_KEY',
         'TIER1_SOURCES', 'TIER2_SOURCES', 'TIER3_SOURCES',
         'PORT',
+        'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY',
       ];
 
       var BLOCKED_KEYS = [

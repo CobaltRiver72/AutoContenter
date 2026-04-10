@@ -32,6 +32,8 @@ var { WordPressPublisher } = require('./modules/publisher');
 var { Pipeline } = require('./workers/pipeline');
 var { ContentExtractor } = require('./modules/extractor');
 var { InfranodusAnalyzer } = require('./modules/infranodus');
+var { FuelModule } = require('./modules/fuel');
+var { MetalsModule } = require('./modules/metals');
 var { setupSession, checkAuth } = require('./routes/auth');
 var createApiRouter = require('./routes/api');
 var createDashboardRouter = require('./routes/dashboard');
@@ -45,6 +47,8 @@ var publisher = new WordPressPublisher(config, logger);
 var extractor = new ContentExtractor(config, db, logger);
 var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
+var fuel = new FuelModule(config, db, logger);
+var metals = new MetalsModule(config, db, logger);
 
 // ─── 6. Clustering queue (debounce rapid SSE events) ──────────────────────
 var _clusteringQueue = [];
@@ -186,6 +190,8 @@ async function boot() {
   await publisher.init();
   await scheduler.init();
   await infranodus.init();
+  await fuel.init();
+  await metals.init();
   logger.info('index', 'All downstream modules ready. Starting firehose...');
   // Firehose opens SSE — replay articles flow into listeners above
   await firehose.init();
@@ -201,6 +207,7 @@ async function boot() {
     firehose: firehose, trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
     scheduler: scheduler, infranodus: infranodus,
+    fuel: fuel, metals: metals,
   };
 
   // Trust Hostinger reverse proxy
