@@ -3392,6 +3392,85 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/import/run ─────────────────────────────────────────────────
+
+  router.post('/import/run', function (req, res) {
+    var type = (req.body && req.body.type) || 'all';
+    if (['fuel', 'metals', 'all'].indexOf(type) === -1) {
+      return res.status(400).json({ ok: false, error: 'type must be fuel, metals, or all' });
+    }
+
+    var spawn = require('child_process').spawn;
+    var nodePath = require('path');
+    var fsSys = require('fs');
+    var scriptPath = nodePath.join(__dirname, '../../scripts/import-csv.js');
+
+    if (!fsSys.existsSync(scriptPath)) {
+      return res.status(500).json({ ok: false, error: 'Import script not found at ' + scriptPath });
+    }
+
+    try {
+      var child = spawn(process.execPath, [scriptPath, '--type=' + type], {
+        cwd: nodePath.join(__dirname, '../..'),
+        env: process.env,
+      });
+
+      var stdout = '';
+      var stderr = '';
+      child.stdout.on('data', function (d) { stdout += d.toString(); });
+      child.stderr.on('data', function (d) { stderr += d.toString(); });
+
+      child.on('close', function (code) {
+        res.json({
+          ok: code === 0,
+          output: stdout,
+          error: stderr || null,
+          exitCode: code,
+        });
+      });
+    } catch (e) {
+      res.json({ ok: false, error: e.message });
+    }
+  });
+
+  // ─── GET /api/import/summary ──────────────────────────────────────────────
+
+  router.get('/import/summary', function (req, res) {
+    try {
+      var fuelSummary = db.prepare(`
+        SELECT
+          COUNT(*) as total_rows,
+          COUNT(DISTINCT city) as cities,
+          COUNT(DISTINCT price_date) as days,
+          MIN(price_date) as earliest,
+          MAX(price_date) as latest,
+          SUM(CASE WHEN petrol IS NOT NULL THEN 1 ELSE 0 END) as petrol_rows,
+          SUM(CASE WHEN diesel IS NOT NULL THEN 1 ELSE 0 END) as diesel_rows,
+          SUM(CASE WHEN source = 'imported' THEN 1 ELSE 0 END) as imported_rows,
+          SUM(CASE WHEN source != 'imported' THEN 1 ELSE 0 END) as live_rows
+        FROM fuel_prices
+      `).get();
+
+      var metalsSummary = db.prepare(`
+        SELECT
+          metal_type,
+          COUNT(*) as total_rows,
+          COUNT(DISTINCT city) as cities,
+          COUNT(DISTINCT price_date) as days,
+          MIN(price_date) as earliest,
+          MAX(price_date) as latest,
+          SUM(CASE WHEN source = 'imported' THEN 1 ELSE 0 END) as imported_rows,
+          SUM(CASE WHEN source != 'imported' THEN 1 ELSE 0 END) as live_rows
+        FROM metals_prices
+        GROUP BY metal_type
+      `).all();
+
+      res.json({ ok: true, fuel: fuelSummary, metals: metalsSummary });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   return router;
 }
 

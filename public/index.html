@@ -478,6 +478,27 @@
           </div>
         </div>
 
+        <!-- Historical Data Import -->
+        <div class="settings-form" id="csv-import-section">
+          <div class="settings-group">
+            <div class="settings-group-title">Historical Data Import</div>
+            <p style="color:#888;font-size:13px;margin-bottom:12px;">Import historical price data from CSV exports of the WordPress plugins. Place your CSV files in the <code>data/</code> folder before importing.</p>
+            <div class="settings-row">
+              <label class="settings-label">Expected files</label>
+              <div style="font-family:monospace;font-size:12px;line-height:1.8;color:#888;">
+                data/import-fuel.csv &nbsp;— columns: city, state, petrol, diesel, price_date, source<br>
+                data/import-metals.csv — columns: city, state, metal_type, price_24k, price_22k, price_18k, price_1g, price_date, source
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+              <button class="btn btn-secondary" onclick="runImport('fuel')">⛽ Import Fuel CSV</button>
+              <button class="btn btn-secondary" onclick="runImport('metals')">🥇 Import Metals CSV</button>
+              <button class="btn btn-purple" onclick="runImport('all')">📥 Import Both</button>
+            </div>
+            <div id="import-result" style="margin-top:10px;"></div>
+          </div>
+        </div>
+
         <!-- Other Settings (dynamically rendered) -->
         <div id="settingsForm" class="settings-form">
           <p class="placeholder-text">Loading...</p>

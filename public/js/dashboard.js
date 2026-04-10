@@ -5435,6 +5435,32 @@
     }).catch(function() {});
   }
 
+  // ─── CSV Import ───────────────────────────────────────────────────────────
+
+  function runImport(type) {
+    var el = document.getElementById('import-result');
+    if (!el) return;
+    el.innerHTML = '<span style="color:#888;">⏳ Running ' + escapeHtml(type) + ' import...</span>';
+    fetch('/api/import/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: type }),
+    })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          el.innerHTML = '<pre style="font-size:11px;white-space:pre-wrap;color:#4ade80;background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;margin:0;">' + escapeHtml(data.output) + '</pre>';
+        } else {
+          el.innerHTML = '<pre style="font-size:11px;white-space:pre-wrap;color:#f87171;background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;margin:0;">' + escapeHtml(data.error || data.output || 'Unknown error') + '</pre>';
+        }
+      })
+      .catch(function(e) {
+        el.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>';
+      });
+  }
+
+  window.runImport = runImport;
+
   // ─── Sources Analytics Page ───────────────────────────────────────────────
 
   var _sourcesData = null;
