@@ -1,11 +1,44 @@
 [
   {
+    "city_name": "Nicobar",
+    "state": "Andaman and Nicobar Islands",
+    "is_ut": 1,
+    "region": "east",
+    "api1_city": "Nicobar",
+    "api2_city": "nicobar",
+    "api2_state": "andaman-and-nicobar-islands",
+    "is_top_city": 0,
+    "api3_name": "Nicobar"
+  },
+  {
+    "city_name": "North And Middle Andaman",
+    "state": "Andaman and Nicobar Islands",
+    "is_ut": 1,
+    "region": "east",
+    "api1_city": "North And Middle Andaman",
+    "api2_city": "north-and-middle-andaman",
+    "api2_state": "andaman-and-nicobar-islands",
+    "is_top_city": 0,
+    "api3_name": "North And Middle Andaman"
+  },
+  {
     "city_name": "Port Blair",
     "state": "Andaman and Nicobar Islands",
     "is_ut": 1,
     "region": "south",
     "api1_city": "Port Blair",
     "api2_city": "port-blair",
+    "api2_state": "andaman-and-nicobar-islands",
+    "is_top_city": 0,
+    "api3_name": "South Andaman"
+  },
+  {
+    "city_name": "South Andaman",
+    "state": "Andaman and Nicobar Islands",
+    "is_ut": 1,
+    "region": "east",
+    "api1_city": "South Andaman",
+    "api2_city": "south-andaman",
     "api2_state": "andaman-and-nicobar-islands",
     "is_top_city": 0,
     "api3_name": "South Andaman"
@@ -20,6 +53,50 @@
     "api2_state": "andhra-pradesh",
     "is_top_city": 0,
     "api3_name": "Guntur"
+  },
+  {
+    "city_name": "Anantapur",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Anantapur",
+    "api2_city": "anantapur",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Anantapur"
+  },
+  {
+    "city_name": "Chittoor",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Chittoor",
+    "api2_city": "chittoor",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Chittoor"
+  },
+  {
+    "city_name": "Cuddapah",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Cuddapah",
+    "api2_city": "cuddapah",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Cuddapah"
+  },
+  {
+    "city_name": "East Godavari",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "East Godavari",
+    "api2_city": "east-godavari",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "East Godavari"
   },
   {
     "city_name": "Guntur",
@@ -43,6 +120,17 @@
     "api3_name": "East Godavari"
   },
   {
+    "city_name": "Krishna",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Krishna",
+    "api2_city": "krishna",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Krishna"
+  },
+  {
     "city_name": "Kurnool",
     "state": "Andhra Pradesh",
     "is_ut": 0,
@@ -63,6 +151,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Prakasam",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Prakasam",
+    "api2_city": "prakasam",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Prakasam"
+  },
+  {
     "city_name": "Rajahmundry",
     "state": "Andhra Pradesh",
     "is_ut": 0,
@@ -72,6 +171,17 @@
     "api2_state": "andhra-pradesh",
     "is_top_city": 0,
     "api3_name": "East Godavari"
+  },
+  {
+    "city_name": "Srikakulam",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Srikakulam",
+    "api2_city": "srikakulam",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Srikakulam"
   },
   {
     "city_name": "Tirupati",
@@ -107,6 +217,83 @@
     "api3_name": "Vishakhapatnam"
   },
   {
+    "city_name": "Vishakhapatnam",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Vishakhapatnam",
+    "api2_city": "vishakhapatnam",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Vishakhapatnam"
+  },
+  {
+    "city_name": "Vizianagaram",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Vizianagaram",
+    "api2_city": "vizianagaram",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Vizianagaram"
+  },
+  {
+    "city_name": "West Godavari",
+    "state": "Andhra Pradesh",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "West Godavari",
+    "api2_city": "west-godavari",
+    "api2_state": "andhra-pradesh",
+    "is_top_city": 0,
+    "api3_name": "West Godavari"
+  },
+  {
+    "city_name": "Changlang",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Changlang",
+    "api2_city": "changlang",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Changlang"
+  },
+  {
+    "city_name": "Dibang Valley",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Dibang Valley",
+    "api2_city": "dibang-valley",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Dibang Valley"
+  },
+  {
+    "city_name": "East Khameng",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "East Khameng",
+    "api2_city": "east-khameng",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "East Khameng"
+  },
+  {
+    "city_name": "East Siang",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "East Siang",
+    "api2_city": "east-siang",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "East Siang"
+  },
+  {
     "city_name": "Itanagar",
     "state": "Arunachal Pradesh",
     "is_ut": 0,
@@ -118,6 +305,248 @@
     "api3_name": "Papumpare"
   },
   {
+    "city_name": "Lohit",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Lohit",
+    "api2_city": "lohit",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Lohit"
+  },
+  {
+    "city_name": "Longding",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Longding",
+    "api2_city": "longding",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Longding"
+  },
+  {
+    "city_name": "Lower Dibang Valley",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Lower Dibang Valley",
+    "api2_city": "lower-dibang-valley",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Lower Dibang Valley"
+  },
+  {
+    "city_name": "Lower Subansiri",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Lower Subansiri",
+    "api2_city": "lower-subansiri",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Lower Subansiri"
+  },
+  {
+    "city_name": "Namsai",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Namsai",
+    "api2_city": "namsai",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Namsai"
+  },
+  {
+    "city_name": "Papumpare",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Papumpare",
+    "api2_city": "papumpare",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Papumpare"
+  },
+  {
+    "city_name": "Tawang",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Tawang",
+    "api2_city": "tawang",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Tawang"
+  },
+  {
+    "city_name": "Tirap",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Tirap",
+    "api2_city": "tirap",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Tirap"
+  },
+  {
+    "city_name": "Upper Siang",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Upper Siang",
+    "api2_city": "upper-siang",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Upper Siang"
+  },
+  {
+    "city_name": "Upper Sibansiri",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Upper Sibansiri",
+    "api2_city": "upper-sibansiri",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Upper Sibansiri"
+  },
+  {
+    "city_name": "West Kameng",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West Kameng",
+    "api2_city": "west-kameng",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "West Kameng"
+  },
+  {
+    "city_name": "West Siang",
+    "state": "Arunachal Pradesh",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West Siang",
+    "api2_city": "west-siang",
+    "api2_state": "arunachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "West Siang"
+  },
+  {
+    "city_name": "Baksa",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Baksa",
+    "api2_city": "baksa",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Baksa"
+  },
+  {
+    "city_name": "Barpeta",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Barpeta",
+    "api2_city": "barpeta",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Barpeta"
+  },
+  {
+    "city_name": "Biswanath",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Biswanath",
+    "api2_city": "biswanath",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Biswanath"
+  },
+  {
+    "city_name": "Bongaigaon",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Bongaigaon",
+    "api2_city": "bongaigaon",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Bongaigaon"
+  },
+  {
+    "city_name": "Cachar",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Cachar",
+    "api2_city": "cachar",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Cachar"
+  },
+  {
+    "city_name": "Charaideo",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Charaideo",
+    "api2_city": "charaideo",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Charaideo"
+  },
+  {
+    "city_name": "Chirang",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Chirang",
+    "api2_city": "chirang",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Chirang"
+  },
+  {
+    "city_name": "Darrang",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Darrang",
+    "api2_city": "darrang",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Darrang"
+  },
+  {
+    "city_name": "Dhemaji",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Dhemaji",
+    "api2_city": "dhemaji",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Dhemaji"
+  },
+  {
+    "city_name": "Dhuburi",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Dhuburi",
+    "api2_city": "dhuburi",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Dhuburi"
+  },
+  {
     "city_name": "Dibrugarh",
     "state": "Assam",
     "is_ut": 0,
@@ -126,6 +555,39 @@
     "api2_city": "dibrugarh",
     "api2_state": "assam",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Dima Hasao",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Dima Hasao",
+    "api2_city": "dima-hasao",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Dima Hasao"
+  },
+  {
+    "city_name": "Goalpara",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Goalpara",
+    "api2_city": "goalpara",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Goalpara"
+  },
+  {
+    "city_name": "Golaghat",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Golaghat",
+    "api2_city": "golaghat",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Golaghat"
   },
   {
     "city_name": "Guwahati",
@@ -139,6 +601,160 @@
     "api3_name": "Kamrup Metro"
   },
   {
+    "city_name": "Hailakandi",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Hailakandi",
+    "api2_city": "hailakandi",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Hailakandi"
+  },
+  {
+    "city_name": "Hojai",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Hojai",
+    "api2_city": "hojai",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Hojai"
+  },
+  {
+    "city_name": "Jorhat",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Jorhat",
+    "api2_city": "jorhat",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Jorhat"
+  },
+  {
+    "city_name": "Kamrup",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Kamrup",
+    "api2_city": "kamrup",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Kamrup"
+  },
+  {
+    "city_name": "Kamrup Metro",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Kamrup Metro",
+    "api2_city": "kamrup-metro",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Kamrup Metro"
+  },
+  {
+    "city_name": "Karbi Anglong",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Karbi Anglong",
+    "api2_city": "karbi-anglong",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Karbi Anglong"
+  },
+  {
+    "city_name": "Karimganj",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Karimganj",
+    "api2_city": "karimganj",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Karimganj"
+  },
+  {
+    "city_name": "Kokrajhar",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Kokrajhar",
+    "api2_city": "kokrajhar",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Kokrajhar"
+  },
+  {
+    "city_name": "Lakhimpur",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Lakhimpur",
+    "api2_city": "lakhimpur",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Lakhimpur"
+  },
+  {
+    "city_name": "Majuli",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Majuli",
+    "api2_city": "majuli",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Majuli"
+  },
+  {
+    "city_name": "Morigaon",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Morigaon",
+    "api2_city": "morigaon",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Morigaon"
+  },
+  {
+    "city_name": "Nagaon",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Nagaon",
+    "api2_city": "nagaon",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Nagaon"
+  },
+  {
+    "city_name": "Nalbari",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Nalbari",
+    "api2_city": "nalbari",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Nalbari"
+  },
+  {
+    "city_name": "Sibsagar",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Sibsagar",
+    "api2_city": "sibsagar",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Sibsagar"
+  },
+  {
     "city_name": "Silchar",
     "state": "Assam",
     "is_ut": 0,
@@ -148,6 +764,160 @@
     "api2_state": "assam",
     "is_top_city": 0,
     "api3_name": "Cachar"
+  },
+  {
+    "city_name": "Sonapur",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Sonapur",
+    "api2_city": "sonapur",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Sonapur"
+  },
+  {
+    "city_name": "Sonitpur",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Sonitpur",
+    "api2_city": "sonitpur",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Sonitpur"
+  },
+  {
+    "city_name": "Tinsukia",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Tinsukia",
+    "api2_city": "tinsukia",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Tinsukia"
+  },
+  {
+    "city_name": "Udalguri",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Udalguri",
+    "api2_city": "udalguri",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "Udalguri"
+  },
+  {
+    "city_name": "West Karbi Anglong",
+    "state": "Assam",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West Karbi Anglong",
+    "api2_city": "west-karbi-anglong",
+    "api2_state": "assam",
+    "is_top_city": 0,
+    "api3_name": "West Karbi Anglong"
+  },
+  {
+    "city_name": "Araria",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Araria",
+    "api2_city": "araria",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Araria"
+  },
+  {
+    "city_name": "Arwal",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Arwal",
+    "api2_city": "arwal",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Arwal"
+  },
+  {
+    "city_name": "Banka",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Banka",
+    "api2_city": "banka",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Banka"
+  },
+  {
+    "city_name": "Begusarai",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Begusarai",
+    "api2_city": "begusarai",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Begusarai"
+  },
+  {
+    "city_name": "Bhagalpur",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Bhagalpur",
+    "api2_city": "bhagalpur",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Bhagalpur"
+  },
+  {
+    "city_name": "Bhojpur",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Bhojpur",
+    "api2_city": "bhojpur",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Bhojpur"
+  },
+  {
+    "city_name": "Buxar",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Buxar",
+    "api2_city": "buxar",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Buxar"
+  },
+  {
+    "city_name": "Darbhanga",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Darbhanga",
+    "api2_city": "darbhanga",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Darbhanga"
+  },
+  {
+    "city_name": "East Champaran",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "East Champaran",
+    "api2_city": "east-champaran",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "East Champaran"
   },
   {
     "city_name": "Gaya",
@@ -160,6 +930,127 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Gopalganj",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Gopalganj",
+    "api2_city": "gopalganj",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Gopalganj"
+  },
+  {
+    "city_name": "Jahanabad",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jahanabad",
+    "api2_city": "jahanabad",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Jahanabad"
+  },
+  {
+    "city_name": "Jamui",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jamui",
+    "api2_city": "jamui",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Jamui"
+  },
+  {
+    "city_name": "Kaimur",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Kaimur",
+    "api2_city": "kaimur",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Kaimur"
+  },
+  {
+    "city_name": "Katihar",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Katihar",
+    "api2_city": "katihar",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Katihar"
+  },
+  {
+    "city_name": "Khagaria",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Khagaria",
+    "api2_city": "khagaria",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Khagaria"
+  },
+  {
+    "city_name": "Kishanganj",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Kishanganj",
+    "api2_city": "kishanganj",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Kishanganj"
+  },
+  {
+    "city_name": "Luckeesarai",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Luckeesarai",
+    "api2_city": "luckeesarai",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Luckeesarai"
+  },
+  {
+    "city_name": "Madhepura",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Madhepura",
+    "api2_city": "madhepura",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Madhepura"
+  },
+  {
+    "city_name": "Madhubani",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Madhubani",
+    "api2_city": "madhubani",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Madhubani"
+  },
+  {
+    "city_name": "Munger",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Munger",
+    "api2_city": "munger",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Munger"
+  },
+  {
     "city_name": "Muzaffarpur",
     "state": "Bihar",
     "is_ut": 0,
@@ -168,6 +1059,28 @@
     "api2_city": "muzaffarpur",
     "api2_state": "bihar",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Nalanda",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Nalanda",
+    "api2_city": "nalanda",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Nalanda"
+  },
+  {
+    "city_name": "Nawada",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Nawada",
+    "api2_city": "nawada",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Nawada"
   },
   {
     "city_name": "Patna",
@@ -180,6 +1093,138 @@
     "is_top_city": 1
   },
   {
+    "city_name": "Purnia",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Purnia",
+    "api2_city": "purnia",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Purnia"
+  },
+  {
+    "city_name": "Rohtas",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Rohtas",
+    "api2_city": "rohtas",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Rohtas"
+  },
+  {
+    "city_name": "Saharsa",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Saharsa",
+    "api2_city": "saharsa",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Saharsa"
+  },
+  {
+    "city_name": "Samastipur",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Samastipur",
+    "api2_city": "samastipur",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Samastipur"
+  },
+  {
+    "city_name": "Saran",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Saran",
+    "api2_city": "saran",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Saran"
+  },
+  {
+    "city_name": "Sewan",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Sewan",
+    "api2_city": "sewan",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Sewan"
+  },
+  {
+    "city_name": "Sheikhpura",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Sheikhpura",
+    "api2_city": "sheikhpura",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Sheikhpura"
+  },
+  {
+    "city_name": "Sheohar",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Sheohar",
+    "api2_city": "sheohar",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Sheohar"
+  },
+  {
+    "city_name": "Sitamarhi",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Sitamarhi",
+    "api2_city": "sitamarhi",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Sitamarhi"
+  },
+  {
+    "city_name": "Supaul",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Supaul",
+    "api2_city": "supaul",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Supaul"
+  },
+  {
+    "city_name": "Vaishali",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Vaishali",
+    "api2_city": "vaishali",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "Vaishali"
+  },
+  {
+    "city_name": "West Champaran",
+    "state": "Bihar",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "West Champaran",
+    "api2_city": "west-champaran",
+    "api2_state": "bihar",
+    "is_top_city": 0,
+    "api3_name": "West Champaran"
+  },
+  {
     "city_name": "Chandigarh",
     "state": "Chandigarh",
     "is_ut": 1,
@@ -188,6 +1233,61 @@
     "api2_city": "chandigarh",
     "api2_state": "chandigarh",
     "is_top_city": 1
+  },
+  {
+    "city_name": "Balod",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Balod",
+    "api2_city": "balod",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Balod"
+  },
+  {
+    "city_name": "Balodabazar",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Balodabazar",
+    "api2_city": "balodabazar",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Balodabazar"
+  },
+  {
+    "city_name": "Balrampur",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Balrampur",
+    "api2_city": "balrampur",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Balrampur"
+  },
+  {
+    "city_name": "Bastar",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Bastar",
+    "api2_city": "bastar",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Bastar"
+  },
+  {
+    "city_name": "Bemetara",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Bemetara",
+    "api2_city": "bemetara",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Bemetara"
   },
   {
     "city_name": "Bhilai",
@@ -201,6 +1301,17 @@
     "api3_name": "Durg"
   },
   {
+    "city_name": "Bijapur",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Bijapur",
+    "api2_city": "bijapur",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Bijapur"
+  },
+  {
     "city_name": "Bilaspur",
     "state": "Chhattisgarh",
     "is_ut": 0,
@@ -212,6 +1323,160 @@
     "api3_name": "Bilaspur"
   },
   {
+    "city_name": "Dantewada",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Dantewada",
+    "api2_city": "dantewada",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Dantewada"
+  },
+  {
+    "city_name": "Dhamtari",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Dhamtari",
+    "api2_city": "dhamtari",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Dhamtari"
+  },
+  {
+    "city_name": "Durg",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Durg",
+    "api2_city": "durg",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Durg"
+  },
+  {
+    "city_name": "Gariyaband",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Gariyaband",
+    "api2_city": "gariyaband",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Gariyaband"
+  },
+  {
+    "city_name": "Janjgir",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Janjgir",
+    "api2_city": "janjgir",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Janjgir"
+  },
+  {
+    "city_name": "Jashpur",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Jashpur",
+    "api2_city": "jashpur",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Jashpur"
+  },
+  {
+    "city_name": "Kanker",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Kanker",
+    "api2_city": "kanker",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Kanker"
+  },
+  {
+    "city_name": "Kawardha",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Kawardha",
+    "api2_city": "kawardha",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Kawardha"
+  },
+  {
+    "city_name": "Kondagaon",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Kondagaon",
+    "api2_city": "kondagaon",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Kondagaon"
+  },
+  {
+    "city_name": "Korba",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Korba",
+    "api2_city": "korba",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Korba"
+  },
+  {
+    "city_name": "Koria",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Koria",
+    "api2_city": "koria",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Koria"
+  },
+  {
+    "city_name": "Mahasamund",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Mahasamund",
+    "api2_city": "mahasamund",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Mahasamund"
+  },
+  {
+    "city_name": "Mungeli",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Mungeli",
+    "api2_city": "mungeli",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Mungeli"
+  },
+  {
+    "city_name": "Raigarh",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Raigarh",
+    "api2_city": "raigarh",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Raigarh"
+  },
+  {
     "city_name": "Raipur",
     "state": "Chhattisgarh",
     "is_ut": 0,
@@ -220,6 +1485,50 @@
     "api2_city": "raipur",
     "api2_state": "chhattisgarh",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Rajnandgaon",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Rajnandgaon",
+    "api2_city": "rajnandgaon",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Rajnandgaon"
+  },
+  {
+    "city_name": "Sukma",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Sukma",
+    "api2_city": "sukma",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Sukma"
+  },
+  {
+    "city_name": "Surajpur",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Surajpur",
+    "api2_city": "surajpur",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Surajpur"
+  },
+  {
+    "city_name": "Surguja",
+    "state": "Chhattisgarh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Surguja",
+    "api2_city": "surguja",
+    "api2_state": "chhattisgarh",
+    "is_top_city": 0,
+    "api3_name": "Surguja"
   },
   {
     "city_name": "Daman",
@@ -253,6 +1562,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Central Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Central Delhi",
+    "api2_city": "central-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "Central Delhi"
+  },
+  {
     "city_name": "Delhi",
     "state": "Delhi",
     "is_ut": 1,
@@ -262,6 +1582,116 @@
     "api2_state": "delhi",
     "is_top_city": 1,
     "api3_name": "New Delhi"
+  },
+  {
+    "city_name": "Delhi Shahdara",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Delhi Shahdara",
+    "api2_city": "delhi-shahdara",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "Delhi Shahdara"
+  },
+  {
+    "city_name": "East Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "East Delhi",
+    "api2_city": "east-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "East Delhi"
+  },
+  {
+    "city_name": "New Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "New Delhi",
+    "api2_city": "new-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "New Delhi"
+  },
+  {
+    "city_name": "North Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "North Delhi",
+    "api2_city": "north-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "North Delhi"
+  },
+  {
+    "city_name": "North East Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "North East Delhi",
+    "api2_city": "north-east-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "North East Delhi"
+  },
+  {
+    "city_name": "North West Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "North West Delhi",
+    "api2_city": "north-west-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "North West Delhi"
+  },
+  {
+    "city_name": "South Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "South Delhi",
+    "api2_city": "south-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "South Delhi"
+  },
+  {
+    "city_name": "South East Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "South East Delhi",
+    "api2_city": "south-east-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "South East Delhi"
+  },
+  {
+    "city_name": "South West Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "South West Delhi",
+    "api2_city": "south-west-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "South West Delhi"
+  },
+  {
+    "city_name": "West Delhi",
+    "state": "Delhi",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "West Delhi",
+    "api2_city": "west-delhi",
+    "api2_state": "delhi",
+    "is_top_city": 0,
+    "api3_name": "West Delhi"
   },
   {
     "city_name": "Margao",
@@ -275,6 +1705,17 @@
     "api3_name": "South Goa"
   },
   {
+    "city_name": "North Goa",
+    "state": "Goa",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "North Goa",
+    "api2_city": "north-goa",
+    "api2_state": "goa",
+    "is_top_city": 0,
+    "api3_name": "North Goa"
+  },
+  {
     "city_name": "Panaji",
     "state": "Goa",
     "is_ut": 0,
@@ -284,6 +1725,17 @@
     "api2_state": "goa",
     "is_top_city": 0,
     "api3_name": "North Goa"
+  },
+  {
+    "city_name": "South Goa",
+    "state": "Goa",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "South Goa",
+    "api2_city": "south-goa",
+    "api2_state": "goa",
+    "is_top_city": 0,
+    "api3_name": "South Goa"
   },
   {
     "city_name": "Ahmedabad",
@@ -296,6 +1748,61 @@
     "is_top_city": 1
   },
   {
+    "city_name": "Amreli",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Amreli",
+    "api2_city": "amreli",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Amreli"
+  },
+  {
+    "city_name": "Anand",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Anand",
+    "api2_city": "anand",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Anand"
+  },
+  {
+    "city_name": "Aravalli",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Aravalli",
+    "api2_city": "aravalli",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Aravalli"
+  },
+  {
+    "city_name": "Banas Kantha",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Banas Kantha",
+    "api2_city": "banas-kantha",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Banas Kantha"
+  },
+  {
+    "city_name": "Bharuch",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Bharuch",
+    "api2_city": "bharuch",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Bharuch"
+  },
+  {
     "city_name": "Bhavnagar",
     "state": "Gujarat",
     "is_ut": 0,
@@ -304,6 +1811,61 @@
     "api2_city": "bhavnagar",
     "api2_state": "gujarat",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Botad",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Botad",
+    "api2_city": "botad",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Botad"
+  },
+  {
+    "city_name": "Chhotaudepur",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Chhotaudepur",
+    "api2_city": "chhotaudepur",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Chhotaudepur"
+  },
+  {
+    "city_name": "Dahod",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Dahod",
+    "api2_city": "dahod",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Dahod"
+  },
+  {
+    "city_name": "Devbhumi Dwarka",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Devbhumi Dwarka",
+    "api2_city": "devbhumi-dwarka",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Devbhumi Dwarka"
+  },
+  {
+    "city_name": "Gandhi Nagar",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Gandhi Nagar",
+    "api2_city": "gandhi-nagar",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Gandhi Nagar"
   },
   {
     "city_name": "Gandhinagar",
@@ -317,6 +1879,17 @@
     "api3_name": "Gandhi Nagar"
   },
   {
+    "city_name": "Gir Somnath",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Gir Somnath",
+    "api2_city": "gir-somnath",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Gir Somnath"
+  },
+  {
     "city_name": "Jamnagar",
     "state": "Gujarat",
     "is_ut": 0,
@@ -325,6 +1898,127 @@
     "api2_city": "jamnagar",
     "api2_state": "gujarat",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Junagadh",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Junagadh",
+    "api2_city": "junagadh",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Junagadh"
+  },
+  {
+    "city_name": "Kheda",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Kheda",
+    "api2_city": "kheda",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Kheda"
+  },
+  {
+    "city_name": "Kutch",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Kutch",
+    "api2_city": "kutch",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Kutch"
+  },
+  {
+    "city_name": "Mahisagar",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Mahisagar",
+    "api2_city": "mahisagar",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Mahisagar"
+  },
+  {
+    "city_name": "Mehsana",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Mehsana",
+    "api2_city": "mehsana",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Mehsana"
+  },
+  {
+    "city_name": "Morbi",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Morbi",
+    "api2_city": "morbi",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Morbi"
+  },
+  {
+    "city_name": "Narmada",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Narmada",
+    "api2_city": "narmada",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Narmada"
+  },
+  {
+    "city_name": "Navsari",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Navsari",
+    "api2_city": "navsari",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Navsari"
+  },
+  {
+    "city_name": "Panch Mahal",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Panch Mahal",
+    "api2_city": "panch-mahal",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Panch Mahal"
+  },
+  {
+    "city_name": "Patan",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Patan",
+    "api2_city": "patan",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Patan"
+  },
+  {
+    "city_name": "Porbander",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Porbander",
+    "api2_city": "porbander",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Porbander"
   },
   {
     "city_name": "Rajkot",
@@ -337,6 +2031,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Sabar Kantha",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Sabar Kantha",
+    "api2_city": "sabar-kantha",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Sabar Kantha"
+  },
+  {
     "city_name": "Surat",
     "state": "Gujarat",
     "is_ut": 0,
@@ -345,6 +2050,39 @@
     "api2_city": "surat",
     "api2_state": "gujarat",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Surendranagar",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Surendranagar",
+    "api2_city": "surendranagar",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Surendranagar"
+  },
+  {
+    "city_name": "Tapi",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Tapi",
+    "api2_city": "tapi",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Tapi"
+  },
+  {
+    "city_name": "The Dangs",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "The Dangs",
+    "api2_city": "the-dangs",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "The Dangs"
   },
   {
     "city_name": "Vadodara",
@@ -357,6 +2095,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Valsad",
+    "state": "Gujarat",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Valsad",
+    "api2_city": "valsad",
+    "api2_state": "gujarat",
+    "is_top_city": 0,
+    "api3_name": "Valsad"
+  },
+  {
     "city_name": "Ambala",
     "state": "Haryana",
     "is_ut": 0,
@@ -367,6 +2116,28 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Bhiwani",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bhiwani",
+    "api2_city": "bhiwani",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Bhiwani"
+  },
+  {
+    "city_name": "Charki Dadri",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Charki Dadri",
+    "api2_city": "charki-dadri",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Charki Dadri"
+  },
+  {
     "city_name": "Faridabad",
     "state": "Haryana",
     "is_ut": 0,
@@ -375,6 +2146,28 @@
     "api2_city": "faridabad",
     "api2_state": "haryana",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Fatehabad",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Fatehabad",
+    "api2_city": "fatehabad",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Fatehabad"
+  },
+  {
+    "city_name": "Gurgaon",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Gurgaon",
+    "api2_city": "gurgaon",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Gurgaon"
   },
   {
     "city_name": "Gurugram",
@@ -398,6 +2191,39 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Jhajjar",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jhajjar",
+    "api2_city": "jhajjar",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Jhajjar"
+  },
+  {
+    "city_name": "Jind",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jind",
+    "api2_city": "jind",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Jind"
+  },
+  {
+    "city_name": "Kaithal",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kaithal",
+    "api2_city": "kaithal",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Kaithal"
+  },
+  {
     "city_name": "Karnal",
     "state": "Haryana",
     "is_ut": 0,
@@ -406,6 +2232,61 @@
     "api2_city": "karnal",
     "api2_state": "haryana",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Kurukshetra",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kurukshetra",
+    "api2_city": "kurukshetra",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Kurukshetra"
+  },
+  {
+    "city_name": "Mahendragarh",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Mahendragarh",
+    "api2_city": "mahendragarh",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Mahendragarh"
+  },
+  {
+    "city_name": "Mewat",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Mewat",
+    "api2_city": "mewat",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Mewat"
+  },
+  {
+    "city_name": "Palwal",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Palwal",
+    "api2_city": "palwal",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Palwal"
+  },
+  {
+    "city_name": "Panchkula",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Panchkula",
+    "api2_city": "panchkula",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Panchkula"
   },
   {
     "city_name": "Panipat",
@@ -418,6 +2299,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Rewari",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Rewari",
+    "api2_city": "rewari",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Rewari"
+  },
+  {
     "city_name": "Rohtak",
     "state": "Haryana",
     "is_ut": 0,
@@ -426,6 +2318,17 @@
     "api2_city": "rohtak",
     "api2_state": "haryana",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Sirsa",
+    "state": "Haryana",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sirsa",
+    "api2_city": "sirsa",
+    "api2_state": "haryana",
+    "is_top_city": 0,
+    "api3_name": "Sirsa"
   },
   {
     "city_name": "Sonipat",
@@ -449,6 +2352,17 @@
     "api3_name": "Yamunanagar"
   },
   {
+    "city_name": "Chamba",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Chamba",
+    "api2_city": "chamba",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Chamba"
+  },
+  {
     "city_name": "Dharamshala",
     "state": "Himachal Pradesh",
     "is_ut": 0,
@@ -460,6 +2374,39 @@
     "api3_name": "Kangra"
   },
   {
+    "city_name": "Hamirpur",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Hamirpur",
+    "api2_city": "hamirpur",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Hamirpur"
+  },
+  {
+    "city_name": "Kangra",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kangra",
+    "api2_city": "kangra",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kangra"
+  },
+  {
+    "city_name": "Kinnaur",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kinnaur",
+    "api2_city": "kinnaur",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kinnaur"
+  },
+  {
     "city_name": "Kullu",
     "state": "Himachal Pradesh",
     "is_ut": 0,
@@ -469,6 +2416,17 @@
     "api2_state": "himachal-pradesh",
     "is_top_city": 0,
     "api3_name": "Kullu"
+  },
+  {
+    "city_name": "Lahul Spiti",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Lahul Spiti",
+    "api2_city": "lahul-spiti",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Lahul Spiti"
   },
   {
     "city_name": "Mandi",
@@ -491,6 +2449,105 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Sirmaur",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sirmaur",
+    "api2_city": "sirmaur",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sirmaur"
+  },
+  {
+    "city_name": "Solan",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Solan",
+    "api2_city": "solan",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Solan"
+  },
+  {
+    "city_name": "Una",
+    "state": "Himachal Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Una",
+    "api2_city": "una",
+    "api2_state": "himachal-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Una"
+  },
+  {
+    "city_name": "Anantnag",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Anantnag",
+    "api2_city": "anantnag",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Anantnag"
+  },
+  {
+    "city_name": "Badgam",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Badgam",
+    "api2_city": "badgam",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Badgam"
+  },
+  {
+    "city_name": "Bandipora",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Bandipora",
+    "api2_city": "bandipora",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Bandipora"
+  },
+  {
+    "city_name": "Baramullah",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Baramullah",
+    "api2_city": "baramullah",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Baramullah"
+  },
+  {
+    "city_name": "Doda",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Doda",
+    "api2_city": "doda",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Doda"
+  },
+  {
+    "city_name": "Ganderbal",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Ganderbal",
+    "api2_city": "ganderbal",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Ganderbal"
+  },
+  {
     "city_name": "Jammu",
     "state": "Jammu and Kashmir",
     "is_ut": 1,
@@ -501,6 +2558,127 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Kathua",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Kathua",
+    "api2_city": "kathua",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Kathua"
+  },
+  {
+    "city_name": "Kishtwar",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Kishtwar",
+    "api2_city": "kishtwar",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Kishtwar"
+  },
+  {
+    "city_name": "Kulgam",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Kulgam",
+    "api2_city": "kulgam",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Kulgam"
+  },
+  {
+    "city_name": "Kupwara",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Kupwara",
+    "api2_city": "kupwara",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Kupwara"
+  },
+  {
+    "city_name": "Poonch",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Poonch",
+    "api2_city": "poonch",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Poonch"
+  },
+  {
+    "city_name": "Pulwama",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Pulwama",
+    "api2_city": "pulwama",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Pulwama"
+  },
+  {
+    "city_name": "Rajouri",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Rajouri",
+    "api2_city": "rajouri",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Rajouri"
+  },
+  {
+    "city_name": "Ramban",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Ramban",
+    "api2_city": "ramban",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Ramban"
+  },
+  {
+    "city_name": "Reasi",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Reasi",
+    "api2_city": "reasi",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Reasi"
+  },
+  {
+    "city_name": "Samba",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Samba",
+    "api2_city": "samba",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Samba"
+  },
+  {
+    "city_name": "Shopian",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Shopian",
+    "api2_city": "shopian",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Shopian"
+  },
+  {
     "city_name": "Srinagar",
     "state": "Jammu and Kashmir",
     "is_ut": 1,
@@ -509,6 +2687,17 @@
     "api2_city": "srinagar",
     "api2_state": "jammu-and-kashmir",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Udhampur",
+    "state": "Jammu and Kashmir",
+    "is_ut": 1,
+    "region": "north",
+    "api1_city": "Udhampur",
+    "api2_city": "udhampur",
+    "api2_state": "jammu-and-kashmir",
+    "is_top_city": 0,
+    "api3_name": "Udhampur"
   },
   {
     "city_name": "Bokaro",
@@ -522,6 +2711,17 @@
     "api3_name": "Bokaro"
   },
   {
+    "city_name": "Chatra",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Chatra",
+    "api2_city": "chatra",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Chatra"
+  },
+  {
     "city_name": "Dhanbad",
     "state": "Jharkhand",
     "is_ut": 0,
@@ -530,6 +2730,83 @@
     "api2_city": "dhanbad",
     "api2_state": "jharkhand",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Dumka",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Dumka",
+    "api2_city": "dumka",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Dumka"
+  },
+  {
+    "city_name": "East Singhbhum",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "East Singhbhum",
+    "api2_city": "east-singhbhum",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "East Singhbhum"
+  },
+  {
+    "city_name": "Garhwa",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Garhwa",
+    "api2_city": "garhwa",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Garhwa"
+  },
+  {
+    "city_name": "Giridih",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Giridih",
+    "api2_city": "giridih",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Giridih"
+  },
+  {
+    "city_name": "Godda",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Godda",
+    "api2_city": "godda",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Godda"
+  },
+  {
+    "city_name": "Gumla",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Gumla",
+    "api2_city": "gumla",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Gumla"
+  },
+  {
+    "city_name": "Hazaribagh",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Hazaribagh",
+    "api2_city": "hazaribagh",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Hazaribagh"
   },
   {
     "city_name": "Jamshedpur",
@@ -543,6 +2820,94 @@
     "api3_name": "East Singhbhum"
   },
   {
+    "city_name": "Jamtara",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jamtara",
+    "api2_city": "jamtara",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Jamtara"
+  },
+  {
+    "city_name": "Khunti",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Khunti",
+    "api2_city": "khunti",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Khunti"
+  },
+  {
+    "city_name": "Koderma",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Koderma",
+    "api2_city": "koderma",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Koderma"
+  },
+  {
+    "city_name": "Latehar",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Latehar",
+    "api2_city": "latehar",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Latehar"
+  },
+  {
+    "city_name": "Lohardaga",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Lohardaga",
+    "api2_city": "lohardaga",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Lohardaga"
+  },
+  {
+    "city_name": "Pakur",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Pakur",
+    "api2_city": "pakur",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Pakur"
+  },
+  {
+    "city_name": "Palamau",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Palamau",
+    "api2_city": "palamau",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Palamau"
+  },
+  {
+    "city_name": "Ramgarh",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Ramgarh",
+    "api2_city": "ramgarh",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Ramgarh"
+  },
+  {
     "city_name": "Ranchi",
     "state": "Jharkhand",
     "is_ut": 0,
@@ -551,6 +2916,61 @@
     "api2_city": "ranchi",
     "api2_state": "jharkhand",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Sahibganj",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Sahibganj",
+    "api2_city": "sahibganj",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Sahibganj"
+  },
+  {
+    "city_name": "Saraikela Kharasawan",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Saraikela Kharasawan",
+    "api2_city": "saraikela-kharasawan",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Saraikela Kharasawan"
+  },
+  {
+    "city_name": "Simdega",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Simdega",
+    "api2_city": "simdega",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "Simdega"
+  },
+  {
+    "city_name": "West Singhbhum",
+    "state": "Jharkhand",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "West Singhbhum",
+    "api2_city": "west-singhbhum",
+    "api2_state": "jharkhand",
+    "is_top_city": 0,
+    "api3_name": "West Singhbhum"
+  },
+  {
+    "city_name": "Bagalkot",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Bagalkot",
+    "api2_city": "bagalkot",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Bagalkot"
   },
   {
     "city_name": "Bangalore",
@@ -563,6 +2983,17 @@
     "is_top_city": 1
   },
   {
+    "city_name": "Bangalore Rural",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Bangalore Rural",
+    "api2_city": "bangalore-rural",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Bangalore Rural"
+  },
+  {
     "city_name": "Belgaum",
     "state": "Karnataka",
     "is_ut": 0,
@@ -571,6 +3002,83 @@
     "api2_city": "belgaum",
     "api2_state": "karnataka",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Bellary",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Bellary",
+    "api2_city": "bellary",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Bellary"
+  },
+  {
+    "city_name": "Bidar",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Bidar",
+    "api2_city": "bidar",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Bidar"
+  },
+  {
+    "city_name": "Chamrajnagar",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Chamrajnagar",
+    "api2_city": "chamrajnagar",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Chamrajnagar"
+  },
+  {
+    "city_name": "Chikkaballapura",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Chikkaballapura",
+    "api2_city": "chikkaballapura",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Chikkaballapura"
+  },
+  {
+    "city_name": "Chikmagalur",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Chikmagalur",
+    "api2_city": "chikmagalur",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Chikmagalur"
+  },
+  {
+    "city_name": "Chitradurga",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Chitradurga",
+    "api2_city": "chitradurga",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Chitradurga"
+  },
+  {
+    "city_name": "Dakshin Kannad",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Dakshin Kannad",
+    "api2_city": "dakshin-kannad",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Dakshin Kannad"
   },
   {
     "city_name": "Davangere",
@@ -583,6 +3091,28 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Dharwad",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Dharwad",
+    "api2_city": "dharwad",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Dharwad"
+  },
+  {
+    "city_name": "Gadag",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Gadag",
+    "api2_city": "gadag",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Gadag"
+  },
+  {
     "city_name": "Gulbarga",
     "state": "Karnataka",
     "is_ut": 0,
@@ -591,6 +3121,28 @@
     "api2_city": "gulbarga",
     "api2_state": "karnataka",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Hassan",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Hassan",
+    "api2_city": "hassan",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Hassan"
+  },
+  {
+    "city_name": "Haveri",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Haveri",
+    "api2_city": "haveri",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Haveri"
   },
   {
     "city_name": "Hubli",
@@ -602,6 +3154,50 @@
     "api2_state": "karnataka",
     "is_top_city": 0,
     "api3_name": "Dharwad"
+  },
+  {
+    "city_name": "Kodagu",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Kodagu",
+    "api2_city": "kodagu",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Kodagu"
+  },
+  {
+    "city_name": "Kolar",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Kolar",
+    "api2_city": "kolar",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Kolar"
+  },
+  {
+    "city_name": "Koppal",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Koppal",
+    "api2_city": "koppal",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Koppal"
+  },
+  {
+    "city_name": "Mandya",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Mandya",
+    "api2_city": "mandya",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Mandya"
   },
   {
     "city_name": "Mangalore",
@@ -622,6 +3218,28 @@
     "api2_city": "mysore",
     "api2_state": "karnataka",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Raichur",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Raichur",
+    "api2_city": "raichur",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Raichur"
+  },
+  {
+    "city_name": "Ramanagara",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Ramanagara",
+    "api2_city": "ramanagara",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Ramanagara"
   },
   {
     "city_name": "Shimoga",
@@ -646,6 +3264,72 @@
     "api3_name": "Tumkur"
   },
   {
+    "city_name": "Udupi",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Udupi",
+    "api2_city": "udupi",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Udupi"
+  },
+  {
+    "city_name": "Uttar Kannad",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Uttar Kannad",
+    "api2_city": "uttar-kannad",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Uttar Kannad"
+  },
+  {
+    "city_name": "Yadgir",
+    "state": "Karnataka",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Yadgir",
+    "api2_city": "yadgir",
+    "api2_state": "karnataka",
+    "is_top_city": 0,
+    "api3_name": "Yadgir"
+  },
+  {
+    "city_name": "Alappuzha",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Alappuzha",
+    "api2_city": "alappuzha",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Alappuzha"
+  },
+  {
+    "city_name": "Ernakulam",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Ernakulam",
+    "api2_city": "ernakulam",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Ernakulam"
+  },
+  {
+    "city_name": "Idukki",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Idukki",
+    "api2_city": "idukki",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Idukki"
+  },
+  {
     "city_name": "Kannur",
     "state": "Kerala",
     "is_ut": 0,
@@ -655,6 +3339,17 @@
     "api2_state": "kerala",
     "is_top_city": 0,
     "api3_name": "Kannur"
+  },
+  {
+    "city_name": "Kasaragod",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Kasaragod",
+    "api2_city": "kasaragod",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Kasaragod"
   },
   {
     "city_name": "Kochi",
@@ -678,6 +3373,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Kottayam",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Kottayam",
+    "api2_city": "kottayam",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Kottayam"
+  },
+  {
     "city_name": "Kozhikode",
     "state": "Kerala",
     "is_ut": 0,
@@ -686,6 +3392,39 @@
     "api2_city": "kozhikode",
     "api2_state": "kerala",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Malappuram",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Malappuram",
+    "api2_city": "malappuram",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Malappuram"
+  },
+  {
+    "city_name": "Palakkad",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Palakkad",
+    "api2_city": "palakkad",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Palakkad"
+  },
+  {
+    "city_name": "Pathananthitta",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Pathananthitta",
+    "api2_city": "pathananthitta",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Pathananthitta"
   },
   {
     "city_name": "Thiruvananthapuram",
@@ -708,6 +3447,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Wayanad",
+    "state": "Kerala",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Wayanad",
+    "api2_city": "wayanad",
+    "api2_state": "kerala",
+    "is_top_city": 0,
+    "api3_name": "Wayanad"
+  },
+  {
     "city_name": "Leh",
     "state": "Ladakh",
     "is_ut": 1,
@@ -728,6 +3478,94 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Agar Malwa",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Agar Malwa",
+    "api2_city": "agar-malwa",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Agar Malwa"
+  },
+  {
+    "city_name": "Alirajpur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Alirajpur",
+    "api2_city": "alirajpur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Alirajpur"
+  },
+  {
+    "city_name": "Anupur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Anupur",
+    "api2_city": "anupur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Anupur"
+  },
+  {
+    "city_name": "Ashoknagar",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Ashoknagar",
+    "api2_city": "ashoknagar",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Ashoknagar"
+  },
+  {
+    "city_name": "Badwani",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Badwani",
+    "api2_city": "badwani",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Badwani"
+  },
+  {
+    "city_name": "Balaghat",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Balaghat",
+    "api2_city": "balaghat",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Balaghat"
+  },
+  {
+    "city_name": "Betul",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Betul",
+    "api2_city": "betul",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Betul"
+  },
+  {
+    "city_name": "Bhind",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Bhind",
+    "api2_city": "bhind",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Bhind"
+  },
+  {
     "city_name": "Bhopal",
     "state": "Madhya Pradesh",
     "is_ut": 0,
@@ -738,6 +3576,105 @@
     "is_top_city": 1
   },
   {
+    "city_name": "Burhanpur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Burhanpur",
+    "api2_city": "burhanpur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Burhanpur"
+  },
+  {
+    "city_name": "Chhatarpur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Chhatarpur",
+    "api2_city": "chhatarpur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Chhatarpur"
+  },
+  {
+    "city_name": "Chhindware",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Chhindware",
+    "api2_city": "chhindware",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Chhindware"
+  },
+  {
+    "city_name": "Damoh",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Damoh",
+    "api2_city": "damoh",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Damoh"
+  },
+  {
+    "city_name": "Datia",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Datia",
+    "api2_city": "datia",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Datia"
+  },
+  {
+    "city_name": "Dewas",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Dewas",
+    "api2_city": "dewas",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Dewas"
+  },
+  {
+    "city_name": "Dhar",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Dhar",
+    "api2_city": "dhar",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Dhar"
+  },
+  {
+    "city_name": "Dindori",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Dindori",
+    "api2_city": "dindori",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Dindori"
+  },
+  {
+    "city_name": "Guna",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Guna",
+    "api2_city": "guna",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Guna"
+  },
+  {
     "city_name": "Gwalior",
     "state": "Madhya Pradesh",
     "is_ut": 0,
@@ -746,6 +3683,28 @@
     "api2_city": "gwalior",
     "api2_state": "madhya-pradesh",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Harda",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Harda",
+    "api2_city": "harda",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Harda"
+  },
+  {
+    "city_name": "Hoshangabad",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Hoshangabad",
+    "api2_city": "hoshangabad",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Hoshangabad"
   },
   {
     "city_name": "Indore",
@@ -768,6 +3727,281 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Jahbua",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Jahbua",
+    "api2_city": "jahbua",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Jahbua"
+  },
+  {
+    "city_name": "Katni",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Katni",
+    "api2_city": "katni",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Katni"
+  },
+  {
+    "city_name": "Khandwa",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Khandwa",
+    "api2_city": "khandwa",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Khandwa"
+  },
+  {
+    "city_name": "Khargone",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Khargone",
+    "api2_city": "khargone",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Khargone"
+  },
+  {
+    "city_name": "Mandla",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Mandla",
+    "api2_city": "mandla",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Mandla"
+  },
+  {
+    "city_name": "Mandsaur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Mandsaur",
+    "api2_city": "mandsaur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Mandsaur"
+  },
+  {
+    "city_name": "Morena",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Morena",
+    "api2_city": "morena",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Morena"
+  },
+  {
+    "city_name": "Narsimhapur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Narsimhapur",
+    "api2_city": "narsimhapur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Narsimhapur"
+  },
+  {
+    "city_name": "Neemach",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Neemach",
+    "api2_city": "neemach",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Neemach"
+  },
+  {
+    "city_name": "Panna",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Panna",
+    "api2_city": "panna",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Panna"
+  },
+  {
+    "city_name": "Raisen",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Raisen",
+    "api2_city": "raisen",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Raisen"
+  },
+  {
+    "city_name": "Rajgarh",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Rajgarh",
+    "api2_city": "rajgarh",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Rajgarh"
+  },
+  {
+    "city_name": "Ratlam",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Ratlam",
+    "api2_city": "ratlam",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Ratlam"
+  },
+  {
+    "city_name": "Rewa",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Rewa",
+    "api2_city": "rewa",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Rewa"
+  },
+  {
+    "city_name": "Sagar",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Sagar",
+    "api2_city": "sagar",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sagar"
+  },
+  {
+    "city_name": "Satna",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Satna",
+    "api2_city": "satna",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Satna"
+  },
+  {
+    "city_name": "Sehore",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Sehore",
+    "api2_city": "sehore",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sehore"
+  },
+  {
+    "city_name": "Seoni",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Seoni",
+    "api2_city": "seoni",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Seoni"
+  },
+  {
+    "city_name": "Shahdol",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Shahdol",
+    "api2_city": "shahdol",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Shahdol"
+  },
+  {
+    "city_name": "Shajapur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Shajapur",
+    "api2_city": "shajapur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Shajapur"
+  },
+  {
+    "city_name": "Sheopur",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Sheopur",
+    "api2_city": "sheopur",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sheopur"
+  },
+  {
+    "city_name": "Shivpuri",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Shivpuri",
+    "api2_city": "shivpuri",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Shivpuri"
+  },
+  {
+    "city_name": "Sidhi",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Sidhi",
+    "api2_city": "sidhi",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sidhi"
+  },
+  {
+    "city_name": "Singrauli",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Singrauli",
+    "api2_city": "singrauli",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Singrauli"
+  },
+  {
+    "city_name": "Tikamgarh",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Tikamgarh",
+    "api2_city": "tikamgarh",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Tikamgarh"
+  },
+  {
     "city_name": "Ujjain",
     "state": "Madhya Pradesh",
     "is_ut": 0,
@@ -776,6 +4010,61 @@
     "api2_city": "ujjain",
     "api2_state": "madhya-pradesh",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Umaria",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Umaria",
+    "api2_city": "umaria",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Umaria"
+  },
+  {
+    "city_name": "Vidisha",
+    "state": "Madhya Pradesh",
+    "is_ut": 0,
+    "region": "central",
+    "api1_city": "Vidisha",
+    "api2_city": "vidisha",
+    "api2_state": "madhya-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Vidisha"
+  },
+  {
+    "city_name": "Ahmadnagar",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Ahmadnagar",
+    "api2_city": "ahmadnagar",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Ahmadnagar"
+  },
+  {
+    "city_name": "Akola",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Akola",
+    "api2_city": "akola",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Akola"
+  },
+  {
+    "city_name": "Amravati",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Amravati",
+    "api2_city": "amravati",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Amravati"
   },
   {
     "city_name": "Aurangabad",
@@ -788,6 +4077,127 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Bhandara",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Bhandara",
+    "api2_city": "bhandara",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Bhandara"
+  },
+  {
+    "city_name": "Bid",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Bid",
+    "api2_city": "bid",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Bid"
+  },
+  {
+    "city_name": "Buldhana",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Buldhana",
+    "api2_city": "buldhana",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Buldhana"
+  },
+  {
+    "city_name": "Chandrapur",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Chandrapur",
+    "api2_city": "chandrapur",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Chandrapur"
+  },
+  {
+    "city_name": "Dhule",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Dhule",
+    "api2_city": "dhule",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Dhule"
+  },
+  {
+    "city_name": "Gadchiroli",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Gadchiroli",
+    "api2_city": "gadchiroli",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Gadchiroli"
+  },
+  {
+    "city_name": "Gondia",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Gondia",
+    "api2_city": "gondia",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Gondia"
+  },
+  {
+    "city_name": "Greater Mumbai",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Greater Mumbai",
+    "api2_city": "greater-mumbai",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Greater Mumbai"
+  },
+  {
+    "city_name": "Hingoli",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Hingoli",
+    "api2_city": "hingoli",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Hingoli"
+  },
+  {
+    "city_name": "Jalgaon",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Jalgaon",
+    "api2_city": "jalgaon",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Jalgaon"
+  },
+  {
+    "city_name": "Jalna",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Jalna",
+    "api2_city": "jalna",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Jalna"
+  },
+  {
     "city_name": "Kolhapur",
     "state": "Maharashtra",
     "is_ut": 0,
@@ -796,6 +4206,17 @@
     "api2_city": "kolhapur",
     "api2_state": "maharashtra",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Latur",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Latur",
+    "api2_city": "latur",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Latur"
   },
   {
     "city_name": "Mumbai",
@@ -809,6 +4230,17 @@
     "api3_name": "Mumbai City"
   },
   {
+    "city_name": "Mumbai City",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Mumbai City",
+    "api2_city": "mumbai-city",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Mumbai City"
+  },
+  {
     "city_name": "Nagpur",
     "state": "Maharashtra",
     "is_ut": 0,
@@ -817,6 +4249,28 @@
     "api2_city": "nagpur",
     "api2_state": "maharashtra",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Nanded",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Nanded",
+    "api2_city": "nanded",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Nanded"
+  },
+  {
+    "city_name": "Nandurbar",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Nandurbar",
+    "api2_city": "nandurbar",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Nandurbar"
   },
   {
     "city_name": "Nashik",
@@ -829,6 +4283,39 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Osmanabad",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Osmanabad",
+    "api2_city": "osmanabad",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Osmanabad"
+  },
+  {
+    "city_name": "Palghar",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Palghar",
+    "api2_city": "palghar",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Palghar"
+  },
+  {
+    "city_name": "Parbhani",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Parbhani",
+    "api2_city": "parbhani",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Parbhani"
+  },
+  {
     "city_name": "Pune",
     "state": "Maharashtra",
     "is_ut": 0,
@@ -837,6 +4324,50 @@
     "api2_city": "pune",
     "api2_state": "maharashtra",
     "is_top_city": 1
+  },
+  {
+    "city_name": "Ratnagiri",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Ratnagiri",
+    "api2_city": "ratnagiri",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Ratnagiri"
+  },
+  {
+    "city_name": "Sangli",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Sangli",
+    "api2_city": "sangli",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Sangli"
+  },
+  {
+    "city_name": "Satara",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Satara",
+    "api2_city": "satara",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Satara"
+  },
+  {
+    "city_name": "Sindhudurg",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Sindhudurg",
+    "api2_city": "sindhudurg",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Sindhudurg"
   },
   {
     "city_name": "Solapur",
@@ -859,6 +4390,83 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Wardha",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Wardha",
+    "api2_city": "wardha",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Wardha"
+  },
+  {
+    "city_name": "Washim",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Washim",
+    "api2_city": "washim",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Washim"
+  },
+  {
+    "city_name": "Yavatmal",
+    "state": "Maharashtra",
+    "is_ut": 0,
+    "region": "west",
+    "api1_city": "Yavatmal",
+    "api2_city": "yavatmal",
+    "api2_state": "maharashtra",
+    "is_top_city": 0,
+    "api3_name": "Yavatmal"
+  },
+  {
+    "city_name": "Bishnupur",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Bishnupur",
+    "api2_city": "bishnupur",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Bishnupur"
+  },
+  {
+    "city_name": "Chandel",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Chandel",
+    "api2_city": "chandel",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Chandel"
+  },
+  {
+    "city_name": "Churachandpur",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Churachandpur",
+    "api2_city": "churachandpur",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Churachandpur"
+  },
+  {
+    "city_name": "East Imphal",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "East Imphal",
+    "api2_city": "east-imphal",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "East Imphal"
+  },
+  {
     "city_name": "Imphal",
     "state": "Manipur",
     "is_ut": 0,
@@ -868,6 +4476,171 @@
     "api2_state": "manipur",
     "is_top_city": 0,
     "api3_name": "East Imphal"
+  },
+  {
+    "city_name": "Jiribam",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Jiribam",
+    "api2_city": "jiribam",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Jiribam"
+  },
+  {
+    "city_name": "Kakching",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Kakching",
+    "api2_city": "kakching",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Kakching"
+  },
+  {
+    "city_name": "Kangpokpi",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Kangpokpi",
+    "api2_city": "kangpokpi",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Kangpokpi"
+  },
+  {
+    "city_name": "Noney",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Noney",
+    "api2_city": "noney",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Noney"
+  },
+  {
+    "city_name": "Senapati",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Senapati",
+    "api2_city": "senapati",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Senapati"
+  },
+  {
+    "city_name": "Tamenglong",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Tamenglong",
+    "api2_city": "tamenglong",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Tamenglong"
+  },
+  {
+    "city_name": "Tengnoupal",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Tengnoupal",
+    "api2_city": "tengnoupal",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Tengnoupal"
+  },
+  {
+    "city_name": "Thoubal",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Thoubal",
+    "api2_city": "thoubal",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Thoubal"
+  },
+  {
+    "city_name": "Ukhrul",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Ukhrul",
+    "api2_city": "ukhrul",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "Ukhrul"
+  },
+  {
+    "city_name": "West Imphal",
+    "state": "Manipur",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West Imphal",
+    "api2_city": "west-imphal",
+    "api2_state": "manipur",
+    "is_top_city": 0,
+    "api3_name": "West Imphal"
+  },
+  {
+    "city_name": "East Garo Hills",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "East Garo Hills",
+    "api2_city": "east-garo-hills",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "East Garo Hills"
+  },
+  {
+    "city_name": "East Jaintia Hills",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "East Jaintia Hills",
+    "api2_city": "east-jaintia-hills",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "East Jaintia Hills"
+  },
+  {
+    "city_name": "East Khasi Hills",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "East Khasi Hills",
+    "api2_city": "east-khasi-hills",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "East Khasi Hills"
+  },
+  {
+    "city_name": "North Garo Hills",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "North Garo Hills",
+    "api2_city": "north-garo-hills",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "North Garo Hills"
+  },
+  {
+    "city_name": "Ri Bhoi",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Ri Bhoi",
+    "api2_city": "ri-bhoi",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "Ri Bhoi"
   },
   {
     "city_name": "Shillong",
@@ -881,6 +4654,50 @@
     "api3_name": "East Khasi Hills"
   },
   {
+    "city_name": "South Garo Hills",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "South Garo Hills",
+    "api2_city": "south-garo-hills",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "South Garo Hills"
+  },
+  {
+    "city_name": "Southwest Khasi Hils",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Southwest Khasi Hils",
+    "api2_city": "southwest-khasi-hils",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "Southwest Khasi Hils"
+  },
+  {
+    "city_name": "West Garo Hills",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West Garo Hills",
+    "api2_city": "west-garo-hills",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "West Garo Hills"
+  },
+  {
+    "city_name": "West Khasi Hills",
+    "state": "Meghalaya",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West Khasi Hills",
+    "api2_city": "west-khasi-hills",
+    "api2_state": "meghalaya",
+    "is_top_city": 0,
+    "api3_name": "West Khasi Hills"
+  },
+  {
     "city_name": "Aizawl",
     "state": "Mizoram",
     "is_ut": 0,
@@ -889,6 +4706,83 @@
     "api2_city": "aizawl",
     "api2_state": "mizoram",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Champhai",
+    "state": "Mizoram",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Champhai",
+    "api2_city": "champhai",
+    "api2_state": "mizoram",
+    "is_top_city": 0,
+    "api3_name": "Champhai"
+  },
+  {
+    "city_name": "Kolasib",
+    "state": "Mizoram",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Kolasib",
+    "api2_city": "kolasib",
+    "api2_state": "mizoram",
+    "is_top_city": 0,
+    "api3_name": "Kolasib"
+  },
+  {
+    "city_name": "Lawngtlai",
+    "state": "Mizoram",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Lawngtlai",
+    "api2_city": "lawngtlai",
+    "api2_state": "mizoram",
+    "is_top_city": 0,
+    "api3_name": "Lawngtlai"
+  },
+  {
+    "city_name": "Lunglei",
+    "state": "Mizoram",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Lunglei",
+    "api2_city": "lunglei",
+    "api2_state": "mizoram",
+    "is_top_city": 0,
+    "api3_name": "Lunglei"
+  },
+  {
+    "city_name": "Mamit",
+    "state": "Mizoram",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Mamit",
+    "api2_city": "mamit",
+    "api2_state": "mizoram",
+    "is_top_city": 0,
+    "api3_name": "Mamit"
+  },
+  {
+    "city_name": "Saiha",
+    "state": "Mizoram",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Saiha",
+    "api2_city": "saiha",
+    "api2_state": "mizoram",
+    "is_top_city": 0,
+    "api3_name": "Saiha"
+  },
+  {
+    "city_name": "Serchhip",
+    "state": "Mizoram",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Serchhip",
+    "api2_city": "serchhip",
+    "api2_state": "mizoram",
+    "is_top_city": 0,
+    "api3_name": "Serchhip"
   },
   {
     "city_name": "Dimapur",
@@ -901,6 +4795,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Kiphere",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Kiphere",
+    "api2_city": "kiphere",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Kiphere"
+  },
+  {
     "city_name": "Kohima",
     "state": "Nagaland",
     "is_ut": 0,
@@ -909,6 +4814,138 @@
     "api2_city": "kohima",
     "api2_state": "nagaland",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Longleng",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Longleng",
+    "api2_city": "longleng",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Longleng"
+  },
+  {
+    "city_name": "Mokokchung",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Mokokchung",
+    "api2_city": "mokokchung",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Mokokchung"
+  },
+  {
+    "city_name": "Mon",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Mon",
+    "api2_city": "mon",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Mon"
+  },
+  {
+    "city_name": "Peren",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Peren",
+    "api2_city": "peren",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Peren"
+  },
+  {
+    "city_name": "Phek",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Phek",
+    "api2_city": "phek",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Phek"
+  },
+  {
+    "city_name": "Tuensang",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Tuensang",
+    "api2_city": "tuensang",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Tuensang"
+  },
+  {
+    "city_name": "Wokha",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Wokha",
+    "api2_city": "wokha",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Wokha"
+  },
+  {
+    "city_name": "Zunheboto",
+    "state": "Nagaland",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Zunheboto",
+    "api2_city": "zunheboto",
+    "api2_state": "nagaland",
+    "is_top_city": 0,
+    "api3_name": "Zunheboto"
+  },
+  {
+    "city_name": "Angul",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Angul",
+    "api2_city": "angul",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Angul"
+  },
+  {
+    "city_name": "Baleshwar",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Baleshwar",
+    "api2_city": "baleshwar",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Baleshwar"
+  },
+  {
+    "city_name": "Bargarh",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Bargarh",
+    "api2_city": "bargarh",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Bargarh"
+  },
+  {
+    "city_name": "Bhadrak",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Bhadrak",
+    "api2_city": "bhadrak",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Bhadrak"
   },
   {
     "city_name": "Bhubaneswar",
@@ -922,6 +4959,28 @@
     "api3_name": "Khordha"
   },
   {
+    "city_name": "Bolangir",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Bolangir",
+    "api2_city": "bolangir",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Bolangir"
+  },
+  {
+    "city_name": "Boudh",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Boudh",
+    "api2_city": "boudh",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Boudh"
+  },
+  {
     "city_name": "Cuttack",
     "state": "Odisha",
     "is_ut": 0,
@@ -930,6 +4989,226 @@
     "api2_city": "cuttack",
     "api2_state": "odisha",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Deogarh",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Deogarh",
+    "api2_city": "deogarh",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Deogarh"
+  },
+  {
+    "city_name": "Dhenkanal",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Dhenkanal",
+    "api2_city": "dhenkanal",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Dhenkanal"
+  },
+  {
+    "city_name": "Gajapati",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Gajapati",
+    "api2_city": "gajapati",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Gajapati"
+  },
+  {
+    "city_name": "Ganjam",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Ganjam",
+    "api2_city": "ganjam",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Ganjam"
+  },
+  {
+    "city_name": "Jagatsinghpur",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jagatsinghpur",
+    "api2_city": "jagatsinghpur",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Jagatsinghpur"
+  },
+  {
+    "city_name": "Jajpur",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jajpur",
+    "api2_city": "jajpur",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Jajpur"
+  },
+  {
+    "city_name": "Jharsuguda",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jharsuguda",
+    "api2_city": "jharsuguda",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Jharsuguda"
+  },
+  {
+    "city_name": "Kalahandi",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Kalahandi",
+    "api2_city": "kalahandi",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Kalahandi"
+  },
+  {
+    "city_name": "Kandhamal",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Kandhamal",
+    "api2_city": "kandhamal",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Kandhamal"
+  },
+  {
+    "city_name": "Kendrapara",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Kendrapara",
+    "api2_city": "kendrapara",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Kendrapara"
+  },
+  {
+    "city_name": "Keonjhar",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Keonjhar",
+    "api2_city": "keonjhar",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Keonjhar"
+  },
+  {
+    "city_name": "Khordha",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Khordha",
+    "api2_city": "khordha",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Khordha"
+  },
+  {
+    "city_name": "Koraput",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Koraput",
+    "api2_city": "koraput",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Koraput"
+  },
+  {
+    "city_name": "Malkangiri",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Malkangiri",
+    "api2_city": "malkangiri",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Malkangiri"
+  },
+  {
+    "city_name": "Mayurbhanj",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Mayurbhanj",
+    "api2_city": "mayurbhanj",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Mayurbhanj"
+  },
+  {
+    "city_name": "Nabarangapur",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Nabarangapur",
+    "api2_city": "nabarangapur",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Nabarangapur"
+  },
+  {
+    "city_name": "Nayagarh",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Nayagarh",
+    "api2_city": "nayagarh",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Nayagarh"
+  },
+  {
+    "city_name": "Nuaparha",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Nuaparha",
+    "api2_city": "nuaparha",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Nuaparha"
+  },
+  {
+    "city_name": "Puri",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Puri",
+    "api2_city": "puri",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Puri"
+  },
+  {
+    "city_name": "Rayagada",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Rayagada",
+    "api2_city": "rayagada",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Rayagada"
   },
   {
     "city_name": "Rourkela",
@@ -954,6 +5233,50 @@
     "api3_name": "Sambalpur"
   },
   {
+    "city_name": "Sundargarh",
+    "state": "Odisha",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Sundargarh",
+    "api2_city": "sundargarh",
+    "api2_state": "odisha",
+    "is_top_city": 0,
+    "api3_name": "Sundargarh"
+  },
+  {
+    "city_name": "Karaikal",
+    "state": "Puducherry",
+    "is_ut": 1,
+    "region": "south",
+    "api1_city": "Karaikal",
+    "api2_city": "karaikal",
+    "api2_state": "puducherry",
+    "is_top_city": 0,
+    "api3_name": "Karaikal"
+  },
+  {
+    "city_name": "Mahe",
+    "state": "Puducherry",
+    "is_ut": 1,
+    "region": "south",
+    "api1_city": "Mahe",
+    "api2_city": "mahe",
+    "api2_state": "puducherry",
+    "is_top_city": 0,
+    "api3_name": "Mahe"
+  },
+  {
+    "city_name": "Pondicherry",
+    "state": "Puducherry",
+    "is_ut": 1,
+    "region": "south",
+    "api1_city": "Pondicherry",
+    "api2_city": "pondicherry",
+    "api2_state": "puducherry",
+    "is_top_city": 0,
+    "api3_name": "Pondicherry"
+  },
+  {
     "city_name": "Puducherry",
     "state": "Puducherry",
     "is_ut": 1,
@@ -963,6 +5286,17 @@
     "api2_state": "puducherry",
     "is_top_city": 0,
     "api3_name": "Pondicherry"
+  },
+  {
+    "city_name": "Yanam",
+    "state": "Puducherry",
+    "is_ut": 1,
+    "region": "south",
+    "api1_city": "Yanam",
+    "api2_city": "yanam",
+    "api2_state": "puducherry",
+    "is_top_city": 0,
+    "api3_name": "Yanam"
   },
   {
     "city_name": "Amritsar",
@@ -975,6 +5309,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Barnala",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Barnala",
+    "api2_city": "barnala",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Barnala"
+  },
+  {
     "city_name": "Bathinda",
     "state": "Punjab",
     "is_ut": 0,
@@ -983,6 +5328,72 @@
     "api2_city": "bathinda",
     "api2_state": "punjab",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Faridkot",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Faridkot",
+    "api2_city": "faridkot",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Faridkot"
+  },
+  {
+    "city_name": "Fatehgarh Sahib",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Fatehgarh Sahib",
+    "api2_city": "fatehgarh-sahib",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Fatehgarh Sahib"
+  },
+  {
+    "city_name": "Fazilka",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Fazilka",
+    "api2_city": "fazilka",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Fazilka"
+  },
+  {
+    "city_name": "Firozpur",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Firozpur",
+    "api2_city": "firozpur",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Firozpur"
+  },
+  {
+    "city_name": "Gurdaspur",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Gurdaspur",
+    "api2_city": "gurdaspur",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Gurdaspur"
+  },
+  {
+    "city_name": "Hoshiarpur",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Hoshiarpur",
+    "api2_city": "hoshiarpur",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Hoshiarpur"
   },
   {
     "city_name": "Jalandhar",
@@ -995,6 +5406,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Kapurthala",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kapurthala",
+    "api2_city": "kapurthala",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Kapurthala"
+  },
+  {
     "city_name": "Ludhiana",
     "state": "Punjab",
     "is_ut": 0,
@@ -1003,6 +5425,28 @@
     "api2_city": "ludhiana",
     "api2_state": "punjab",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Mansa",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Mansa",
+    "api2_city": "mansa",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Mansa"
+  },
+  {
+    "city_name": "Moga",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Moga",
+    "api2_city": "moga",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Moga"
   },
   {
     "city_name": "Mohali",
@@ -1016,6 +5460,28 @@
     "api3_name": "Mohali"
   },
   {
+    "city_name": "Muktsar",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Muktsar",
+    "api2_city": "muktsar",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Muktsar"
+  },
+  {
+    "city_name": "Pathankot",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Pathankot",
+    "api2_city": "pathankot",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Pathankot"
+  },
+  {
     "city_name": "Patiala",
     "state": "Punjab",
     "is_ut": 0,
@@ -1024,6 +5490,61 @@
     "api2_city": "patiala",
     "api2_state": "punjab",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Rupnagar",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Rupnagar",
+    "api2_city": "rupnagar",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Rupnagar"
+  },
+  {
+    "city_name": "Sangrur",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sangrur",
+    "api2_city": "sangrur",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Sangrur"
+  },
+  {
+    "city_name": "Sas Nagar",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sas Nagar",
+    "api2_city": "sas-nagar",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Sas Nagar"
+  },
+  {
+    "city_name": "Shd Bhagat Singh Ngr",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Shd Bhagat Singh Ngr",
+    "api2_city": "shd-bhagat-singh-ngr",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Shd Bhagat Singh Ngr"
+  },
+  {
+    "city_name": "Tarn Taran",
+    "state": "Punjab",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Tarn Taran",
+    "api2_city": "tarn-taran",
+    "api2_state": "punjab",
+    "is_top_city": 0,
+    "api3_name": "Tarn Taran"
   },
   {
     "city_name": "Ajmer",
@@ -1036,6 +5557,72 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Alwar",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Alwar",
+    "api2_city": "alwar",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Alwar"
+  },
+  {
+    "city_name": "Banswara",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Banswara",
+    "api2_city": "banswara",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Banswara"
+  },
+  {
+    "city_name": "Baran",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Baran",
+    "api2_city": "baran",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Baran"
+  },
+  {
+    "city_name": "Barmer",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Barmer",
+    "api2_city": "barmer",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Barmer"
+  },
+  {
+    "city_name": "Bharatpur",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bharatpur",
+    "api2_city": "bharatpur",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Bharatpur"
+  },
+  {
+    "city_name": "Bhilwara",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bhilwara",
+    "api2_city": "bhilwara",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Bhilwara"
+  },
+  {
     "city_name": "Bikaner",
     "state": "Rajasthan",
     "is_ut": 0,
@@ -1044,6 +5631,94 @@
     "api2_city": "bikaner",
     "api2_state": "rajasthan",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Bundi",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bundi",
+    "api2_city": "bundi",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Bundi"
+  },
+  {
+    "city_name": "Chittaurgarh",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Chittaurgarh",
+    "api2_city": "chittaurgarh",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Chittaurgarh"
+  },
+  {
+    "city_name": "Churu",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Churu",
+    "api2_city": "churu",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Churu"
+  },
+  {
+    "city_name": "Dausa",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Dausa",
+    "api2_city": "dausa",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Dausa"
+  },
+  {
+    "city_name": "Dhaulpur",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Dhaulpur",
+    "api2_city": "dhaulpur",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Dhaulpur"
+  },
+  {
+    "city_name": "Dungarpur",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Dungarpur",
+    "api2_city": "dungarpur",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Dungarpur"
+  },
+  {
+    "city_name": "Ganganagar",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Ganganagar",
+    "api2_city": "ganganagar",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Ganganagar"
+  },
+  {
+    "city_name": "Hanumangarh",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Hanumangarh",
+    "api2_city": "hanumangarh",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Hanumangarh"
   },
   {
     "city_name": "Jaipur",
@@ -1056,6 +5731,50 @@
     "is_top_city": 1
   },
   {
+    "city_name": "Jaisalmer",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jaisalmer",
+    "api2_city": "jaisalmer",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Jaisalmer"
+  },
+  {
+    "city_name": "Jalor",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jalor",
+    "api2_city": "jalor",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Jalor"
+  },
+  {
+    "city_name": "Jhalawar",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jhalawar",
+    "api2_city": "jhalawar",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Jhalawar"
+  },
+  {
+    "city_name": "Jhunjhunun",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jhunjhunun",
+    "api2_city": "jhunjhunun",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Jhunjhunun"
+  },
+  {
     "city_name": "Jodhpur",
     "state": "Rajasthan",
     "is_ut": 0,
@@ -1064,6 +5783,17 @@
     "api2_city": "jodhpur",
     "api2_state": "rajasthan",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Karauli",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Karauli",
+    "api2_city": "karauli",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Karauli"
   },
   {
     "city_name": "Kota",
@@ -1076,6 +5806,94 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Nagaur",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Nagaur",
+    "api2_city": "nagaur",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Nagaur"
+  },
+  {
+    "city_name": "Pali",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Pali",
+    "api2_city": "pali",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Pali"
+  },
+  {
+    "city_name": "Pratapgarh",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Pratapgarh",
+    "api2_city": "pratapgarh",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Pratapgarh"
+  },
+  {
+    "city_name": "Rajsamand",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Rajsamand",
+    "api2_city": "rajsamand",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Rajsamand"
+  },
+  {
+    "city_name": "Sawaimadhopur",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sawaimadhopur",
+    "api2_city": "sawaimadhopur",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Sawaimadhopur"
+  },
+  {
+    "city_name": "Sikar",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sikar",
+    "api2_city": "sikar",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Sikar"
+  },
+  {
+    "city_name": "Sirohi",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sirohi",
+    "api2_city": "sirohi",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Sirohi"
+  },
+  {
+    "city_name": "Tonk",
+    "state": "Rajasthan",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Tonk",
+    "api2_city": "tonk",
+    "api2_state": "rajasthan",
+    "is_top_city": 0,
+    "api3_name": "Tonk"
+  },
+  {
     "city_name": "Udaipur",
     "state": "Rajasthan",
     "is_ut": 0,
@@ -1086,6 +5904,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "East District",
+    "state": "Sikkim",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "East District",
+    "api2_city": "east-district",
+    "api2_state": "sikkim",
+    "is_top_city": 0,
+    "api3_name": "East District"
+  },
+  {
     "city_name": "Gangtok",
     "state": "Sikkim",
     "is_ut": 0,
@@ -1094,6 +5923,50 @@
     "api2_city": "gangtok",
     "api2_state": "sikkim",
     "is_top_city": 0
+  },
+  {
+    "city_name": "North District",
+    "state": "Sikkim",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "North District",
+    "api2_city": "north-district",
+    "api2_state": "sikkim",
+    "is_top_city": 0,
+    "api3_name": "North District"
+  },
+  {
+    "city_name": "South District",
+    "state": "Sikkim",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "South District",
+    "api2_city": "south-district",
+    "api2_state": "sikkim",
+    "is_top_city": 0,
+    "api3_name": "South District"
+  },
+  {
+    "city_name": "West District",
+    "state": "Sikkim",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West District",
+    "api2_city": "west-district",
+    "api2_state": "sikkim",
+    "is_top_city": 0,
+    "api3_name": "West District"
+  },
+  {
+    "city_name": "Ariyalur",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Ariyalur",
+    "api2_city": "ariyalur",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Ariyalur"
   },
   {
     "city_name": "Chennai",
@@ -1116,6 +5989,39 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Cuddalore",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Cuddalore",
+    "api2_city": "cuddalore",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Cuddalore"
+  },
+  {
+    "city_name": "Dharmapuri",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Dharmapuri",
+    "api2_city": "dharmapuri",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Dharmapuri"
+  },
+  {
+    "city_name": "Dindigul",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Dindigul",
+    "api2_city": "dindigul",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Dindigul"
+  },
+  {
     "city_name": "Erode",
     "state": "Tamil Nadu",
     "is_ut": 0,
@@ -1124,6 +6030,50 @@
     "api2_city": "erode",
     "api2_state": "tamil-nadu",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Kanchipuram",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Kanchipuram",
+    "api2_city": "kanchipuram",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Kanchipuram"
+  },
+  {
+    "city_name": "Kanniyakumari",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Kanniyakumari",
+    "api2_city": "kanniyakumari",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Kanniyakumari"
+  },
+  {
+    "city_name": "Karur",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Karur",
+    "api2_city": "karur",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Karur"
+  },
+  {
+    "city_name": "Krishnagiri",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Krishnagiri",
+    "api2_city": "krishnagiri",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Krishnagiri"
   },
   {
     "city_name": "Madurai",
@@ -1136,6 +6086,72 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Nagapattinam",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Nagapattinam",
+    "api2_city": "nagapattinam",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Nagapattinam"
+  },
+  {
+    "city_name": "Namakkal",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Namakkal",
+    "api2_city": "namakkal",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Namakkal"
+  },
+  {
+    "city_name": "Nilgiris",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Nilgiris",
+    "api2_city": "nilgiris",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Nilgiris"
+  },
+  {
+    "city_name": "Perambalur",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Perambalur",
+    "api2_city": "perambalur",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Perambalur"
+  },
+  {
+    "city_name": "Pudukkottai",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Pudukkottai",
+    "api2_city": "pudukkottai",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Pudukkottai"
+  },
+  {
+    "city_name": "Ramanathapuram",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Ramanathapuram",
+    "api2_city": "ramanathapuram",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Ramanathapuram"
+  },
+  {
     "city_name": "Salem",
     "state": "Tamil Nadu",
     "is_ut": 0,
@@ -1144,6 +6160,61 @@
     "api2_city": "salem",
     "api2_state": "tamil-nadu",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Sivaganga",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Sivaganga",
+    "api2_city": "sivaganga",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Sivaganga"
+  },
+  {
+    "city_name": "Teni",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Teni",
+    "api2_city": "teni",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Teni"
+  },
+  {
+    "city_name": "Thanjavur",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Thanjavur",
+    "api2_city": "thanjavur",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Thanjavur"
+  },
+  {
+    "city_name": "Thiruvarur",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Thiruvarur",
+    "api2_city": "thiruvarur",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Thiruvarur"
+  },
+  {
+    "city_name": "Tiruchchirappalli",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Tiruchchirappalli",
+    "api2_city": "tiruchchirappalli",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Tiruchchirappalli"
   },
   {
     "city_name": "Tiruchirappalli",
@@ -1179,6 +6250,39 @@
     "api3_name": "Tirupur"
   },
   {
+    "city_name": "Tiruvallur",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Tiruvallur",
+    "api2_city": "tiruvallur",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Tiruvallur"
+  },
+  {
+    "city_name": "Tiruvannamalai",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Tiruvannamalai",
+    "api2_city": "tiruvannamalai",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Tiruvannamalai"
+  },
+  {
+    "city_name": "Tuticorin",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Tuticorin",
+    "api2_city": "tuticorin",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Tuticorin"
+  },
+  {
     "city_name": "Vellore",
     "state": "Tamil Nadu",
     "is_ut": 0,
@@ -1189,6 +6293,50 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Viluppuram",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Viluppuram",
+    "api2_city": "viluppuram",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Viluppuram"
+  },
+  {
+    "city_name": "Virudunagar",
+    "state": "Tamil Nadu",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Virudunagar",
+    "api2_city": "virudunagar",
+    "api2_state": "tamil-nadu",
+    "is_top_city": 0,
+    "api3_name": "Virudunagar"
+  },
+  {
+    "city_name": "Adilabad",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Adilabad",
+    "api2_city": "adilabad",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Adilabad"
+  },
+  {
+    "city_name": "Bhadradri Kothagudem",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Bhadradri Kothagudem",
+    "api2_city": "bhadradri-kothagudem",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Bhadradri Kothagudem"
+  },
+  {
     "city_name": "Hyderabad",
     "state": "Telangana",
     "is_ut": 0,
@@ -1197,6 +6345,72 @@
     "api2_city": "hyderabad",
     "api2_state": "telangana",
     "is_top_city": 1
+  },
+  {
+    "city_name": "Jagitial",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Jagitial",
+    "api2_city": "jagitial",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Jagitial"
+  },
+  {
+    "city_name": "Jangaon",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Jangaon",
+    "api2_city": "jangaon",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Jangaon"
+  },
+  {
+    "city_name": "Jayashankar Bhupalpa",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Jayashankar Bhupalpa",
+    "api2_city": "jayashankar-bhupalpa",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Jayashankar Bhupalpa"
+  },
+  {
+    "city_name": "Jogulamba Gadwal",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Jogulamba Gadwal",
+    "api2_city": "jogulamba-gadwal",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Jogulamba Gadwal"
+  },
+  {
+    "city_name": "Kamareddy",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Kamareddy",
+    "api2_city": "kamareddy",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Kamareddy"
+  },
+  {
+    "city_name": "Karim Nagar",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Karim Nagar",
+    "api2_city": "karim-nagar",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Karim Nagar"
   },
   {
     "city_name": "Karimnagar",
@@ -1210,6 +6424,138 @@
     "api3_name": "Karim Nagar"
   },
   {
+    "city_name": "Khammam",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Khammam",
+    "api2_city": "khammam",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Khammam"
+  },
+  {
+    "city_name": "Komram Bheem Asifaba",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Komram Bheem Asifaba",
+    "api2_city": "komram-bheem-asifaba",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Komram Bheem Asifaba"
+  },
+  {
+    "city_name": "Mahabubabad",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Mahabubabad",
+    "api2_city": "mahabubabad",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Mahabubabad"
+  },
+  {
+    "city_name": "Mancherial",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Mancherial",
+    "api2_city": "mancherial",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Mancherial"
+  },
+  {
+    "city_name": "Medak",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Medak",
+    "api2_city": "medak",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Medak"
+  },
+  {
+    "city_name": "Medchal Malkajgiri",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Medchal Malkajgiri",
+    "api2_city": "medchal-malkajgiri",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Medchal Malkajgiri"
+  },
+  {
+    "city_name": "Mehabubnagar",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Mehabubnagar",
+    "api2_city": "mehabubnagar",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Mehabubnagar"
+  },
+  {
+    "city_name": "Mulugu",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Mulugu",
+    "api2_city": "mulugu",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Mulugu"
+  },
+  {
+    "city_name": "Nagarkurnool",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Nagarkurnool",
+    "api2_city": "nagarkurnool",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Nagarkurnool"
+  },
+  {
+    "city_name": "Nalgonda",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Nalgonda",
+    "api2_city": "nalgonda",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Nalgonda"
+  },
+  {
+    "city_name": "Narayanpet",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Narayanpet",
+    "api2_city": "narayanpet",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Narayanpet"
+  },
+  {
+    "city_name": "Nirmal",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Nirmal",
+    "api2_city": "nirmal",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Nirmal"
+  },
+  {
     "city_name": "Nizamabad",
     "state": "Telangana",
     "is_ut": 0,
@@ -1218,6 +6564,94 @@
     "api2_city": "nizamabad",
     "api2_state": "telangana",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Peddapalli",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Peddapalli",
+    "api2_city": "peddapalli",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Peddapalli"
+  },
+  {
+    "city_name": "Rajanna Sircilla",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Rajanna Sircilla",
+    "api2_city": "rajanna-sircilla",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Rajanna Sircilla"
+  },
+  {
+    "city_name": "Rangareddi",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Rangareddi",
+    "api2_city": "rangareddi",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Rangareddi"
+  },
+  {
+    "city_name": "Sangareddy",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Sangareddy",
+    "api2_city": "sangareddy",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Sangareddy"
+  },
+  {
+    "city_name": "Siddipet",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Siddipet",
+    "api2_city": "siddipet",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Siddipet"
+  },
+  {
+    "city_name": "Suryapet",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Suryapet",
+    "api2_city": "suryapet",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Suryapet"
+  },
+  {
+    "city_name": "Vikarabad",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Vikarabad",
+    "api2_city": "vikarabad",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Vikarabad"
+  },
+  {
+    "city_name": "Wanaparthy",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Wanaparthy",
+    "api2_city": "wanaparthy",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Wanaparthy"
   },
   {
     "city_name": "Warangal",
@@ -1230,12 +6664,122 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Warangal Rural",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Warangal Rural",
+    "api2_city": "warangal-rural",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Warangal Rural"
+  },
+  {
+    "city_name": "Yadadri Bhuvanagiri",
+    "state": "Telangana",
+    "is_ut": 0,
+    "region": "south",
+    "api1_city": "Yadadri Bhuvanagiri",
+    "api2_city": "yadadri-bhuvanagiri",
+    "api2_state": "telangana",
+    "is_top_city": 0,
+    "api3_name": "Yadadri Bhuvanagiri"
+  },
+  {
     "city_name": "Agartala",
     "state": "Tripura",
     "is_ut": 0,
     "region": "northeast",
     "api1_city": "Agartala",
     "api2_city": "agartala",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "West Tripura"
+  },
+  {
+    "city_name": "Dhalai",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Dhalai",
+    "api2_city": "dhalai",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "Dhalai"
+  },
+  {
+    "city_name": "Gomati",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Gomati",
+    "api2_city": "gomati",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "Gomati"
+  },
+  {
+    "city_name": "Khowai",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Khowai",
+    "api2_city": "khowai",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "Khowai"
+  },
+  {
+    "city_name": "North Tripura",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "North Tripura",
+    "api2_city": "north-tripura",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "North Tripura"
+  },
+  {
+    "city_name": "Sepahijhala",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Sepahijhala",
+    "api2_city": "sepahijhala",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "Sepahijhala"
+  },
+  {
+    "city_name": "South Tripura",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "South Tripura",
+    "api2_city": "south-tripura",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "South Tripura"
+  },
+  {
+    "city_name": "Unakoti",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "Unakoti",
+    "api2_city": "unakoti",
+    "api2_state": "tripura",
+    "is_top_city": 0,
+    "api3_name": "Unakoti"
+  },
+  {
+    "city_name": "West Tripura",
+    "state": "Tripura",
+    "is_ut": 0,
+    "region": "northeast",
+    "api1_city": "West Tripura",
+    "api2_city": "west-tripura",
     "api2_state": "tripura",
     "is_top_city": 0,
     "api3_name": "West Tripura"
@@ -1261,6 +6805,127 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Allahabad",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Allahabad",
+    "api2_city": "allahabad",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Allahabad"
+  },
+  {
+    "city_name": "Ambedkarnagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Ambedkarnagar",
+    "api2_city": "ambedkarnagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Ambedkarnagar"
+  },
+  {
+    "city_name": "Amethi Csm Nagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Amethi Csm Nagar",
+    "api2_city": "amethi-csm-nagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Amethi Csm Nagar"
+  },
+  {
+    "city_name": "Amroha",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Amroha",
+    "api2_city": "amroha",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Amroha"
+  },
+  {
+    "city_name": "Auraiya",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Auraiya",
+    "api2_city": "auraiya",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Auraiya"
+  },
+  {
+    "city_name": "Azamgarh",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Azamgarh",
+    "api2_city": "azamgarh",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Azamgarh"
+  },
+  {
+    "city_name": "Baghpat",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Baghpat",
+    "api2_city": "baghpat",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Baghpat"
+  },
+  {
+    "city_name": "Bahraich",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bahraich",
+    "api2_city": "bahraich",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Bahraich"
+  },
+  {
+    "city_name": "Ballia",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Ballia",
+    "api2_city": "ballia",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Ballia"
+  },
+  {
+    "city_name": "Banda",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Banda",
+    "api2_city": "banda",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Banda"
+  },
+  {
+    "city_name": "Barabanki",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Barabanki",
+    "api2_city": "barabanki",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Barabanki"
+  },
+  {
     "city_name": "Bareilly",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1269,6 +6934,160 @@
     "api2_city": "bareilly",
     "api2_state": "uttar-pradesh",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Basti",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Basti",
+    "api2_city": "basti",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Basti"
+  },
+  {
+    "city_name": "Bijnor",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bijnor",
+    "api2_city": "bijnor",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Bijnor"
+  },
+  {
+    "city_name": "Budaun",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Budaun",
+    "api2_city": "budaun",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Budaun"
+  },
+  {
+    "city_name": "Bulandshahr",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bulandshahr",
+    "api2_city": "bulandshahr",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Bulandshahr"
+  },
+  {
+    "city_name": "Chandauli",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Chandauli",
+    "api2_city": "chandauli",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Chandauli"
+  },
+  {
+    "city_name": "Chitrakut",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Chitrakut",
+    "api2_city": "chitrakut",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Chitrakut"
+  },
+  {
+    "city_name": "Deoria",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Deoria",
+    "api2_city": "deoria",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Deoria"
+  },
+  {
+    "city_name": "Etah",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Etah",
+    "api2_city": "etah",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Etah"
+  },
+  {
+    "city_name": "Etawah",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Etawah",
+    "api2_city": "etawah",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Etawah"
+  },
+  {
+    "city_name": "Faizabad",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Faizabad",
+    "api2_city": "faizabad",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Faizabad"
+  },
+  {
+    "city_name": "Farrukkhabad",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Farrukkhabad",
+    "api2_city": "farrukkhabad",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Farrukkhabad"
+  },
+  {
+    "city_name": "Fatehpur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Fatehpur",
+    "api2_city": "fatehpur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Fatehpur"
+  },
+  {
+    "city_name": "Firozabad",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Firozabad",
+    "api2_city": "firozabad",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Firozabad"
+  },
+  {
+    "city_name": "Gautam Budh Nagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Gautam Budh Nagar",
+    "api2_city": "gautam-budh-nagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Gautam Budh Nagar"
   },
   {
     "city_name": "Ghaziabad",
@@ -1281,6 +7100,28 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Ghazipur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Ghazipur",
+    "api2_city": "ghazipur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Ghazipur"
+  },
+  {
+    "city_name": "Gonda",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Gonda",
+    "api2_city": "gonda",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Gonda"
+  },
+  {
     "city_name": "Gorakhpur",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1289,6 +7130,61 @@
     "api2_city": "gorakhpur",
     "api2_state": "uttar-pradesh",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Hapur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Hapur",
+    "api2_city": "hapur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Hapur"
+  },
+  {
+    "city_name": "Hardoi",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Hardoi",
+    "api2_city": "hardoi",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Hardoi"
+  },
+  {
+    "city_name": "Hathras",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Hathras",
+    "api2_city": "hathras",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Hathras"
+  },
+  {
+    "city_name": "Jalaun",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jalaun",
+    "api2_city": "jalaun",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Jalaun"
+  },
+  {
+    "city_name": "Jaunpur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Jaunpur",
+    "api2_city": "jaunpur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Jaunpur"
   },
   {
     "city_name": "Jhansi",
@@ -1302,6 +7198,17 @@
     "api3_name": "Jhansi"
   },
   {
+    "city_name": "Kannuaj",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kannuaj",
+    "api2_city": "kannuaj",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kannuaj"
+  },
+  {
     "city_name": "Kanpur",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1313,6 +7220,72 @@
     "api3_name": "Kanpur Urban"
   },
   {
+    "city_name": "Kanpur Rural",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kanpur Rural",
+    "api2_city": "kanpur-rural",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kanpur Rural"
+  },
+  {
+    "city_name": "Kanpur Urban",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kanpur Urban",
+    "api2_city": "kanpur-urban",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kanpur Urban"
+  },
+  {
+    "city_name": "Kashi Ram Nagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kashi Ram Nagar",
+    "api2_city": "kashi-ram-nagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kashi Ram Nagar"
+  },
+  {
+    "city_name": "Kaushambi",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kaushambi",
+    "api2_city": "kaushambi",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kaushambi"
+  },
+  {
+    "city_name": "Kushinagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Kushinagar",
+    "api2_city": "kushinagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Kushinagar"
+  },
+  {
+    "city_name": "Lalitpur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Lalitpur",
+    "api2_city": "lalitpur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Lalitpur"
+  },
+  {
     "city_name": "Lucknow",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1321,6 +7294,39 @@
     "api2_city": "lucknow",
     "api2_state": "uttar-pradesh",
     "is_top_city": 1
+  },
+  {
+    "city_name": "Maharajganj",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Maharajganj",
+    "api2_city": "maharajganj",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Maharajganj"
+  },
+  {
+    "city_name": "Mahoba",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Mahoba",
+    "api2_city": "mahoba",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Mahoba"
+  },
+  {
+    "city_name": "Mainpuri",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Mainpuri",
+    "api2_city": "mainpuri",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Mainpuri"
   },
   {
     "city_name": "Mathura",
@@ -1334,6 +7340,17 @@
     "api3_name": "Mathura"
   },
   {
+    "city_name": "Maunathbhanjan",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Maunathbhanjan",
+    "api2_city": "maunathbhanjan",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Maunathbhanjan"
+  },
+  {
     "city_name": "Meerut",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1344,6 +7361,17 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Mirzapur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Mirzapur",
+    "api2_city": "mirzapur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Mirzapur"
+  },
+  {
     "city_name": "Moradabad",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1352,6 +7380,17 @@
     "api2_city": "moradabad",
     "api2_state": "uttar-pradesh",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Muzaffarnagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Muzaffarnagar",
+    "api2_city": "muzaffarnagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Muzaffarnagar"
   },
   {
     "city_name": "Noida",
@@ -1365,6 +7404,17 @@
     "api3_name": "Gautam Budh Nagar"
   },
   {
+    "city_name": "Pilibhit",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Pilibhit",
+    "api2_city": "pilibhit",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Pilibhit"
+  },
+  {
     "city_name": "Prayagraj",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1376,6 +7426,160 @@
     "api3_name": "Allahabad"
   },
   {
+    "city_name": "Rae Bareli",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Rae Bareli",
+    "api2_city": "rae-bareli",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Rae Bareli"
+  },
+  {
+    "city_name": "Rampur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Rampur",
+    "api2_city": "rampur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Rampur"
+  },
+  {
+    "city_name": "Saharanpur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Saharanpur",
+    "api2_city": "saharanpur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Saharanpur"
+  },
+  {
+    "city_name": "Sambhal",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sambhal",
+    "api2_city": "sambhal",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sambhal"
+  },
+  {
+    "city_name": "Sant Kabir Nagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sant Kabir Nagar",
+    "api2_city": "sant-kabir-nagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sant Kabir Nagar"
+  },
+  {
+    "city_name": "Sant Ravi Nagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sant Ravi Nagar",
+    "api2_city": "sant-ravi-nagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sant Ravi Nagar"
+  },
+  {
+    "city_name": "Shahjahanpur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Shahjahanpur",
+    "api2_city": "shahjahanpur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Shahjahanpur"
+  },
+  {
+    "city_name": "Shamli",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Shamli",
+    "api2_city": "shamli",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Shamli"
+  },
+  {
+    "city_name": "Shravasti",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Shravasti",
+    "api2_city": "shravasti",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Shravasti"
+  },
+  {
+    "city_name": "Sidharthnagar",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sidharthnagar",
+    "api2_city": "sidharthnagar",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sidharthnagar"
+  },
+  {
+    "city_name": "Sitapur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sitapur",
+    "api2_city": "sitapur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sitapur"
+  },
+  {
+    "city_name": "Sonbhadra",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sonbhadra",
+    "api2_city": "sonbhadra",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sonbhadra"
+  },
+  {
+    "city_name": "Sultanpur",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Sultanpur",
+    "api2_city": "sultanpur",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Sultanpur"
+  },
+  {
+    "city_name": "Unnao",
+    "state": "Uttar Pradesh",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Unnao",
+    "api2_city": "unnao",
+    "api2_state": "uttar-pradesh",
+    "is_top_city": 0,
+    "api3_name": "Unnao"
+  },
+  {
     "city_name": "Varanasi",
     "state": "Uttar Pradesh",
     "is_ut": 0,
@@ -1384,6 +7588,50 @@
     "api2_city": "varanasi",
     "api2_state": "uttar-pradesh",
     "is_top_city": 0
+  },
+  {
+    "city_name": "Almora",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Almora",
+    "api2_city": "almora",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Almora"
+  },
+  {
+    "city_name": "Bageshwar",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Bageshwar",
+    "api2_city": "bageshwar",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Bageshwar"
+  },
+  {
+    "city_name": "Chamoli",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Chamoli",
+    "api2_city": "chamoli",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Chamoli"
+  },
+  {
+    "city_name": "Champawat",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Champawat",
+    "api2_city": "champawat",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Champawat"
   },
   {
     "city_name": "Dehradun",
@@ -1406,6 +7654,94 @@
     "is_top_city": 0
   },
   {
+    "city_name": "Nainital",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Nainital",
+    "api2_city": "nainital",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Nainital"
+  },
+  {
+    "city_name": "Pauri",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Pauri",
+    "api2_city": "pauri",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Pauri"
+  },
+  {
+    "city_name": "Pithoragarh",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Pithoragarh",
+    "api2_city": "pithoragarh",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Pithoragarh"
+  },
+  {
+    "city_name": "Rudraprayag",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Rudraprayag",
+    "api2_city": "rudraprayag",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Rudraprayag"
+  },
+  {
+    "city_name": "Tehri Garhwal",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Tehri Garhwal",
+    "api2_city": "tehri-garhwal",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Tehri Garhwal"
+  },
+  {
+    "city_name": "Udham Singh Nagar",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Udham Singh Nagar",
+    "api2_city": "udham-singh-nagar",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Udham Singh Nagar"
+  },
+  {
+    "city_name": "Uttarkashi",
+    "state": "Uttarakhand",
+    "is_ut": 0,
+    "region": "north",
+    "api1_city": "Uttarkashi",
+    "api2_city": "uttarkashi",
+    "api2_state": "uttarakhand",
+    "is_top_city": 0,
+    "api3_name": "Uttarkashi"
+  },
+  {
+    "city_name": "Alipurduar",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Alipurduar",
+    "api2_city": "alipurduar",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Alipurduar"
+  },
+  {
     "city_name": "Asansol",
     "state": "West Bengal",
     "is_ut": 0,
@@ -1415,6 +7751,61 @@
     "api2_state": "west-bengal",
     "is_top_city": 0,
     "api3_name": "Paschim Bardhaman"
+  },
+  {
+    "city_name": "Bankura",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Bankura",
+    "api2_city": "bankura",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Bankura"
+  },
+  {
+    "city_name": "Birbhum",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Birbhum",
+    "api2_city": "birbhum",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Birbhum"
+  },
+  {
+    "city_name": "Cooch Bihar",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Cooch Bihar",
+    "api2_city": "cooch-bihar",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Cooch Bihar"
+  },
+  {
+    "city_name": "Dakshin Dinajpur",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Dakshin Dinajpur",
+    "api2_city": "dakshin-dinajpur",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Dakshin Dinajpur"
+  },
+  {
+    "city_name": "Darjeeling",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Darjeeling",
+    "api2_city": "darjeeling",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Darjeeling"
   },
   {
     "city_name": "Durgapur",
@@ -1428,6 +7819,17 @@
     "api3_name": "Paschim Bardhaman"
   },
   {
+    "city_name": "Hooghly",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Hooghly",
+    "api2_city": "hooghly",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Hooghly"
+  },
+  {
     "city_name": "Howrah",
     "state": "West Bengal",
     "is_ut": 0,
@@ -1437,6 +7839,39 @@
     "api2_state": "west-bengal",
     "is_top_city": 0,
     "api3_name": "Howrah"
+  },
+  {
+    "city_name": "Jalpaiguri",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jalpaiguri",
+    "api2_city": "jalpaiguri",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Jalpaiguri"
+  },
+  {
+    "city_name": "Jhargram",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Jhargram",
+    "api2_city": "jhargram",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Jhargram"
+  },
+  {
+    "city_name": "Kalimpong",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Kalimpong",
+    "api2_city": "kalimpong",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Kalimpong"
   },
   {
     "city_name": "Kolkata",
@@ -1449,6 +7884,105 @@
     "is_top_city": 1
   },
   {
+    "city_name": "Malda",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Malda",
+    "api2_city": "malda",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Malda"
+  },
+  {
+    "city_name": "Murshidabad",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Murshidabad",
+    "api2_city": "murshidabad",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Murshidabad"
+  },
+  {
+    "city_name": "Nadia",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Nadia",
+    "api2_city": "nadia",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Nadia"
+  },
+  {
+    "city_name": "North 24 Parganas",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "North 24 Parganas",
+    "api2_city": "north-24-parganas",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "North 24 Parganas"
+  },
+  {
+    "city_name": "Paschim Bardhaman",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Paschim Bardhaman",
+    "api2_city": "paschim-bardhaman",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Paschim Bardhaman"
+  },
+  {
+    "city_name": "Paschim Medinipur",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Paschim Medinipur",
+    "api2_city": "paschim-medinipur",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Paschim Medinipur"
+  },
+  {
+    "city_name": "Purba Bardhaman",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Purba Bardhaman",
+    "api2_city": "purba-bardhaman",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Purba Bardhaman"
+  },
+  {
+    "city_name": "Purba Medinipur",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Purba Medinipur",
+    "api2_city": "purba-medinipur",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Purba Medinipur"
+  },
+  {
+    "city_name": "Purulia",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Purulia",
+    "api2_city": "purulia",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Purulia"
+  },
+  {
     "city_name": "Siliguri",
     "state": "West Bengal",
     "is_ut": 0,
@@ -1458,5 +7992,27 @@
     "api2_state": "west-bengal",
     "is_top_city": 0,
     "api3_name": "Darjeeling"
+  },
+  {
+    "city_name": "South 24 Parganas",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "South 24 Parganas",
+    "api2_city": "south-24-parganas",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "South 24 Parganas"
+  },
+  {
+    "city_name": "Uttar Dinajpur",
+    "state": "West Bengal",
+    "is_ut": 0,
+    "region": "east",
+    "api1_city": "Uttar Dinajpur",
+    "api2_city": "uttar-dinajpur",
+    "api2_state": "west-bengal",
+    "is_top_city": 0,
+    "api3_name": "Uttar Dinajpur"
   }
 ]
