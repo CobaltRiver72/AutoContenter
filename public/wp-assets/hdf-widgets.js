@@ -25,6 +25,30 @@
     return Math.floor(mins / 60) + 'h ago';
   }
 
+  // ── Chart.js lazy-loader ────────────────────────────────────────────────
+  // Loads Chart.js from CDN on first need; queues callbacks so multiple
+  // charts on the same page don't race to inject duplicate script tags.
+  var _chartJsReady = typeof Chart !== 'undefined';
+  var _chartJsQueue = [];
+
+  function requireChartJs(cb) {
+    if (_chartJsReady) { cb(); return; }
+    _chartJsQueue.push(cb);
+    if (_chartJsQueue.length > 1) return; // already loading
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+    s.onload = function () {
+      _chartJsReady = true;
+      _chartJsQueue.forEach(function (fn) { fn(); });
+      _chartJsQueue = [];
+    };
+    s.onerror = function () {
+      console.warn('HDF: failed to load Chart.js from CDN');
+      _chartJsQueue = [];
+    };
+    document.head.appendChild(s);
+  }
+
   function fetchData(endpoint, params) {
     var qs = Object.keys(params).filter(function(k) { return params[k] != null; }).map(function(k) {
       return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
@@ -250,21 +274,22 @@
         var label = isMetals ? ((metal || 'Metal') + ' (\u20b9/g)') : 'Petrol (\u20b9/L)';
         el.innerHTML = '<div class="hdf-chart-wrap"><h3>' + label + ' trend \u2014 ' + city + ' (last ' + days + ' days)</h3></div>';
         el.querySelector('.hdf-chart-wrap').appendChild(canvas);
-        if (typeof Chart === 'undefined') return;
-        new Chart(canvas, {
-          type: 'line',
-          data: {
-            labels: labels,
-            datasets: [{ label: label, data: dataPoints, borderColor: '#1d4ed8', backgroundColor: 'rgba(29,78,216,0.07)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3 }]
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: { ticks: { maxTicksLimit: 7, font: { size: 11 } } },
-              y: { ticks: { font: { size: 11 } } }
+        requireChartJs(function () {
+          new Chart(canvas, {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [{ label: label, data: dataPoints, borderColor: '#1d4ed8', backgroundColor: 'rgba(29,78,216,0.07)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3 }]
+            },
+            options: {
+              responsive: true,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { maxTicksLimit: 7, font: { size: 11 } } },
+                y: { ticks: { font: { size: 11 } } }
+              }
             }
-          }
+          });
         });
       });
     },
