@@ -482,29 +482,67 @@
         <div class="settings-form" id="csv-import-section">
           <div class="settings-group">
             <div class="settings-group-title">Historical Data Import</div>
-            <p style="color:#888;font-size:13px;margin-bottom:16px;">Upload CSV exports from the WordPress plugins to backfill price history for trend charts.</p>
+            <p style="color:#888;font-size:13px;margin-bottom:16px;">Upload CSV or JSON exports to backfill price history. Use <strong style="color:#ccc;">Dry Run</strong> first to verify row counts.</p>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <!-- Tab switcher -->
+            <div style="display:flex;gap:4px;margin-bottom:16px;background:rgba(255,255,255,0.06);padding:4px;border-radius:8px;width:fit-content;">
+              <button onclick="switchImportTab('csv')" id="importTabCsv"
+                      style="padding:6px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer;background:rgba(255,255,255,0.12);color:#fff;font-weight:600;">
+                CSV
+              </button>
+              <button onclick="switchImportTab('json')" id="importTabJson"
+                      style="padding:6px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer;background:transparent;color:#888;font-weight:500;">
+                JSON
+              </button>
+            </div>
 
-              <!-- Fuel Import -->
+            <!-- CSV Cards -->
+            <div id="importPanelCsv" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
               <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;">
-                <div style="font-size:14px;font-weight:700;margin-bottom:8px;">⛽ Import Fuel CSV</div>
-                <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: city, state, petrol, diesel, price_date, source</div>
+                <div style="font-size:14px;font-weight:700;margin-bottom:6px;">⛽ Fuel CSV</div>
+                <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: <code style="color:#9ca3af;">city, state, petrol, diesel, price_date, source</code></div>
                 <input type="file" id="fuelCsvFile" accept=".csv" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
                 <div style="display:flex;gap:6px;">
-                  <button onclick="importCsv('fuel', true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
-                  <button onclick="importCsv('fuel', false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                  <button onclick="runImport('fuel','csv',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button onclick="runImport('fuel','csv',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
                 </div>
               </div>
 
-              <!-- Metals Import -->
               <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;">
-                <div style="font-size:14px;font-weight:700;margin-bottom:8px;">🥇 Import Metals CSV</div>
-                <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: city, state, metal_type, price_24k, price_22k, price_18k, price_1g, price_date, source</div>
+                <div style="font-size:14px;font-weight:700;margin-bottom:6px;">🥇 Metals CSV</div>
+                <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: <code style="color:#9ca3af;">city, metal_type, price_24k, price_22k, price_18k, price_1g, price_date</code></div>
                 <input type="file" id="metalsCsvFile" accept=".csv" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
                 <div style="display:flex;gap:6px;">
-                  <button onclick="importCsv('metals', true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
-                  <button onclick="importCsv('metals', false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                  <button onclick="runImport('metals','csv',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button onclick="runImport('metals','csv',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- JSON Cards -->
+            <div id="importPanelJson" style="display:none;grid-template-columns:1fr 1fr;gap:16px;">
+
+              <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;">
+                <div style="font-size:14px;font-weight:700;margin-bottom:6px;">⛽ Fuel JSON</div>
+                <div style="font-size:12px;color:#888;margin-bottom:8px;">Array of objects: <code style="color:#9ca3af;">city, petrol, diesel, price_date</code></div>
+                <div style="font-size:11px;color:#6b7280;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:6px;margin-bottom:10px;font-family:monospace;overflow:auto;white-space:nowrap;">[{"city":"Delhi","petrol":96.72,"diesel":89.62,"price_date":"2025-01-15"}]</div>
+                <input type="file" id="fuelJsonFile" accept=".json" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
+                <div style="display:flex;gap:6px;">
+                  <button onclick="runImport('fuel','json',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button onclick="runImport('fuel','json',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                </div>
+              </div>
+
+              <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;">
+                <div style="font-size:14px;font-weight:700;margin-bottom:6px;">🥇 Metals JSON</div>
+                <div style="font-size:12px;color:#888;margin-bottom:8px;">Array of objects: <code style="color:#9ca3af;">city, metal_type, price_24k, price_22k, price_18k, price_1g, price_date</code></div>
+                <div style="font-size:11px;color:#6b7280;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:6px;margin-bottom:10px;font-family:monospace;overflow:auto;white-space:nowrap;">[{"city":"Delhi","metal_type":"gold","price_24k":7245.50,"price_22k":6641.67,"price_date":"2025-01-15"}]</div>
+                <input type="file" id="metalsJsonFile" accept=".json" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
+                <div style="display:flex;gap:6px;">
+                  <button onclick="runImport('metals','json',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button onclick="runImport('metals','json',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
                 </div>
               </div>
 

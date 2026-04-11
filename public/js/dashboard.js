@@ -6154,44 +6154,87 @@
     }).catch(function() {});
   }
 
-  // ─── CSV Import ───────────────────────────────────────────────────────────
+  // ─── Import (CSV + JSON) ──────────────────────────────────────────────────
 
-  function importCsv(type, dryRun) {
-    var fileInput = document.getElementById(type === 'fuel' ? 'fuelCsvFile' : 'metalsCsvFile');
+  function switchImportTab(tab) {
+    var csvPanel = document.getElementById('importPanelCsv');
+    var jsonPanel = document.getElementById('importPanelJson');
+    var csvBtn  = document.getElementById('importTabCsv');
+    var jsonBtn = document.getElementById('importTabJson');
+    if (tab === 'csv') {
+      csvPanel.style.display  = 'grid';
+      jsonPanel.style.display = 'none';
+      csvBtn.style.background  = 'rgba(255,255,255,0.12)';
+      csvBtn.style.color       = '#fff';
+      csvBtn.style.fontWeight  = '600';
+      jsonBtn.style.background = 'transparent';
+      jsonBtn.style.color      = '#888';
+      jsonBtn.style.fontWeight = '500';
+    } else {
+      csvPanel.style.display  = 'none';
+      jsonPanel.style.display = 'grid';
+      jsonBtn.style.background = 'rgba(255,255,255,0.12)';
+      jsonBtn.style.color      = '#fff';
+      jsonBtn.style.fontWeight = '600';
+      csvBtn.style.background  = 'transparent';
+      csvBtn.style.color       = '#888';
+      csvBtn.style.fontWeight  = '500';
+    }
+  }
+
+  function runImport(type, format, dryRun) {
+    var inputId   = type + format.charAt(0).toUpperCase() + format.slice(1) + 'File';
+    var fileInput = document.getElementById(inputId);
     if (!fileInput || !fileInput.files.length) {
-      showImportResult('error', '❌ Please select a CSV file first.');
+      showImportResult('error', '❌ Please select a .' + format + ' file first.');
       return;
     }
     var file = fileInput.files[0];
-    if (!file.name.endsWith('.csv')) {
-      showImportResult('error', '❌ Please select a .csv file.');
+    if (!file.name.toLowerCase().endsWith('.' + format)) {
+      showImportResult('error', '❌ Please select a .' + format + ' file.');
       return;
     }
     showImportResult('loading', (dryRun ? 'Dry-running' : 'Importing') + ' ' + escapeHtml(file.name) + ' (' + (file.size / 1024).toFixed(0) + ' KB)…');
+
     var reader = new FileReader();
     reader.onerror = function () { showImportResult('error', '❌ Could not read file.'); };
     reader.onload = function (e) {
-      fetch('/api/import/' + type + (dryRun ? '?dry=1' : ''), {
+      var endpoint = format === 'csv' ? '/api/import/' + type : '/api/import/' + type + '-json';
+      var body;
+      if (format === 'csv') {
+        body = JSON.stringify({ csv: e.target.result });
+      } else {
+        var parsed;
+        try { parsed = JSON.parse(e.target.result); }
+        catch (err) { showImportResult('error', '❌ Invalid JSON: ' + escapeHtml(err.message)); return; }
+        if (!Array.isArray(parsed)) { showImportResult('error', '❌ JSON must be an array of objects.'); return; }
+        body = JSON.stringify({ rows: parsed });
+      }
+      fetch(endpoint + (dryRun ? '?dry=1' : ''), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv: e.target.result }),
+        body: body,
       })
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (data.ok) {
           var s = data.stats;
+          var warnHtml = (s.errors && s.errors.length)
+            ? '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12px;color:#f87171;">' + s.errors.length + ' warnings — click to expand</summary>' +
+              '<pre style="font-size:11px;margin-top:4px;white-space:pre-wrap;color:#f87171;">' + escapeHtml(s.errors.slice(0, 20).join('\n')) + (s.errors.length > 20 ? '\n…and ' + (s.errors.length - 20) + ' more' : '') + '</pre></details>'
+            : '';
           showImportResult('success',
             '✅ ' + escapeHtml(data.message) + '<br>' +
-            '<small style="color:#888;">Total rows: ' + s.total + ' · Inserted: ' + s.inserted + ' · Skipped: ' + s.skipped +
-            (s.errors && s.errors.length ? ' · ' + s.errors.length + ' warnings' : '') + '</small>'
+            '<small style="color:#86efac;">Total: ' + s.total + ' · Inserted: ' + s.inserted + ' · Skipped: ' + s.skipped + '</small>' +
+            warnHtml
           );
         } else {
           showImportResult('error', '❌ ' + escapeHtml(data.error || 'Unknown error'));
         }
       })
-      .catch(function (e) {
-        showImportResult('error', '❌ Network error: ' + escapeHtml(e.message));
+      .catch(function (err) {
+        showImportResult('error', '❌ Network error: ' + escapeHtml(err.message));
       });
     };
     reader.readAsText(file);
@@ -6210,7 +6253,8 @@
     div.innerHTML = html;
   }
 
-  window.importCsv = importCsv;
+  window.runImport = runImport;
+  window.switchImportTab = switchImportTab;
 
   // ─── Sources Analytics Page ───────────────────────────────────────────────
 

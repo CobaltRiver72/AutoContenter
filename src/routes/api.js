@@ -4222,6 +4222,134 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/import/fuel-json ──────────────────────────────────────────
+
+  router.post('/import/fuel-json', function (req, res) {
+    var rows = req.body && req.body.rows;
+    if (!Array.isArray(rows)) return res.status(400).json({ ok: false, error: 'Expected { rows: [...] } body' });
+    if (!rows.length) return res.json({ ok: true, stats: { total: 0, inserted: 0, skipped: 0, errors: [] }, message: 'No rows in file' });
+
+    var dryRun = req.query.dry === '1' || req.query.dry === 'true';
+
+    var first = rows[0];
+    var missing = ['city', 'price_date'].filter(function (k) { return !(k in first); });
+    if (missing.length) return res.status(400).json({ ok: false, error: 'Missing fields: ' + missing.join(', ') });
+
+    var stats = { total: 0, inserted: 0, skipped: 0, errors: [] };
+
+    var insertStmt = db.prepare(`
+      INSERT INTO fuel_prices (city, state, petrol, diesel, price_date, source, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(city, price_date) DO UPDATE SET
+        petrol  = COALESCE(excluded.petrol,  fuel_prices.petrol),
+        diesel  = COALESCE(excluded.diesel,  fuel_prices.diesel),
+        state   = COALESCE(excluded.state,   fuel_prices.state),
+        source  = COALESCE(excluded.source,  fuel_prices.source)
+    `);
+
+    var runFuelJsonImport = db.transaction(function (rows) {
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        stats.total++;
+        var city = String(row.city || '').trim();
+        if (!city) { stats.skipped++; continue; }
+        var dateVal = String(row.price_date || '').trim();
+        if (!dateVal || !/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+          stats.errors.push('Row ' + stats.total + ': invalid date "' + dateVal + '"');
+          stats.skipped++; continue;
+        }
+        var petrol = toDec(row.petrol);
+        var diesel = toDec(row.diesel);
+        if (petrol === null && diesel === null) { stats.skipped++; continue; }
+        var state  = String(row.state  || '').trim() || null;
+        var source = String(row.source || 'imported').trim();
+        if (!dryRun) {
+          try { insertStmt.run(city, state, petrol, diesel, dateVal, source); stats.inserted++; }
+          catch (e) { stats.errors.push('Row ' + stats.total + ': ' + e.message); stats.skipped++; }
+        } else { stats.inserted++; }
+      }
+    });
+
+    try {
+      runFuelJsonImport(rows);
+      res.json({
+        ok: true, dryRun: dryRun, stats: stats,
+        message: dryRun
+          ? 'Dry run: would insert/update ~' + stats.inserted + ' rows from ' + stats.total + ' JSON objects'
+          : 'Imported ' + stats.inserted + ' rows (' + stats.skipped + ' skipped) from ' + stats.total + ' JSON objects',
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message, stats: stats });
+    }
+  });
+
+  // ─── POST /api/import/metals-json ─────────────────────────────────────────
+
+  router.post('/import/metals-json', function (req, res) {
+    var rows = req.body && req.body.rows;
+    if (!Array.isArray(rows)) return res.status(400).json({ ok: false, error: 'Expected { rows: [...] } body' });
+    if (!rows.length) return res.json({ ok: true, stats: { total: 0, inserted: 0, skipped: 0, errors: [] }, message: 'No rows in file' });
+
+    var dryRun = req.query.dry === '1' || req.query.dry === 'true';
+
+    var first = rows[0];
+    var missing = ['city', 'metal_type', 'price_date'].filter(function (k) { return !(k in first); });
+    if (missing.length) return res.status(400).json({ ok: false, error: 'Missing fields: ' + missing.join(', ') });
+
+    var stats = { total: 0, inserted: 0, skipped: 0, errors: [] };
+
+    var insertStmt = db.prepare(`
+      INSERT INTO metals_prices (city, metal_type, price_24k, price_22k, price_18k, price_1g, price_date, source, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(city, metal_type, price_date) DO UPDATE SET
+        price_24k = COALESCE(excluded.price_24k, metals_prices.price_24k),
+        price_22k = COALESCE(excluded.price_22k, metals_prices.price_22k),
+        price_18k = COALESCE(excluded.price_18k, metals_prices.price_18k),
+        price_1g  = COALESCE(excluded.price_1g,  metals_prices.price_1g),
+        source    = COALESCE(excluded.source,    metals_prices.source)
+    `);
+
+    var VALID_METALS_J = ['gold', 'silver', 'platinum'];
+
+    var runMetalsJsonImport = db.transaction(function (rows) {
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        stats.total++;
+        var city  = String(row.city || '').trim();
+        var metal = String(row.metal_type || '').toLowerCase().trim();
+        if (!city) { stats.skipped++; continue; }
+        var dateVal = String(row.price_date || '').trim();
+        if (!dateVal || !/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+          stats.errors.push('Row ' + stats.total + ': invalid date "' + dateVal + '"');
+          stats.skipped++; continue;
+        }
+        if (!VALID_METALS_J.includes(metal)) { stats.skipped++; continue; }
+        var p24k = toDec(row.price_24k);
+        var p22k = toDec(row.price_22k);
+        var p18k = toDec(row.price_18k);
+        var p1g  = toDec(row.price_1g);
+        if (p24k === null && p22k === null && p18k === null && p1g === null) { stats.skipped++; continue; }
+        var source = String(row.source || 'imported').trim();
+        if (!dryRun) {
+          try { insertStmt.run(city, metal, p24k, p22k, p18k, p1g, dateVal, source); stats.inserted++; }
+          catch (e) { stats.errors.push('Row ' + stats.total + ': ' + e.message); stats.skipped++; }
+        } else { stats.inserted++; }
+      }
+    });
+
+    try {
+      runMetalsJsonImport(rows);
+      res.json({
+        ok: true, dryRun: dryRun, stats: stats,
+        message: dryRun
+          ? 'Dry run: would insert/update ~' + stats.inserted + ' rows from ' + stats.total + ' JSON objects'
+          : 'Imported ' + stats.inserted + ' rows (' + stats.skipped + ' skipped) from ' + stats.total + ' JSON objects',
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message, stats: stats });
+    }
+  });
+
   // ─── GET /api/import/summary ──────────────────────────────────────────────
 
   router.get('/import/summary', function (req, res) {
