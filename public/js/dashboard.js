@@ -6207,16 +6207,39 @@
         var parsed;
         try { parsed = JSON.parse(e.target.result); }
         catch (err) { showImportResult('error', '❌ Invalid JSON: ' + escapeHtml(err.message)); return; }
-        // Unwrap common envelope keys: { data:[...] }, { items:[...] }, { results:[...] }, etc.
+
+        // ── Goodreturns scraper format ─────────────────────────────────────
+        // { source, fuel:"diesel", scraped_date, cities:{ CityName:{ daily_history:[{date,price}] } } }
+        if (!Array.isArray(parsed) && typeof parsed === 'object' && parsed !== null &&
+            parsed.cities && typeof parsed.cities === 'object' && !Array.isArray(parsed.cities)) {
+          var fuelType = (parsed.fuel || '').toLowerCase();   // 'petrol' or 'diesel'
+          var grSource = parsed.source || 'goodreturns';
+          var rows = [];
+          Object.keys(parsed.cities).forEach(function (cityName) {
+            var hist = (parsed.cities[cityName].daily_history) || [];
+            hist.forEach(function (entry) {
+              if (!entry.date || entry.price == null) return;
+              var row = { city: cityName, price_date: entry.date, source: grSource };
+              if (fuelType === 'petrol')      row.petrol = entry.price;
+              else if (fuelType === 'diesel') row.diesel = entry.price;
+              else { row.petrol = entry.price; row.diesel = entry.price; }
+              rows.push(row);
+            });
+          });
+          parsed = rows;
+        }
+
+        // ── Generic envelope unwrapping ────────────────────────────────────
+        // { data:[...] }, { items:[...] }, { results:[...] }, etc.
         if (!Array.isArray(parsed) && typeof parsed === 'object' && parsed !== null) {
-          var wrapperKeys = ['data', 'items', 'results', 'records', 'rows', 'prices', 'fuel', 'metals'];
+          var wrapperKeys = ['data', 'items', 'results', 'records', 'rows', 'prices'];
           var unwrapped = null;
           for (var wi = 0; wi < wrapperKeys.length; wi++) {
             if (Array.isArray(parsed[wrapperKeys[wi]])) { unwrapped = parsed[wrapperKeys[wi]]; break; }
           }
-          // Single object — treat as one-row array
-          parsed = unwrapped || [parsed];
+          parsed = unwrapped || [parsed];   // last resort: single object → one-row array
         }
+
         if (!Array.isArray(parsed) || !parsed.length) {
           showImportResult('error', '❌ Could not find an array of rows in this JSON file.');
           return;
