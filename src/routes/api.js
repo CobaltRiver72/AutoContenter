@@ -807,9 +807,12 @@ function createApiRouter(deps) {
   // ─── GET /api/fuel/ping-api — Test RapidAPI key for fuel ─────────────────
 
   router.get('/fuel/ping-api', async function (req, res) {
-    var row = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
-    var apiKey = row ? row.value : null;
-    if (!apiKey) return res.json({ ok: false, error: 'FUEL_RAPIDAPI_KEY not set' });
+    var apiKey = req.query.key || null;
+    if (!apiKey) {
+      var row = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
+      apiKey = row ? row.value : null;
+    }
+    if (!apiKey) return res.json({ ok: false, error: 'FUEL_RAPIDAPI_KEY not set — type a key above and Ping, or save it first' });
 
     var host = 'daily-petrol-diesel-lpg-cng-fuel-prices-in-india.p.rapidapi.com';
     try {
@@ -829,9 +832,12 @@ function createApiRouter(deps) {
   // ─── GET /api/metals/ping-api — Test RapidAPI key for metals ─────────────
 
   router.get('/metals/ping-api', async function (req, res) {
-    var row = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
-    var apiKey = row ? row.value : null;
-    if (!apiKey) return res.json({ ok: false, error: 'METALS_RAPIDAPI_KEY not set' });
+    var apiKey = req.query.key || null;
+    if (!apiKey) {
+      var row = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
+      apiKey = row ? row.value : null;
+    }
+    if (!apiKey) return res.json({ ok: false, error: 'METALS_RAPIDAPI_KEY not set — type a key above and Ping, or save it first' });
 
     var host = 'gold-silver-platinum-price-in-india.p.rapidapi.com';
     try {

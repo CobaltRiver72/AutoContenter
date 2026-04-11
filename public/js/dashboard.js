@@ -5352,8 +5352,11 @@
 
   function testFuelApi() {
     var statusEl = $('fuel-key-status');
+    var keyInput = $('fuel-rapidapi-key');
+    var typedKey = keyInput && keyInput.value && keyInput.value.indexOf('••') === -1 ? keyInput.value.trim() : '';
+    var url = '/api/fuel/ping-api' + (typedKey ? '?key=' + encodeURIComponent(typedKey) : '');
     if (statusEl) { statusEl.textContent = 'Testing...'; statusEl.style.color = '#888'; }
-    fetchApi('/api/fuel/ping-api')
+    fetchApi(url)
       .then(function(data) {
         if (!statusEl) return;
         if (data.ok) {
@@ -5371,8 +5374,11 @@
 
   function testMetalsApi() {
     var statusEl = $('metals-key-status');
+    var keyInput = $('metals-rapidapi-key');
+    var typedKey = keyInput && keyInput.value && keyInput.value.indexOf('••') === -1 ? keyInput.value.trim() : '';
+    var url = '/api/metals/ping-api' + (typedKey ? '?key=' + encodeURIComponent(typedKey) : '');
     if (statusEl) { statusEl.textContent = 'Testing...'; statusEl.style.color = '#888'; }
-    fetchApi('/api/metals/ping-api')
+    fetchApi(url)
       .then(function(data) {
         if (!statusEl) return;
         if (data.ok) {
