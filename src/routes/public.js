@@ -17,7 +17,7 @@ module.exports = function(db) {
     var metal = req.query.metal;
     if (!city) return res.json({ ok: false, error: 'city required' });
     try {
-      var row;
+      var row, yesterday, delta = null, delta_pct = null;
       if (mod === 'metals' && metal) {
         row = db.prepare(
           'SELECT mp.city, mc.state, mp.metal_type, mp.price_24k, mp.price_22k, mp.price_18k, mp.price_1g, mp.price_date ' +
@@ -26,6 +26,18 @@ module.exports = function(db) {
           'WHERE mp.city = ? AND mp.metal_type = ? AND mp.price_date = date(\'now\', \'localtime\') ' +
           'ORDER BY mp.price_date DESC LIMIT 1'
         ).get(city, metal);
+        yesterday = db.prepare(
+          'SELECT price_24k, price_1g FROM metals_prices ' +
+          'WHERE city = ? AND metal_type = ? AND price_date = date(\'now\', \'-1 day\', \'localtime\') LIMIT 1'
+        ).get(city, metal);
+        if (row && yesterday) {
+          var tp = metal === 'gold' ? row.price_24k : row.price_1g;
+          var yp = metal === 'gold' ? yesterday.price_24k : yesterday.price_1g;
+          if (tp && yp) {
+            delta = Math.round((tp - yp) * 100) / 100;
+            delta_pct = Math.round((delta / yp) * 10000) / 100;
+          }
+        }
       } else if (mod === 'fuel') {
         row = db.prepare(
           'SELECT fp.city, fp.state, fp.petrol, fp.diesel, fp.price_date ' +
@@ -33,9 +45,20 @@ module.exports = function(db) {
           'WHERE fp.city = ? AND fp.price_date = date(\'now\', \'localtime\') ' +
           'LIMIT 1'
         ).get(city);
+        yesterday = db.prepare(
+          'SELECT petrol, diesel FROM fuel_prices ' +
+          'WHERE city = ? AND price_date = date(\'now\', \'-1 day\', \'localtime\') LIMIT 1'
+        ).get(city);
+        if (row && yesterday) {
+          var tp2 = row.petrol, yp2 = yesterday.petrol;
+          if (tp2 && yp2) {
+            delta = Math.round((tp2 - yp2) * 100) / 100;
+            delta_pct = Math.round((delta / yp2) * 10000) / 100;
+          }
+        }
       }
       if (!row) return res.json({ ok: false, data: null });
-      res.json({ ok: true, data: row, ts: Date.now() });
+      res.json({ ok: true, data: Object.assign({}, row, { delta: delta, delta_pct: delta_pct }), ts: Date.now() });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }
@@ -148,6 +171,83 @@ module.exports = function(db) {
         };
       }
       res.json({ ok: true, data: summary || {}, ts: Date.now() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // GET /api/public/history?module=metals&city=Mumbai&metal=gold&days=30
+  // GET /api/public/history?module=fuel&city=Mumbai&days=30
+  router.get('/history', function(req, res) {
+    var mod = req.query.module;
+    var city = req.query.city;
+    var metal = req.query.metal;
+    var days = Math.min(parseInt(req.query.days) || 30, 90);
+    if (!city) return res.json({ ok: false, error: 'city required' });
+    try {
+      var rows;
+      if (mod === 'metals' && metal) {
+        rows = db.prepare(
+          'SELECT price_date, price_24k, price_22k, price_18k, price_1g ' +
+          'FROM metals_prices ' +
+          'WHERE city = ? AND metal_type = ? AND price_date >= date(\'now\', \'-' + days + ' days\', \'localtime\') ' +
+          'ORDER BY price_date ASC'
+        ).all(city, metal);
+      } else if (mod === 'fuel') {
+        rows = db.prepare(
+          'SELECT price_date, petrol, diesel ' +
+          'FROM fuel_prices ' +
+          'WHERE city = ? AND price_date >= date(\'now\', \'-' + days + ' days\', \'localtime\') ' +
+          'ORDER BY price_date ASC'
+        ).all(city);
+      }
+      res.json({ ok: true, data: rows || [], ts: Date.now() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // GET /api/public/cross-metal?city=Mumbai
+  router.get('/cross-metal', function(req, res) {
+    var city = req.query.city;
+    if (!city) return res.json({ ok: false, error: 'city required' });
+    try {
+      var today = "date('now', 'localtime')";
+      var result = {};
+      var metals = ['gold', 'silver', 'platinum'];
+      for (var i = 0; i < metals.length; i++) {
+        var m = metals[i];
+        var row = db.prepare(
+          'SELECT price_24k, price_22k, price_18k, price_1g, price_date ' +
+          'FROM metals_prices WHERE city = ? AND metal_type = ? AND price_date = date(\'now\', \'localtime\') LIMIT 1'
+        ).get(city, m);
+        if (row) result[m] = row;
+      }
+      res.json({ ok: true, data: result, ts: Date.now() });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // GET /api/public/state-cities?state=Maharashtra&module=metals&metal=gold
+  // GET /api/public/state-cities?state=Maharashtra&module=fuel
+  router.get('/state-cities', function(req, res) {
+    var mod = req.query.module;
+    var state = req.query.state;
+    var metal = req.query.metal;
+    if (!state) return res.json({ ok: false, error: 'state required' });
+    try {
+      var rows;
+      if (mod === 'metals') {
+        rows = db.prepare(
+          'SELECT city_name FROM metals_cities WHERE state = ? AND is_active = 1 ORDER BY city_name ASC'
+        ).all(state);
+      } else if (mod === 'fuel') {
+        rows = db.prepare(
+          'SELECT city_name FROM fuel_cities WHERE state = ? AND is_enabled = 1 ORDER BY city_name ASC'
+        ).all(state);
+      }
+      res.json({ ok: true, data: (rows || []).map(function(r) { return r.city_name; }), ts: Date.now() });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }

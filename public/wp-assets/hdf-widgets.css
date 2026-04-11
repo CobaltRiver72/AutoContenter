@@ -94,3 +94,37 @@
   .hdf-hero-price { font-size: 28px; }
   .hdf-hero-top { flex-direction: column; }
 }
+
+/* ── Chart ── */
+.hdf-chart-wrap { margin: 20px 0; border-radius: var(--hdf-radius); border: 1px solid var(--hdf-border); padding: 16px; background: var(--hdf-bg); }
+.hdf-chart-wrap h3 { font-size: 14px; font-weight: 700; margin: 0 0 12px; color: var(--hdf-text); }
+.hdf-chart-wrap canvas { max-height: 280px; }
+
+/* ── Variant pills ── */
+.hdf-variant-pills { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; }
+.hdf-variant-pill { padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; border: 1px solid var(--hdf-border); background: var(--hdf-surface); color: var(--hdf-text); }
+.hdf-variant-pill.active { background: var(--hdf-primary); color: #fff; border-color: var(--hdf-primary); }
+
+/* ── Delta badge ── */
+.hdf-delta { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 20px; margin: 8px 0 0; }
+.hdf-delta.up   { background: #f0fdf4; color: var(--hdf-green); border: 1px solid #bbf7d0; }
+.hdf-delta.down { background: #fff1f2; color: var(--hdf-red);   border: 1px solid #fecdd3; }
+.hdf-delta.flat { background: var(--hdf-surface); color: var(--hdf-muted); border: 1px solid var(--hdf-border); }
+
+/* ── City pills ── */
+.hdf-city-pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.hdf-city-pills a { padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; background: var(--hdf-surface); border: 1px solid var(--hdf-border); color: var(--hdf-primary); text-decoration: none; white-space: nowrap; transition: background .15s; }
+.hdf-city-pills a:hover { background: #e0ecff; }
+
+/* ── Cross-metal comparison ── */
+.hdf-cross-metal { display: flex; gap: 12px; flex-wrap: wrap; margin: 20px 0; }
+.hdf-cross-metal-card { flex: 1 1 140px; border: 1px solid var(--hdf-border); border-radius: var(--hdf-radius); padding: 14px 16px; background: var(--hdf-surface); text-align: center; }
+.hdf-cross-metal-card .hdf-cmc-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--hdf-muted); margin-bottom: 6px; }
+.hdf-cross-metal-card .hdf-cmc-price { font-size: 20px; font-weight: 800; color: var(--hdf-text); }
+.hdf-cross-metal-card .hdf-cmc-unit  { font-size: 11px; color: var(--hdf-muted); margin-top: 2px; }
+
+/* ── Fill-up calculator ── */
+.hdf-fillup { border: 1px solid var(--hdf-border); border-radius: var(--hdf-radius); padding: 16px; background: var(--hdf-surface); margin: 20px 0; }
+.hdf-fillup h3 { font-size: 14px; font-weight: 700; margin: 0 0 12px; color: var(--hdf-text); }
+.hdf-fillup-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--hdf-border); font-size: 13px; }
+.hdf-fillup-row:last-child { border-bottom: none; font-weight: 700; }

@@ -373,6 +373,16 @@ class MetalsPostCreator {
     const articleJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'NewsArticle', 'headline': metalLabel + ' Price in ' + city.city_name + ' Today \u2014 ' + dateStr, 'description': metalLabel + ' price in ' + city.city_name + ' today is ' + priceDisplay + ' per gram (' + primaryVariant + ') on ' + dateStr + '. Source: IBJA.', 'datePublished': today.toISOString(), 'dateModified': today.toISOString(), 'author': { '@type': 'Organization', 'name': 'HDF News' }, 'publisher': { '@type': 'Organization', 'name': 'HDF News' } });
     const faqJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage', 'mainEntity': faqs.map(function(f) { return { '@type': 'Question', 'name': f.q, 'acceptedAnswer': { '@type': 'Answer', 'text': f.a } }; }) });
 
+    // Weight table (static)
+    const weightRows = (metal.weightRows || [1, 2, 4, 8, 10, 20, 50, 100]).map(function(w) {
+      const cols = displayVariants.map(function(v) {
+        const p = prices[v];
+        return '<td>' + (p ? '\u20b9' + (p * w).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '\u2014') + '</td>';
+      }).join('');
+      return '<tr><td>' + w + 'g</td>' + cols + '</tr>';
+    }).join('');
+    const weightHeaders = ['<th>Weight</th>'].concat(displayVariants.map(function(v) { return '<th style="text-align:center">' + v + '</th>'; })).join('');
+
     return [
       '<script type="application/ld+json">' + articleJsonLd + '</script>',
       '<script type="application/ld+json">' + faqJsonLd + '</script>',
@@ -395,6 +405,28 @@ class MetalsPostCreator {
       '  <tbody>' + variantRows + '</tbody></table></div>',
       '</div>',
       '',
+      '<h2>' + metalLabel + ' Price by Weight in ' + city.city_name + ' \u2014 ' + dateStr + '</h2>',
+      '<div class="hdf-table-wrap"><table class="hdf-table">',
+      '<caption>' + metalLabel + ' price for different weights — ' + dateStr + '</caption>',
+      '<thead><tr>' + weightHeaders + '</tr></thead>',
+      '<tbody>' + weightRows + '</tbody>',
+      '</table></div>',
+      '',
+      '<h2>' + metalLabel + ' Price History in ' + city.city_name + ' \u2014 Last 30 Days</h2>',
+      '<div data-hdf="price-history" data-module="metals" data-city="' + city.city_name + '" data-metal="' + metalType + '" data-days="30">',
+      '  <p>' + metalLabel + ' price in ' + city.city_name + ' today: ' + priceDisplay + ' per gram. Full 30-day history loads dynamically.</p>',
+      '</div>',
+      '',
+      '<h2>' + metalLabel + ' Price Trend Chart \u2014 ' + city.city_name + '</h2>',
+      '<div data-hdf="price-chart" data-module="metals" data-city="' + city.city_name + '" data-metal="' + metalType + '" data-days="30">',
+      '  <div class="hdf-chart-wrap"><p style="font-size:13px;color:#6b7280">Chart loading\u2026</p></div>',
+      '</div>',
+      '',
+      '<h2>Compare Precious Metals in ' + city.city_name + ' Today</h2>',
+      '<div data-hdf="cross-metal" data-city="' + city.city_name + '">',
+      '  <p>Live gold, silver, and platinum prices in ' + city.city_name + ' load dynamically.</p>',
+      '</div>',
+      '',
       '<div class="hdf-callout">',
       '  <div class="hdf-callout-label">Read Also</div>',
       '  <a href="' + stateUrl + '">' + metalLabel + ' Price in ' + city.state_name + ' Today \u2014 All Cities (' + dateStr + ')</a>',
@@ -406,6 +438,11 @@ class MetalsPostCreator {
       '  <div class="hdf-table-wrap"><table class="hdf-table"><caption>' + metalLabel + ' price in ' + city.state_name + ' cities</caption>',
       '  <thead><tr><th>City</th><th>' + primaryVariant + ' (per gram)</th></tr></thead>',
       '  <tbody>' + nearbyRows + '</tbody></table></div>',
+      '</div>',
+      '',
+      '<h2>More Cities in ' + city.state_name + '</h2>',
+      '<div data-hdf="city-pills" data-module="metals" data-state="' + city.state_name + '" data-prefix="' + metalType + '-price-in">',
+      '  <div class="hdf-city-pills">' + nearbyCities.map(function(c) { return '<a href="/' + metalType + '-price-in-' + c.city_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-today/">' + c.city_name + '</a>'; }).join('') + '</div>',
       '</div>',
       '',
       '<div class="hdf-info">\ud83d\udca1 Prices shown are IBJA benchmark rates. Actual purchase price at jewellers includes 3% GST and making charges. Always verify before purchase.</div>',
