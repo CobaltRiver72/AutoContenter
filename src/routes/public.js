@@ -1,7 +1,11 @@
 'use strict';
 
 var express = require('express');
+var cors = require('cors');
 var router = express.Router();
+
+var publicCors = cors({ origin: '*', methods: ['GET'] });
+router.use(publicCors);
 
 module.exports = function(db) {
 
