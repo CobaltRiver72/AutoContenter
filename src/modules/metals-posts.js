@@ -2,6 +2,11 @@
 
 const MODULE = 'metals-posts';
 const crypto = require('crypto');
+const {
+  liveBadge, priceChangeBadge, statPills, sourceBadge,
+  readAlsoBox, infoBox, styledTable, faqSection,
+  articleSchema, breadcrumbs, priceHero
+} = require('../utils/post-html');
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 
@@ -87,6 +92,7 @@ class MetalsPostCreator {
     this.wp = wpPublisher;
     this.db = db;
     this.logger = logger;
+    this.METAL_CONFIG = METAL_CONFIG;
   }
 
   // ─── wp_posts_log helpers ────────────────────────────────────────────────
@@ -255,223 +261,30 @@ class MetalsPostCreator {
     `).all(metalType, today, state);
 
     // Build post
-    const title = config.label + ' Price in ' + city + ' Today (' + fmtDate(today) + ') — ' + config.titleSuffix;
+    const title = config.label + ' Price in ' + city + ' Today (' + fmtDate(today) + ') — Per Gram';
     const slug = slugify(metalType + '-price-in-' + city + '-today');
     const metaDescription = (config.label + ' price in ' + city + ' today is ₹' + indianFormat(primaryPrice) + ' per gram, ' + changeText(delta) + '. Check ' + config.titleSuffix + ' rates.').substring(0, 160);
 
-    // Build HTML content
-    let html = '';
+    // Build prices object for _buildCityContent
+    const prices = {
+      '24K': todayRow.price_24k || null,
+      '22K': todayRow.price_22k || null,
+      '18K': todayRow.price_18k || null,
+      '1g': todayRow.price_1g || null,
+    };
 
-    // ── 1. Hero section ──
-    html += '<div class="hdf-hero">';
-    html += '<div class="hdf-hero-inner">';
-    html += '<span class="hdf-live-badge">LIVE</span>';
-    html += '<h2 class="hdf-hero-title">' + config.label + ' Price in ' + city + '</h2>';
-    html += '<div class="hdf-hero-price">₹' + indianFormat(primaryPrice) + ' <small>per gram</small></div>';
-    html += '<div class="hdf-hero-change">' + changeBadge(delta) + '</div>';
-    if (metalType === 'gold') {
-      html += '<div class="hdf-hero-variants">';
-      html += '<span class="hdf-variant-badge">22K: ₹' + indianFormat(todayRow.price_22k) + '</span>';
-      html += '<span class="hdf-variant-badge">18K: ₹' + indianFormat(todayRow.price_18k) + '</span>';
-      html += '</div>';
-    }
-    html += '<div class="hdf-hero-source">Source: ' + config.source + '</div>';
-    html += '</div>';
-    html += '</div>';
+    // Get all cities for stats
+    const allCities = this.db.prepare(
+      'SELECT mc.city_name, mc.state FROM metals_cities mc WHERE mc.is_active = 1'
+    ).all();
 
-    // ── 2. Intro paragraph ──
-    html += '<div class="hdf-section hdf-intro">';
-    html += '<p>Today\'s <strong>' + config.label.toLowerCase() + ' price in ' + city + '</strong> is <strong>₹' + indianFormat(primaryPrice) + ' per gram</strong>, ';
-    html += changeText(delta) + '. ';
-    if (metalType === 'gold') {
-      html += 'The 22K gold rate stands at ₹' + indianFormat(todayRow.price_22k) + ' per gram, while 18K is priced at ₹' + indianFormat(todayRow.price_18k) + ' per gram. ';
-    }
-    html += 'Prices are sourced from the ' + config.source + ' and updated daily.</p>';
-    html += '</div>';
-
-    // ── 3. Weight table ──
-    html += '<div class="hdf-section hdf-weight-table">';
-    html += '<h2>' + config.label + ' Price in ' + city + ' — By Weight</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>Weight</th>';
-    if (metalType === 'gold') {
-      html += '<th>24K Price</th><th>22K Price</th><th>18K Price</th>';
-    } else {
-      html += '<th>Price (₹)</th>';
-    }
-    html += '</tr></thead>';
-    html += '<tbody>';
-    for (const w of config.weightRows) {
-      const label = w >= 1000 ? (w / 1000) + ' KG' : w + ' ' + config.weightUnit;
-      html += '<tr><td>' + label + '</td>';
-      if (metalType === 'gold') {
-        html += '<td>₹' + indianFormat(todayRow.price_24k ? todayRow.price_24k * w : null) + '</td>';
-        html += '<td>₹' + indianFormat(todayRow.price_22k ? todayRow.price_22k * w : null) + '</td>';
-        html += '<td>₹' + indianFormat(todayRow.price_18k ? todayRow.price_18k * w : null) + '</td>';
-      } else {
-        html += '<td>₹' + indianFormat(todayRow.price_1g ? todayRow.price_1g * w : null) + '</td>';
-      }
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── 4. Investment calculator ──
-    html += '<div class="hdf-section hdf-calculator">';
-    html += '<h2>' + config.label + ' Investment Calculator — ' + city + '</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>Weight</th><th>Rate per Gram</th><th>Total Cost (₹)</th></tr></thead>';
-    html += '<tbody>';
-    for (const w of config.weightRows) {
-      const label = w >= 1000 ? (w / 1000) + ' KG' : w + ' ' + config.weightUnit;
-      const rate = metalType === 'gold' ? todayRow.price_24k : todayRow.price_1g;
-      html += '<tr><td>' + label + '</td>';
-      html += '<td>₹' + indianFormat(rate) + '</td>';
-      html += '<td>₹' + indianFormat(rate ? rate * w : null) + '</td>';
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── 5. 7-Day history table ──
-    html += '<div class="hdf-section hdf-history">';
-    html += '<h2>' + config.label + ' Price Trend in ' + city + ' — Last 7 Days</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>Date</th><th>Price (₹/g)</th><th>Change (₹)</th><th>Change (%)</th></tr></thead>';
-    html += '<tbody>';
-    for (let i = 0; i < history7.length; i++) {
-      const row = history7[i];
-      const price = metalType === 'gold' ? row.price_24k : row.price_1g;
-      const prevPrice = i > 0 ? (metalType === 'gold' ? history7[i - 1].price_24k : history7[i - 1].price_1g) : null;
-      const dayDelta = (price && prevPrice) ? price - prevPrice : 0;
-      const dayPct = (price && prevPrice && prevPrice !== 0) ? ((dayDelta / prevPrice) * 100).toFixed(2) : '0.00';
-      const isToday = row.price_date === today;
-      html += '<tr' + (isToday ? ' class="hdf-today-row"' : '') + '>';
-      html += '<td>' + fmtDate(row.price_date) + (isToday ? ' <span class="hdf-today-badge">Today</span>' : '') + '</td>';
-      html += '<td>₹' + indianFormat(price) + '</td>';
-      html += '<td>' + changeBadge(dayDelta) + '</td>';
-      html += '<td>' + (dayDelta >= 0 ? '+' : '') + dayPct + '%</td>';
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── 6. Chart placeholder ──
-    html += '<div class="hdf-section hdf-chart">';
-    html += '<h2>' + config.label + ' Price Chart — ' + city + '</h2>';
-    html += '<canvas class="hdf-price-chart" data-city="' + city + '" data-metal="' + metalType + '" data-days="30" width="700" height="350"></canvas>';
-    html += '</div>';
-
-    // ── 7. 30-Day trend analysis ──
-    html += this._build30DayTrend(history30, metalType, config, city);
-
-    // ── 8. Cross-metal pills ──
-    html += '<div class="hdf-section hdf-cross-metal">';
-    html += '<h2>Other Metal Prices in ' + city + '</h2>';
-    html += '<div class="hdf-pills">';
-    const otherMetals = Object.keys(METAL_CONFIG).filter(m => m !== metalType);
-    for (const om of otherMetals) {
-      const omConf = METAL_CONFIG[om];
-      const omSlug = slugify(om + '-price-in-' + city + '-today');
-      html += '<a class="hdf-pill" href="/' + omSlug + '/">' + omConf.label + ' Price in ' + city + '</a>';
-    }
-    html += '</div>';
-    html += '</div>';
-
-    // ── 9. Same-state city pills ──
-    html += '<div class="hdf-section hdf-state-cities">';
-    html += '<h2>' + config.label + ' Price in Other ' + state + ' Cities</h2>';
-    html += '<div class="hdf-pills">';
-    for (const sc of stateCities) {
-      const scPrice = metalType === 'gold' ? sc.price_24k : sc.price_1g;
-      const scSlug = slugify(metalType + '-price-in-' + sc.city_name + '-today');
-      html += '<a class="hdf-pill" href="/' + scSlug + '/">' + sc.city_name + ' — ₹' + indianFormat(scPrice) + '</a>';
-    }
-    html += '</div>';
-    html += '</div>';
-
-    // ── 10. Top cities pills ──
-    html += '<div class="hdf-section hdf-top-cities">';
-    html += '<h2>' + config.label + ' Price in Major Indian Cities</h2>';
-    html += '<div class="hdf-pills">';
-    for (const tc of TOP_CITIES) {
-      const tcSlug = slugify(metalType + '-price-in-' + tc + '-today');
-      html += '<a class="hdf-pill" href="/' + tcSlug + '/">' + tc + '</a>';
-    }
-    html += '</div>';
-    html += '</div>';
-
-    // ── 11. About pricing ──
-    html += '<div class="hdf-section hdf-about-pricing">';
-    html += '<h2>How ' + config.label + ' Prices Are Determined in India</h2>';
-    html += '<p>' + config.label + ' prices in India are influenced by the international spot price set by the <strong>London Bullion Market Association (LBMA)</strong>, ';
-    html += 'converted to INR using the prevailing USD-INR exchange rate. The domestic price also includes:</p>';
-    html += '<ul>';
-    html += '<li><strong>Import Duty:</strong> ' + config.importDuty + ' levied by the Government of India on imported ' + config.label.toLowerCase() + '.</li>';
-    html += '<li><strong>GST:</strong> ' + config.gst + ' applicable on ' + config.label.toLowerCase() + ' purchases.</li>';
-    html += '<li><strong>Making Charges:</strong> Jewellers add making charges (varies by design and jeweller) on top of the base metal price.</li>';
-    html += '</ul>';
-    html += '<p>The ' + config.source + ' publishes the official daily rate that jewellers across India use as their benchmark.</p>';
-    html += '</div>';
-
-    // ── 12. Price breakdown ──
-    html += '<div class="hdf-section hdf-price-breakdown">';
-    html += '<h2>' + config.label + ' Price Breakdown</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>Component</th><th>Details</th></tr></thead>';
-    html += '<tbody>';
-    html += '<tr><td>International Spot Price</td><td>Set by LBMA (London Bullion Market Association)</td></tr>';
-    html += '<tr><td>USD-INR Exchange Rate</td><td>Prevailing RBI reference rate</td></tr>';
-    html += '<tr><td>Import Duty</td><td>' + config.importDuty + ' on CIF value</td></tr>';
-    html += '<tr><td>GST</td><td>' + config.gst + '</td></tr>';
-    html += '<tr><td>Making Charges</td><td>Varies by jeweller and design (typically 8%–25%)</td></tr>';
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── 13. Breadcrumb ──
-    html += '<nav class="hdf-breadcrumb">';
     const stateSlug = slugify(metalType + '-price-in-' + state + '-today');
     const nationalSlug = slugify(metalType + '-price-in-india-today');
-    html += '<a href="/' + nationalSlug + '/">India</a>';
-    html += ' &rsaquo; <a href="/' + stateSlug + '/">' + state + '</a>';
-    html += ' &rsaquo; <span>' + city + '</span>';
-    html += '</nav>';
+    const stateUrl = '/' + stateSlug + '/';
+    const nationalUrl = '/' + nationalSlug + '/';
 
-    // ── 14. Cross-fuel links ──
-    html += '<div class="hdf-section hdf-cross-fuel">';
-    html += '<h2>Fuel Prices in ' + city + '</h2>';
-    html += '<div class="hdf-pills">';
-    const petrolSlug = slugify('petrol-price-in-' + city + '-today');
-    const dieselSlug = slugify('diesel-price-in-' + city + '-today');
-    html += '<a class="hdf-pill" href="/' + petrolSlug + '/">Petrol Price in ' + city + '</a>';
-    html += '<a class="hdf-pill" href="/' + dieselSlug + '/">Diesel Price in ' + city + '</a>';
-    html += '</div>';
-    html += '</div>';
-
-    // ── 15. FAQ ──
-    html += '<div class="hdf-section hdf-faq">';
-    html += '<h2>Frequently Asked Questions</h2>';
-    html += '<div class="hdf-faq-list">';
-
-    html += '<div class="hdf-faq-item"><h3>What is the ' + config.label.toLowerCase() + ' price in ' + city + ' today?</h3>';
-    html += '<p>Today\'s ' + config.label.toLowerCase() + ' price in ' + city + ' is ₹' + indianFormat(primaryPrice) + ' per gram';
-    if (metalType === 'gold') html += ' for 24K purity';
-    html += ', as per the ' + config.source + '.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>How is ' + config.label.toLowerCase() + ' price calculated in ' + city + '?</h3>';
-    html += '<p>' + config.label + ' prices in ' + city + ' are based on the international spot price (LBMA), converted to INR, plus import duty (' + config.importDuty + ') and GST (' + config.gst + '). Local demand and supply may cause minor variations.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>What is the GST on ' + config.label.toLowerCase() + ' in India?</h3>';
-    html += '<p>GST on ' + config.label.toLowerCase() + ' in India is ' + config.gst + '. This is charged at the point of purchase from a jeweller or bullion dealer.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>Why do ' + config.label.toLowerCase() + ' prices differ between cities?</h3>';
-    html += '<p>While the base ' + config.label.toLowerCase() + ' rate from IBJA is the same across India, city-level variations occur due to local demand, transportation costs, and jeweller margins. However, the difference is typically very small (₹20–₹50 per gram).</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>Is it a good time to buy ' + config.label.toLowerCase() + ' in ' + city + '?</h3>';
-    html += '<p>Prices have been ' + changeText(delta) + '. Review the 7-day and 30-day trend charts above to assess the price direction before making a purchase decision. Consult a financial advisor for large investments.</p></div>';
-
-    html += '</div>';
-    html += '</div>';
+    const cityObj = { city_name: city, state_name: state };
+    const html = this._buildCityContent(cityObj, metalType, prices, allCities, stateUrl, nationalUrl);
 
     // Publish
     const result = await this.wp.upsertPost({
@@ -491,6 +304,151 @@ class MetalsPostCreator {
     this._logPost('city', metalType, city, result, contentHash);
     this.logger.info(MODULE, config.label + ' city post ' + result.action + ': ' + city);
     return result.action;
+  }
+
+  _buildCityContent(city, metalType, prices, allCities, stateUrl, nationalUrl) {
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
+    const isoDate = today.toISOString();
+    const metal = this.METAL_CONFIG[metalType];
+
+    // Primary variant and price
+    const primaryVariant = metalType === 'gold' ? '24K' : '1g';
+    const primaryPrice = prices[primaryVariant];
+    const priceDisplay = primaryPrice ? `₹${primaryPrice.toLocaleString('en-IN')}` : 'N/A';
+
+    // Count unique states in city list
+    const stateCount = [...new Set(allCities.map(c => c.state))].filter(Boolean).length;
+    const cityCount = allCities.length;
+
+    // Build variants table rows
+    const variantKeys = metalType === 'gold' ? ['24K', '22K', '18K'] : ['1g'];
+    const variantRows = variantKeys.map(v => {
+      const p = prices[v];
+      return [v, p ? `₹${p.toLocaleString('en-IN')}` : '—', p ? `₹${(p * 10).toLocaleString('en-IN')}` : '—'];
+    });
+
+    // Weight table rows
+    const weights = [1, 5, 8, 10, 100];
+    const weightRows = weights.map(g => {
+      return [
+        `${g}g`,
+        ...variantKeys.map(v => prices[v] ? `₹${(prices[v] * g).toLocaleString('en-IN')}` : '—')
+      ];
+    });
+
+    // State cities for nearby links
+    const stateCities = allCities.filter(c => c.state === city.state_name && c.city_name !== city.city_name).slice(0, 5);
+
+    const faqs = [
+      {
+        q: `What is the ${metal.label} price in ${city.city_name} today (${dateStr})?`,
+        a: `The ${metal.label} (${primaryVariant}) price in ${city.city_name} today is <strong>${priceDisplay} per gram</strong>, sourced from IBJA (Indian Bullion and Jewellers Association).`
+      },
+      {
+        q: `Is ${metal.label} price the same in all cities in ${city.state_name}?`,
+        a: `${metal.label} prices can vary slightly between cities in ${city.state_name} depending on local taxes and dealer margins. The IBJA rate is a national benchmark, and local jewellers may charge slightly above or below this rate.`
+      },
+      {
+        q: `Why does ${metal.label} price change daily?`,
+        a: `${metal.label} prices fluctuate due to global commodity markets, USD/INR exchange rates, international demand, and macroeconomic factors. Indian prices are also influenced by import duties and GST.`
+      },
+      {
+        q: `What is the difference between the purity grades of ${metal.label}?`,
+        a: metalType === 'gold'
+          ? `24K gold has the highest purity (99.9%), while 22K (91.7%) and 18K (75%) contain other metals for added durability. Higher karat means higher price.`
+          : `${metal.label} purity is measured in fineness. Higher purity means more expensive metal.`
+      },
+      {
+        q: `Where to buy ${metal.label} in ${city.city_name}?`,
+        a: `You can buy ${metal.label} at certified jewellers, bank branches, post offices (India Post Gold), and reputed online platforms. Always check the BIS hallmark for purity certification.`
+      }
+    ];
+
+    return `
+${breadcrumbs([
+  { name: 'Home', url: nationalUrl.replace(/\/[^/]+\/$/, '/') },
+  { name: `${metal.label} Price`, url: nationalUrl },
+  { name: city.state_name, url: stateUrl },
+  { name: `${city.city_name} ${metal.label} Price Today` }
+])}
+
+${priceHero({
+  title: `${metal.label} Price in ${city.city_name} Today (${dateStr})`,
+  price: priceDisplay,
+  unit: `per gram (${primaryVariant})`,
+  change: null,
+  direction: 'none',
+  subtitle: `Updated daily · Sourced from IBJA · ${city.city_name}, ${city.state_name}`,
+  pills: [
+    { value: cityCount, label: 'cities tracked' },
+    { value: stateCount, label: 'states covered' },
+    { value: 'IBJA', label: 'source' }
+  ]
+})}
+
+${articleSchema({
+  headline: `${metal.label} Price in ${city.city_name} Today – ${dateStr}`,
+  description: `Current ${metal.label} price in ${city.city_name} is ${priceDisplay} per gram (${primaryVariant}) on ${dateStr}. Compare all variants and weights.`,
+  datePublished: isoDate,
+  publisherName: 'HDF News'
+})}
+
+<article>
+
+<section>
+<p style="font-size:15px;line-height:1.8;color:#374151;">
+The <strong>${metal.label} price in ${city.city_name}</strong> today is <strong>${priceDisplay} per gram</strong> for ${primaryVariant} ${metal.label}, as reported by the IBJA (Indian Bullion and Jewellers Association) on <time datetime="${today.toISOString().split('T')[0]}">${dateStr}</time>. Prices are updated every morning and reflect the national benchmark rate applicable across India, including ${city.city_name}.
+</p>
+${sourceBadge('IBJA — Indian Bullion and Jewellers Association')}
+</section>
+
+<section>
+${styledTable(
+  `${metal.label} Price by Variant in ${city.city_name} — ${dateStr}`,
+  ['Variant', 'Per Gram', 'Per 10 Grams'],
+  variantRows,
+  ['40%', '30%', '30%']
+)}
+</section>
+
+${readAlsoBox('Read Also', `${metal.label} Price in ${city.state_name} — All Cities`, stateUrl)}
+
+<section>
+${styledTable(
+  `${metal.label} Price by Weight in ${city.city_name}`,
+  ['Weight', ...variantKeys.map(v => `${v} (₹)`)],
+  weightRows
+)}
+${infoBox(`Prices shown above are calculated using today's IBJA benchmark rate for ${city.city_name}. Actual purchase prices at jewellers may include GST (3%) and making charges.`)}
+</section>
+
+${stateCities.length > 0 ? `
+<section>
+<h2 style="font-size:20px;font-weight:700;color:#111827;margin-top:28px;">Nearby Cities in ${city.state_name}</h2>
+<p style="font-size:14px;color:#6b7280;margin-bottom:12px;">Compare ${metal.label} prices in cities near ${city.city_name} in ${city.state_name}:</p>
+<div style="display:flex;flex-wrap:wrap;gap:8px;">
+${stateCities.map(c => `<a href="/${slugify(metalType + '-price-in-' + c.city_name + '-today')}/" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:8px 14px;font-size:13px;color:#374151;text-decoration:none;font-weight:500;">${c.city_name}</a>`).join('')}
+</div>
+</section>
+` : ''}
+
+<section>
+<h2 style="font-size:20px;font-weight:700;color:#111827;margin-top:28px;">Factors Affecting ${metal.label} Price in ${city.city_name}</h2>
+<p style="font-size:14px;color:#374151;line-height:1.8;">Several factors influence the ${metal.label} price in ${city.city_name} and across India:</p>
+<ul style="font-size:14px;color:#374151;line-height:2;padding-left:20px;">
+  <li><strong>Global commodity prices</strong> — International ${metal.label} spot prices (USD/troy oz) directly impact Indian rates</li>
+  <li><strong>USD/INR exchange rate</strong> — A weaker rupee makes imported ${metal.label} more expensive</li>
+  <li><strong>Import duties &amp; GST</strong> — India levies import duty + 3% GST on ${metal.label} purchases</li>
+  <li><strong>Demand seasonality</strong> — Festivals, weddings, and harvest seasons drive higher demand in India</li>
+  <li><strong>Inflation &amp; interest rates</strong> — ${metal.label} is a safe-haven asset; demand rises during economic uncertainty</li>
+</ul>
+</section>
+
+${faqSection(faqs)}
+
+</article>
+`.trim();
   }
 
   // ─── State post ─────────────────────────────────────────────────────────
@@ -560,149 +518,23 @@ class MetalsPostCreator {
       ORDER BY mp.price_date ASC
     `).all(state, metalType, today);
 
-    const title = config.label + ' Price in ' + state + ' Today (' + fmtDate(today) + ') — ' + config.titleSuffix + ' All Cities';
+    const title = config.label + ' Price in ' + state + ' Today (' + fmtDate(today) + ') — All Cities';
     const slug = slugify(metalType + '-price-in-' + state + '-today');
     const metaDescription = (config.label + ' price in ' + state + ' today averages ₹' + indianFormat(avgPrice) + '/g. Check ' + config.titleSuffix + ' across all cities.').substring(0, 160);
 
-    let html = '';
-
-    // ── Hero with state average ──
-    html += '<div class="hdf-hero">';
-    html += '<div class="hdf-hero-inner">';
-    html += '<span class="hdf-live-badge">LIVE</span>';
-    html += '<h2 class="hdf-hero-title">' + config.label + ' Price in ' + state + '</h2>';
-    html += '<div class="hdf-hero-price">₹' + indianFormat(avgPrice) + ' <small>avg per gram</small></div>';
-    html += '<div class="hdf-hero-change">' + changeBadge(delta) + '</div>';
-    html += '<div class="hdf-hero-source">Source: ' + config.source + '</div>';
-    html += '<div class="hdf-hero-meta">' + stateCities.length + ' cities tracked</div>';
-    html += '</div>';
-    html += '</div>';
-
-    // ── Intro ──
-    html += '<div class="hdf-section hdf-intro">';
-    html += '<p>The average <strong>' + config.label.toLowerCase() + ' price in ' + state + '</strong> today is <strong>₹' + indianFormat(avgPrice) + ' per gram</strong>, ';
-    html += changeText(delta) + '. ';
-    html += 'Prices are tracked across ' + stateCities.length + ' cities in ' + state + ', sourced daily from the ' + config.source + '.</p>';
-    html += '</div>';
-
-    // ── All cities table ──
-    html += '<div class="hdf-section hdf-state-table">';
-    html += '<h2>' + config.label + ' Price in ' + state + ' — All Cities</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>City</th>';
-    if (metalType === 'gold') {
-      html += '<th>24K (₹/g)</th><th>22K (₹/g)</th><th>18K (₹/g)</th>';
-    } else {
-      html += '<th>Price (₹/g)</th>';
-    }
-    html += '</tr></thead>';
-    html += '<tbody>';
-    for (const sc of stateCities) {
-      const citySlug = slugify(metalType + '-price-in-' + sc.city_name + '-today');
-      html += '<tr>';
-      html += '<td><a href="/' + citySlug + '/">' + sc.city_name + '</a></td>';
-      if (metalType === 'gold') {
-        html += '<td>₹' + indianFormat(sc.price_24k) + '</td>';
-        html += '<td>₹' + indianFormat(sc.price_22k) + '</td>';
-        html += '<td>₹' + indianFormat(sc.price_18k) + '</td>';
-      } else {
-        html += '<td>₹' + indianFormat(sc.price_1g) + '</td>';
-      }
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── 7-Day state history ──
-    html += '<div class="hdf-section hdf-history">';
-    html += '<h2>' + config.label + ' Price Trend in ' + state + ' — Last 7 Days</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>Date</th><th>Avg Price (₹/g)</th><th>Change</th><th>Change (%)</th></tr></thead>';
-    html += '<tbody>';
-    for (let i = 0; i < history7.length; i++) {
-      const row = history7[i];
-      const price = metalType === 'gold' ? row.avg_24k : row.avg_1g;
-      const prevPrice = i > 0 ? (metalType === 'gold' ? history7[i - 1].avg_24k : history7[i - 1].avg_1g) : null;
-      const dayDelta = (price && prevPrice) ? price - prevPrice : 0;
-      const dayPct = (price && prevPrice && prevPrice !== 0) ? ((dayDelta / prevPrice) * 100).toFixed(2) : '0.00';
-      const isToday = row.price_date === today;
-      html += '<tr' + (isToday ? ' class="hdf-today-row"' : '') + '>';
-      html += '<td>' + fmtDate(row.price_date) + (isToday ? ' <span class="hdf-today-badge">Today</span>' : '') + '</td>';
-      html += '<td>₹' + indianFormat(price) + '</td>';
-      html += '<td>' + changeBadge(dayDelta) + '</td>';
-      html += '<td>' + (dayDelta >= 0 ? '+' : '') + dayPct + '%</td>';
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── Chart placeholder ──
-    html += '<div class="hdf-section hdf-chart">';
-    html += '<h2>' + config.label + ' Price Chart — ' + state + '</h2>';
-    html += '<canvas class="hdf-price-chart" data-city="' + state + '" data-metal="' + metalType + '" data-days="30" data-level="state" width="700" height="350"></canvas>';
-    html += '</div>';
-
-    // ── National link ──
-    html += '<div class="hdf-section hdf-national-link">';
     const nationalSlug = slugify(metalType + '-price-in-india-today');
-    html += '<p>View <a href="/' + nationalSlug + '/">' + config.label + ' Price in India — All States</a></p>';
-    html += '</div>';
-
-    // ── Cross-metal pills ──
-    html += '<div class="hdf-section hdf-cross-metal">';
-    html += '<h2>Other Metal Prices in ' + state + '</h2>';
-    html += '<div class="hdf-pills">';
-    const otherMetals = Object.keys(METAL_CONFIG).filter(m => m !== metalType);
-    for (const om of otherMetals) {
-      const omConf = METAL_CONFIG[om];
-      const omSlug = slugify(om + '-price-in-' + state + '-today');
-      html += '<a class="hdf-pill" href="/' + omSlug + '/">' + omConf.label + ' Price in ' + state + '</a>';
-    }
-    html += '</div>';
-    html += '</div>';
-
-    // ── Cross-fuel links ──
-    html += '<div class="hdf-section hdf-cross-fuel">';
-    html += '<h2>Fuel Prices in ' + state + '</h2>';
-    html += '<div class="hdf-pills">';
-    const petrolSlug = slugify('petrol-price-in-' + state + '-today');
-    const dieselSlug = slugify('diesel-price-in-' + state + '-today');
-    html += '<a class="hdf-pill" href="/' + petrolSlug + '/">Petrol Price in ' + state + '</a>';
-    html += '<a class="hdf-pill" href="/' + dieselSlug + '/">Diesel Price in ' + state + '</a>';
-    html += '</div>';
-    html += '</div>';
-
-    // ── FAQ ──
-    html += '<div class="hdf-section hdf-faq">';
-    html += '<h2>Frequently Asked Questions</h2>';
-    html += '<div class="hdf-faq-list">';
-
-    html += '<div class="hdf-faq-item"><h3>What is the ' + config.label.toLowerCase() + ' rate in ' + state + ' today?</h3>';
-    html += '<p>The average ' + config.label.toLowerCase() + ' price in ' + state + ' today is ₹' + indianFormat(avgPrice) + ' per gram';
-    if (metalType === 'gold') html += ' for 24K purity';
-    html += '. Prices may vary slightly across cities.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>Which city in ' + state + ' has the lowest ' + config.label.toLowerCase() + ' price?</h3>';
-    let cheapest = stateCities[0];
-    for (const sc of stateCities) {
-      const p = metalType === 'gold' ? sc.price_24k : sc.price_1g;
-      const cp = metalType === 'gold' ? cheapest.price_24k : cheapest.price_1g;
-      if (p && cp && p < cp) cheapest = sc;
-    }
-    const cheapPrice = metalType === 'gold' ? cheapest.price_24k : cheapest.price_1g;
-    html += '<p>' + cheapest.city_name + ' currently has the lowest ' + config.label.toLowerCase() + ' price in ' + state + ' at ₹' + indianFormat(cheapPrice) + ' per gram.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>Are ' + config.label.toLowerCase() + ' prices the same across all cities in ' + state + '?</h3>';
-    html += '<p>No, minor variations (typically ₹20–₹50 per gram) exist between cities due to local demand, transportation, and jeweller margins. The base rate from ' + config.source + ' is the same nationwide.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>What taxes are applicable on ' + config.label.toLowerCase() + ' in ' + state + '?</h3>';
-    html += '<p>GST of ' + config.gst + ' is applicable on ' + config.label.toLowerCase() + ' purchases across India, including ' + state + '. Import duty is ' + config.importDuty + '.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>How often are ' + config.label.toLowerCase() + ' prices updated?</h3>';
-    html += '<p>' + config.label + ' prices are updated daily based on the IBJA rate. The rate is typically announced between 10:30 AM and 11:30 AM IST on business days.</p></div>';
-
-    html += '</div>';
-    html += '</div>';
+    const nationalUrl = '/' + nationalSlug + '/';
+    const citiesWithPrices = stateCities.map(c => ({
+      city_name: c.city_name,
+      state_name: state,
+      prices: {
+        '24K': c.price_24k || null,
+        '22K': c.price_22k || null,
+        '18K': c.price_18k || null,
+        '1g': c.price_1g || null,
+      }
+    }));
+    const html = this._buildStateContent(state, metalType, citiesWithPrices, nationalUrl);
 
     // Publish
     const result = await this.wp.upsertPost({
@@ -723,6 +555,96 @@ class MetalsPostCreator {
     this._logPost('state', metalType, state, result, contentHash);
     this.logger.info(MODULE, config.label + ' state post ' + result.action + ': ' + state);
     return result.action;
+  }
+
+  _buildStateContent(stateName, metalType, citiesWithPrices, nationalUrl) {
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
+    const metal = this.METAL_CONFIG[metalType];
+    const primaryVariant = metalType === 'gold' ? '24K' : '1g';
+    const stateUrl = '/' + slugify(metalType + '-price-in-' + stateName + '-today') + '/';
+
+    const validCities = citiesWithPrices.filter(c => c.prices && c.prices[primaryVariant]);
+    const avgPrice = validCities.length
+      ? Math.round(validCities.reduce((s, c) => s + c.prices[primaryVariant], 0) / validCities.length)
+      : null;
+    const avgDisplay = avgPrice ? `₹${avgPrice.toLocaleString('en-IN')}` : 'N/A';
+    const minCity = validCities.reduce((a, b) => (!a || b.prices[primaryVariant] < a.prices[primaryVariant]) ? b : a, null);
+    const maxCity = validCities.reduce((a, b) => (!a || b.prices[primaryVariant] > a.prices[primaryVariant]) ? b : a, null);
+
+    const tableRows = validCities.map(c => [
+      c.city_name,
+      `₹${c.prices[primaryVariant].toLocaleString('en-IN')}`,
+      metalType === 'gold' && c.prices['22K'] ? `₹${c.prices['22K'].toLocaleString('en-IN')}` : '—'
+    ]);
+
+    const faqs = [
+      {
+        q: `What is the ${metal.label} price in ${stateName} today?`,
+        a: `The average ${metal.label} (${primaryVariant}) price in ${stateName} today is <strong>${avgDisplay} per gram</strong> across ${validCities.length} cities, as of ${dateStr}.`
+      },
+      {
+        q: `Which city has the cheapest ${metal.label} in ${stateName}?`,
+        a: minCity ? `${minCity.city_name} has the lowest ${metal.label} price in ${stateName} today at ₹${minCity.prices[primaryVariant].toLocaleString('en-IN')} per gram.` : 'Price data is being updated.'
+      },
+      {
+        q: `Is ${metal.label} price different across cities in ${stateName}?`,
+        a: `${metal.label} prices across cities in ${stateName} are generally benchmarked to the IBJA national rate. Minor variations can occur due to local dealer margins and taxes.`
+      }
+    ];
+
+    return `
+${breadcrumbs([
+  { name: 'Home', url: nationalUrl.replace(/\/[^/]+\/$/, '/') },
+  { name: `${metal.label} Price`, url: nationalUrl },
+  { name: `${stateName} ${metal.label} Price Today` }
+])}
+
+${priceHero({
+  title: `${metal.label} Price in ${stateName} Today (${dateStr})`,
+  price: avgDisplay,
+  unit: `avg per gram · ${primaryVariant}`,
+  change: null,
+  direction: 'none',
+  subtitle: `${validCities.length} cities tracked across ${stateName} · Source: IBJA`,
+  pills: [
+    { value: validCities.length, label: 'cities' },
+    { value: minCity ? `₹${minCity.prices[primaryVariant].toLocaleString('en-IN')}` : '—', label: 'lowest' },
+    { value: maxCity ? `₹${maxCity.prices[primaryVariant].toLocaleString('en-IN')}` : '—', label: 'highest' }
+  ]
+})}
+
+${articleSchema({
+  headline: `${metal.label} Price in ${stateName} Today – ${dateStr}`,
+  description: `${metal.label} price in ${stateName} today averages ${avgDisplay} per gram. Check rates in all ${validCities.length} cities in ${stateName}.`,
+  datePublished: today.toISOString(),
+  publisherName: 'HDF News'
+})}
+
+<article>
+
+<section>
+<p style="font-size:15px;line-height:1.8;color:#374151;">
+The average <strong>${metal.label} price in ${stateName}</strong> today is <strong>${avgDisplay} per gram</strong> for ${primaryVariant} ${metal.label} as on <time datetime="${today.toISOString().split('T')[0]}">${dateStr}</time>. We track ${metal.label} rates across <strong>${validCities.length} cities in ${stateName}</strong>, sourced from the IBJA (Indian Bullion and Jewellers Association).
+</p>
+${sourceBadge('IBJA — Indian Bullion and Jewellers Association')}
+</section>
+
+${readAlsoBox('See Also', `${metal.label} Price in India Today — National Average`, nationalUrl)}
+
+<section>
+${styledTable(
+  `${metal.label} Price in All Cities of ${stateName} — ${dateStr}`,
+  metalType === 'gold' ? ['City', `24K (per gram)`, `22K (per gram)`] : ['City', `Price (per gram)`, 'Purity'],
+  tableRows,
+  ['45%', '28%', '27%']
+)}
+</section>
+
+${faqSection(faqs)}
+
+</article>
+`.trim();
   }
 
   // ─── National post ──────────────────────────────────────────────────────
@@ -817,201 +739,21 @@ class MetalsPostCreator {
       LIMIT 20
     `).all(metalType, today);
 
-    const title = config.label + ' Price in India Today (' + fmtDate(today) + ') — ' + config.titleSuffix + ' All Cities';
+    const title = config.label + ' Price in India Today (' + fmtDate(today) + ') — All States';
     const slug = slugify(metalType + '-price-in-india-today');
     const metaDescription = (config.label + ' price in India today is ₹' + indianFormat(nationalAvg) + '/g avg, ' + changeText(delta) + '. Check ' + config.titleSuffix + ' in all cities.').substring(0, 160);
 
-    let html = '';
-
-    // ── Hero ──
-    html += '<div class="hdf-hero">';
-    html += '<div class="hdf-hero-inner">';
-    html += '<span class="hdf-live-badge">LIVE</span>';
-    html += '<h2 class="hdf-hero-title">' + config.label + ' Price in India</h2>';
-    html += '<div class="hdf-hero-price">₹' + indianFormat(nationalAvg) + ' <small>avg per gram</small></div>';
-    html += '<div class="hdf-hero-change">' + changeBadge(delta) + '</div>';
-    html += '<div class="hdf-hero-source">Source: ' + config.source + '</div>';
-    html += '<div class="hdf-hero-meta">' + allCities.length + ' cities · ' + stateAverages.length + ' states tracked</div>';
-    html += '</div>';
-    html += '</div>';
-
-    // ── Intro ──
-    html += '<div class="hdf-section hdf-intro">';
-    html += '<p>The national average <strong>' + config.label.toLowerCase() + ' price in India</strong> today is <strong>₹' + indianFormat(nationalAvg) + ' per gram</strong>, ';
-    html += changeText(delta) + '. ';
-    html += 'We track ' + config.label.toLowerCase() + ' rates across ' + allCities.length + ' cities in ' + stateAverages.length + ' states, sourced from the ' + config.source + '.</p>';
-    html += '</div>';
-
-    // ── State-wise table ──
-    html += '<div class="hdf-section hdf-statewise-table">';
-    html += '<h2>' + config.label + ' Price by State</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>State</th><th>Avg Price (₹/g)</th><th>Cities</th></tr></thead>';
-    html += '<tbody>';
-    for (const sa of stateAverages) {
-      const stSlug = slugify(metalType + '-price-in-' + sa.state + '-today');
-      html += '<tr>';
-      html += '<td><a href="/' + stSlug + '/">' + sa.state + '</a></td>';
-      html += '<td>₹' + indianFormat(sa.avg) + '</td>';
-      html += '<td>' + sa.cityCount + '</td>';
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── Most / least expensive states ──
-    const sortedByPrice = [...stateAverages].sort((a, b) => b.avg - a.avg);
-    html += '<div class="hdf-section hdf-state-extremes">';
-    html += '<h2>Most & Least Expensive States for ' + config.label + '</h2>';
-    html += '<div class="hdf-extremes-grid">';
-
-    html += '<div class="hdf-extreme-card hdf-extreme-high">';
-    html += '<h3>Most Expensive</h3>';
-    html += '<ol>';
-    const topStates = sortedByPrice.slice(0, 5);
-    for (const ts of topStates) {
-      html += '<li>' + ts.state + ' — ₹' + indianFormat(ts.avg) + '/g</li>';
-    }
-    html += '</ol>';
-    html += '</div>';
-
-    html += '<div class="hdf-extreme-card hdf-extreme-low">';
-    html += '<h3>Least Expensive</h3>';
-    html += '<ol>';
-    const bottomStates = sortedByPrice.slice(-5).reverse();
-    for (const bs of bottomStates) {
-      html += '<li>' + bs.state + ' — ₹' + indianFormat(bs.avg) + '/g</li>';
-    }
-    html += '</ol>';
-    html += '</div>';
-
-    html += '</div>';
-    html += '</div>';
-
-    // ── Major cities table (20) ──
-    html += '<div class="hdf-section hdf-major-cities">';
-    html += '<h2>' + config.label + ' Price in Major Indian Cities</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>City</th><th>State</th>';
-    if (metalType === 'gold') {
-      html += '<th>24K (₹/g)</th><th>22K (₹/g)</th><th>18K (₹/g)</th>';
-    } else {
-      html += '<th>Price (₹/g)</th>';
-    }
-    html += '</tr></thead>';
-    html += '<tbody>';
-    for (const mc of majorCities) {
-      const mcSlug = slugify(metalType + '-price-in-' + mc.city_name + '-today');
-      html += '<tr>';
-      html += '<td><a href="/' + mcSlug + '/">' + mc.city_name + '</a></td>';
-      html += '<td>' + (mc.state || '—') + '</td>';
-      if (metalType === 'gold') {
-        html += '<td>₹' + indianFormat(mc.price_24k) + '</td>';
-        html += '<td>₹' + indianFormat(mc.price_22k) + '</td>';
-        html += '<td>₹' + indianFormat(mc.price_18k) + '</td>';
-      } else {
-        html += '<td>₹' + indianFormat(mc.price_1g) + '</td>';
+    const allCitiesWithPrices = allCities.map(c => ({
+      city_name: c.city_name,
+      state_name: c.state,
+      prices: {
+        '24K': c.price_24k || null,
+        '22K': c.price_22k || null,
+        '18K': c.price_18k || null,
+        '1g': c.price_1g || null,
       }
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── 7-Day national history ──
-    html += '<div class="hdf-section hdf-history">';
-    html += '<h2>' + config.label + ' Price Trend in India — Last 7 Days</h2>';
-    html += '<table class="hdf-table">';
-    html += '<thead><tr><th>Date</th><th>Avg Price (₹/g)</th><th>Change</th><th>Change (%)</th></tr></thead>';
-    html += '<tbody>';
-    for (let i = 0; i < history7.length; i++) {
-      const row = history7[i];
-      const price = metalType === 'gold' ? row.avg_24k : row.avg_1g;
-      const prevPrice = i > 0 ? (metalType === 'gold' ? history7[i - 1].avg_24k : history7[i - 1].avg_1g) : null;
-      const dayDelta = (price && prevPrice) ? price - prevPrice : 0;
-      const dayPct = (price && prevPrice && prevPrice !== 0) ? ((dayDelta / prevPrice) * 100).toFixed(2) : '0.00';
-      const isToday = row.price_date === today;
-      html += '<tr' + (isToday ? ' class="hdf-today-row"' : '') + '>';
-      html += '<td>' + fmtDate(row.price_date) + (isToday ? ' <span class="hdf-today-badge">Today</span>' : '') + '</td>';
-      html += '<td>₹' + indianFormat(price) + '</td>';
-      html += '<td>' + changeBadge(dayDelta) + '</td>';
-      html += '<td>' + (dayDelta >= 0 ? '+' : '') + dayPct + '%</td>';
-      html += '</tr>';
-    }
-    html += '</tbody></table>';
-    html += '</div>';
-
-    // ── Chart ──
-    html += '<div class="hdf-section hdf-chart">';
-    html += '<h2>' + config.label + ' Price Chart — India</h2>';
-    html += '<canvas class="hdf-price-chart" data-city="India" data-metal="' + metalType + '" data-days="30" data-level="national" width="700" height="350"></canvas>';
-    html += '</div>';
-
-    // ── Cross-metal links ──
-    html += '<div class="hdf-section hdf-cross-metal">';
-    html += '<h2>Other Metal Prices in India</h2>';
-    html += '<div class="hdf-pills">';
-    const otherMetals = Object.keys(METAL_CONFIG).filter(m => m !== metalType);
-    for (const om of otherMetals) {
-      const omConf = METAL_CONFIG[om];
-      const omSlug = slugify(om + '-price-in-india-today');
-      html += '<a class="hdf-pill" href="/' + omSlug + '/">' + omConf.label + ' Price in India</a>';
-    }
-    html += '</div>';
-    html += '</div>';
-
-    // ── Cross-fuel links ──
-    html += '<div class="hdf-section hdf-cross-fuel">';
-    html += '<h2>Fuel Prices in India</h2>';
-    html += '<div class="hdf-pills">';
-    html += '<a class="hdf-pill" href="/petrol-price-in-india-today/">Petrol Price in India</a>';
-    html += '<a class="hdf-pill" href="/diesel-price-in-india-today/">Diesel Price in India</a>';
-    html += '</div>';
-    html += '</div>';
-
-    // ── About IBJA / LBMA ──
-    html += '<div class="hdf-section hdf-about-pricing">';
-    html += '<h2>About ' + config.label + ' Pricing in India</h2>';
-    html += '<p>Domestic ' + config.label.toLowerCase() + ' prices in India are derived from the international spot price determined by the <strong>London Bullion Market Association (LBMA)</strong>. ';
-    html += 'The LBMA conducts twice-daily electronic auctions (AM and PM fix) that set the global benchmark for precious metals.</p>';
-    html += '<p>To arrive at the Indian price, the LBMA spot rate (in USD per troy ounce) is:</p>';
-    html += '<ol>';
-    html += '<li>Converted to INR using the prevailing RBI reference exchange rate</li>';
-    html += '<li>Converted from troy ounce (31.1g) to per-gram pricing</li>';
-    html += '<li>Adjusted for import duty of ' + config.importDuty + '</li>';
-    html += '<li>GST of ' + config.gst + ' added at point of sale</li>';
-    html += '</ol>';
-    html += '<p>The <strong>' + config.source + '</strong> then publishes the official daily domestic rate that jewellers and dealers across India use as their benchmark.</p>';
-    html += '</div>';
-
-    // ── FAQ ──
-    html += '<div class="hdf-section hdf-faq">';
-    html += '<h2>Frequently Asked Questions</h2>';
-    html += '<div class="hdf-faq-list">';
-
-    html += '<div class="hdf-faq-item"><h3>What is today\'s ' + config.label.toLowerCase() + ' rate in India?</h3>';
-    html += '<p>The average ' + config.label.toLowerCase() + ' price in India today is ₹' + indianFormat(nationalAvg) + ' per gram';
-    if (metalType === 'gold') html += ' for 24K purity';
-    html += ', sourced from the ' + config.source + '.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>Which state has the cheapest ' + config.label.toLowerCase() + ' in India?</h3>';
-    const cheapestState = sortedByPrice.length > 0 ? sortedByPrice[sortedByPrice.length - 1] : null;
-    if (cheapestState) {
-      html += '<p>' + cheapestState.state + ' currently has the lowest average ' + config.label.toLowerCase() + ' price at ₹' + indianFormat(cheapestState.avg) + ' per gram.</p></div>';
-    } else {
-      html += '<p>Price data is being updated. Please check back shortly.</p></div>';
-    }
-
-    html += '<div class="hdf-faq-item"><h3>Why is ' + config.label.toLowerCase() + ' price different in each city?</h3>';
-    html += '<p>While the IBJA base rate is uniform, city-level variations of ₹20–₹50 per gram arise from local demand, transportation costs, and individual jeweller margins.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>What is the import duty on ' + config.label.toLowerCase() + ' in India?</h3>';
-    html += '<p>The current import duty on ' + config.label.toLowerCase() + ' in India is ' + config.importDuty + ', levied on the CIF (Cost, Insurance, and Freight) value of imported ' + config.label.toLowerCase() + '.</p></div>';
-
-    html += '<div class="hdf-faq-item"><h3>How can I track daily ' + config.label.toLowerCase() + ' prices?</h3>';
-    html += '<p>This page is updated every day with the latest ' + config.label.toLowerCase() + ' rates from IBJA. Bookmark this page or visit daily to track prices across all Indian cities and states.</p></div>';
-
-    html += '</div>';
-    html += '</div>';
+    }));
+    const html = this._buildNationalContent(metalType, allCitiesWithPrices);
 
     // Publish
     const result = await this.wp.upsertPost({
@@ -1092,6 +834,116 @@ class MetalsPostCreator {
 
     html += '</div>';
     return html;
+  }
+
+  _buildNationalContent(metalType, allCitiesWithPrices) {
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const metal = this.METAL_CONFIG[metalType];
+    const primaryVariant = metalType === 'gold' ? '24K' : '1g';
+    const variantKeys = metalType === 'gold' ? ['24K', '22K', '18K'] : ['1g'];
+    const valid = allCitiesWithPrices.filter(c => c.prices && c.prices[primaryVariant]);
+    const avgPrice = valid.length
+      ? Math.round(valid.reduce((s, c) => s + c.prices[primaryVariant], 0) / valid.length)
+      : null;
+    const avgDisplay = avgPrice ? `\u20b9${avgPrice.toLocaleString('en-IN')}` : 'N/A';
+    const stateCount = [...new Set(valid.map(c => c.state_name))].filter(Boolean).length;
+    const byState = {};
+    valid.forEach(c => {
+      if (!byState[c.state_name]) byState[c.state_name] = { prices: [], cities: 0 };
+      byState[c.state_name].prices.push(c.prices[primaryVariant]);
+      byState[c.state_name].cities++;
+    });
+    const stateRows = Object.entries(byState).sort((a, b) => a[0].localeCompare(b[0])).map(([state, data]) => {
+      const avg = Math.round(data.prices.reduce((s, p) => s + p, 0) / data.prices.length);
+      return [state, `\u20b9${avg.toLocaleString('en-IN')}`, data.cities.toString()];
+    });
+    const weights = [1, 5, 8, 10, 100];
+    const weightRows = weights.map(g => [
+      `${g}g`,
+      ...variantKeys.map(v => {
+        const sample = valid.find(c => c.prices[v]);
+        return sample ? `\u20b9${(sample.prices[v] * g).toLocaleString('en-IN')}` : '\u2014';
+      })
+    ]);
+    const faqs = [
+      {
+        q: `What is the ${metal.label} price in India today (${dateStr})?`,
+        a: `The national average ${metal.label} price in India today is <strong>${avgDisplay} per gram</strong> for ${primaryVariant} ${metal.label}, as reported by IBJA on ${dateStr}.`
+      },
+      {
+        q: `How is ${metal.label} price determined in India?`,
+        a: `${metal.label} prices in India are primarily benchmarked by IBJA. The rate is influenced by international spot prices, USD/INR exchange rate, import duty, and GST.`
+      },
+      {
+        q: `Is ${metal.label} price the same across all states in India?`,
+        a: `The IBJA benchmark rate is uniform across India. However, retail prices can vary slightly due to state-level taxes, dealer margins, and transportation costs.`
+      },
+      {
+        q: `What is GST on ${metal.label} in India?`,
+        a: `${metal.label} attracts 3% GST in India on the purchase price. Making charges on jewellery also attract 5% GST separately.`
+      },
+      {
+        q: `When is ${metal.label} price updated?`,
+        a: `${metal.label} prices are updated every morning (typically by 9:00 AM IST) based on the IBJA daily rate announcement.`
+      }
+    ];
+    return [
+      priceHero({
+        title: `${metal.label} Price in India Today (${dateStr})`,
+        price: avgDisplay,
+        unit: `avg per gram \u00b7 ${primaryVariant}`,
+        change: null,
+        direction: 'none',
+        subtitle: `Updated daily \u00b7 Sourced from IBJA \u00b7 ${valid.length} cities \u00b7 ${stateCount} states tracked`,
+        pills: [
+          { value: valid.length, label: 'cities tracked' },
+          { value: stateCount, label: 'states covered' },
+          { value: 'Daily 9AM', label: 'update time' }
+        ]
+      }),
+      articleSchema({
+        headline: `${metal.label} Price in India Today \u2013 ${dateStr}`,
+        description: `National average ${metal.label} price today is ${avgDisplay} per gram. Check rates across ${valid.length} cities in ${stateCount} states. Source: IBJA.`,
+        datePublished: today.toISOString(),
+        publisherName: 'HDF News'
+      }),
+      '<article>',
+      '<section>',
+      `<p style="font-size:15px;line-height:1.8;color:#374151;">The national average <strong>${metal.label} price in India</strong> today is <strong>${avgDisplay} per gram</strong> for ${primaryVariant} ${metal.label}. We track rates across <strong>${valid.length} cities in ${stateCount} states</strong>, sourced from the IBJA.</p>`,
+      sourceBadge('IBJA \u2014 Indian Bullion and Jewellers Association'),
+      '</section>',
+      '<section>',
+      styledTable(
+        `${metal.label} Price by Variant \u2014 ${dateStr}`,
+        ['Variant', 'Per Gram', 'Per 10 Grams'],
+        variantKeys.map(v => {
+          const sample = valid.find(c => c.prices[v]);
+          const p = sample ? sample.prices[v] : null;
+          return [v, p ? `\u20b9${p.toLocaleString('en-IN')}` : '\u2014', p ? `\u20b9${(p * 10).toLocaleString('en-IN')}` : '\u2014'];
+        }),
+        ['40%', '30%', '30%']
+      ),
+      '</section>',
+      '<section>',
+      styledTable(
+        `${metal.label} Price by Weight in India`,
+        ['Weight', ...variantKeys.map(v => `${v} (\u20b9)`)],
+        weightRows
+      ),
+      infoBox('Prices shown are based on IBJA benchmark rates. Add 3% GST for actual purchase price. Making charges are additional.'),
+      '</section>',
+      '<section>',
+      styledTable(
+        `${metal.label} Price by State \u2014 ${dateStr}`,
+        [`State`, `Avg Price (${primaryVariant}/g)`, 'Cities Tracked'],
+        stateRows,
+        ['50%', '25%', '25%']
+      ),
+      '</section>',
+      faqSection(faqs),
+      '</article>'
+    ].join('\n');
   }
 }
 
