@@ -200,30 +200,58 @@ class FuelModule extends EventEmitter {
 
     let petrol = null;
     let diesel = null;
+    const errors = [];
 
     // Fetch petrol
     try {
       const pRes = await fetch('https://' + host + '/petrol_price_india_city_value/', { headers });
-      if (pRes.ok) {
+      if (!pRes.ok) {
+        errors.push('Petrol API returned ' + pRes.status);
+      } else {
         const pData = await pRes.json();
         const val = Object.values(pData)[0];
-        if (typeof val === 'number' && val >= 30 && val <= 200) petrol = val;
+        if (typeof val === 'number' && val >= 30 && val <= 300) {
+          petrol = val;
+        } else {
+          errors.push('Petrol: invalid value ' + JSON.stringify(val));
+        }
       }
-    } catch (e) { /* skip */ }
+    } catch (e) {
+      errors.push('Petrol fetch error: ' + e.message);
+    }
 
     // Fetch diesel
     try {
       const dRes = await fetch('https://' + host + '/diesel_price_india_city_value/', { headers });
-      if (dRes.ok) {
+      if (!dRes.ok) {
+        errors.push('Diesel API returned ' + dRes.status);
+      } else {
         const dData = await dRes.json();
         const val = Object.values(dData)[0];
-        if (typeof val === 'number' && val >= 30 && val <= 200) diesel = val;
+        if (typeof val === 'number' && val >= 20 && val <= 300) {
+          diesel = val;
+        } else {
+          errors.push('Diesel: invalid value ' + JSON.stringify(val));
+        }
       }
-    } catch (e) { /* skip */ }
+    } catch (e) {
+      errors.push('Diesel fetch error: ' + e.message);
+    }
+
+    if (errors.length > 0) {
+      this.logger.warn(MODULE, city.city_name + ': ' + errors.join('; '));
+    }
 
     if (petrol !== null || diesel !== null) {
       this.upsertPrice(city.city_name, city.state, petrol, diesel, 'api3');
+      return true;
     }
+
+    // Both failed — throw so runDailyFetch counts it as a failure
+    if (errors.length > 0) {
+      throw new Error(errors.join('; '));
+    }
+    return false;
   }
 
   /**
@@ -379,12 +407,31 @@ class FuelModule extends EventEmitter {
     const bySource = {};
     for (const r of bySrc) bySource[r.source] = r.c;
 
+    // Last fetch from log
+    let lastFetchResult = null;
+    try {
+      const lastFetch = this.db.prepare(
+        'SELECT * FROM fetch_log WHERE module = ? ORDER BY created_at DESC LIMIT 1'
+      ).get('fuel');
+      if (lastFetch) {
+        lastFetchResult = {
+          type: lastFetch.fetch_type,
+          ok: lastFetch.cities_ok,
+          fail: lastFetch.cities_fail,
+          duration: lastFetch.duration_ms,
+          time: lastFetch.created_at,
+          details: lastFetch.details ? JSON.parse(lastFetch.details) : null,
+        };
+      }
+    } catch (e) { /* ignore */ }
+
     return {
       total,
       fetched,
       missing: Math.max(0, total - fetched),
       bySource,
       lastFetchAt: this.stats.lastFetchAt,
+      lastFetchResult,
     };
   }
 

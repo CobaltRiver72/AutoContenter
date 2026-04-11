@@ -499,6 +499,14 @@
           </div>
         </div>
 
+        <!-- Pipeline Diagnostics -->
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-title">Pipeline Diagnostics</div>
+          <p style="color:#888;font-size:13px;margin-bottom:12px;">Quick check of all system requirements — API keys, cities, modules, credentials.</p>
+          <button class="btn btn-secondary" onclick="runDiagnostics()">🔍 Run Diagnostics</button>
+          <div id="diagnostics-result" style="margin-top:10px;"></div>
+        </div>
+
         <!-- Other Settings (dynamically rendered) -->
         <div id="settingsForm" class="settings-form">
           <p class="placeholder-text">Loading...</p>
@@ -666,6 +674,7 @@
         <div class="page-header">
           <h2 class="page-title">Fuel Price Tracker</h2>
           <div class="page-actions">
+            <button class="btn btn-sm btn-outline" onclick="testFuelFetch()">🧪 Test (5 cities)</button>
             <button class="btn btn-sm btn-purple" id="fuelFetchBtn" onclick="triggerFuelFetch()">⚡ Fetch All Prices</button>
             <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="fuelPostsBtn" onclick="triggerFuelPosts()">📝 Generate Posts</button>
             <button class="btn btn-sm btn-ghost" onclick="loadFuelPage()">↻ Refresh</button>
@@ -679,6 +688,7 @@
           <div class="stat-card"><div class="stat-value" id="fuel-missing-today">—</div><div class="stat-label">Missing</div></div>
           <div class="stat-card"><div class="stat-value" id="fuel-last-fetch">—</div><div class="stat-label">Last Fetch</div></div>
         </div>
+        <div id="fuel-last-fetch-detail"></div>
 
         <!-- Tab Navigation -->
         <div class="page-tabs" id="fuel-tabs">
@@ -809,6 +819,7 @@
         <div class="page-header">
           <h2 class="page-title">Metals Price Tracker</h2>
           <div class="page-actions">
+            <button class="btn btn-sm btn-outline" onclick="testMetalsFetch()">🧪 Test (Gold)</button>
             <button class="btn btn-sm btn-purple" onclick="triggerMetalsFetch()">⚡ Fetch All Prices</button>
             <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="metalsPostsBtn" onclick="triggerMetalsPosts()">📝 Generate Posts</button>
             <button class="btn btn-sm btn-ghost" onclick="loadMetalsPage()">↻ Refresh</button>
@@ -829,6 +840,7 @@
           <div class="stat-card"><div class="stat-value" id="metals-avg-price">—</div><div class="stat-label">National Avg (10g)</div></div>
           <div class="stat-card"><div class="stat-value" id="metals-last-fetch">—</div><div class="stat-label">Last Fetch</div></div>
         </div>
+        <div id="metals-last-fetch-detail"></div>
 
         <!-- Tab Navigation -->
         <div class="page-tabs" id="metals-tabs">
@@ -1119,6 +1131,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=17"></script>
+  <script src="/js/dashboard.js?v=18"></script>
 </body>
 </html>

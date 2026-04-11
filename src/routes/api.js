@@ -711,16 +711,23 @@ function createApiRouter(deps) {
     }
   });
 
-  router.post('/fuel/fetch', function (req, res) {
+  router.post('/fuel/fetch', async function (req, res) {
     try {
       var fuel = req.app.locals.modules.fuel;
       if (!fuel) return res.status(503).json({ error: 'Fuel module not loaded' });
-      fuel.runDailyFetch(true).catch(function(err) {
-        logger.error('api', 'Manual fuel fetch failed: ' + err.message);
+
+      var result = await fuel.runDailyFetch(true);
+      if (result.skipped) {
+        return res.json({ success: false, error: 'No FUEL_RAPIDAPI_KEY set. Add it in Settings first.' });
+      }
+      res.json({
+        success: true,
+        message: 'Fetch completed: ' + result.ok + ' OK, ' + result.fail + ' failed out of ' + result.total,
+        result: result,
       });
-      res.json({ success: true, message: 'Fetch started in background' });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      logger.error('api', 'Fuel fetch failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -753,7 +760,8 @@ function createApiRouter(deps) {
       var metal = req.query.metal || 'gold';
       var state = req.query.state || null;
       var sql = `
-        SELECT mc.city_name, mc.state, mp.price_24k, mp.price_22k, mp.price_18k,
+        SELECT mc.city_name, mc.state, mc.is_active,
+               mp.price_24k, mp.price_22k, mp.price_18k,
                mp.price_1g, mp.price_date, mp.source
         FROM metals_cities mc
         LEFT JOIN metals_prices mp ON mc.city_name = mp.city
@@ -791,16 +799,23 @@ function createApiRouter(deps) {
     }
   });
 
-  router.post('/metals/fetch', function (req, res) {
+  router.post('/metals/fetch', async function (req, res) {
     try {
       var metals = req.app.locals.modules.metals;
       if (!metals) return res.status(503).json({ error: 'Metals module not loaded' });
-      metals.runDailyFetch(true).catch(function(err) {
-        logger.error('api', 'Manual metals fetch failed: ' + err.message);
+
+      var result = await metals.runDailyFetch(true);
+      if (result.skipped) {
+        return res.json({ success: false, error: 'No METALS_RAPIDAPI_KEY set. Add it in Settings first.' });
+      }
+      res.json({
+        success: true,
+        message: 'Metals fetch completed: ' + JSON.stringify(result),
+        result: result,
       });
-      res.json({ success: true, message: 'Metals fetch started in background' });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      logger.error('api', 'Metals fetch failed: ' + err.message);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -814,10 +829,15 @@ function createApiRouter(deps) {
     }
     if (!apiKey) return res.json({ ok: false, error: 'FUEL_RAPIDAPI_KEY not set — type a key above and Ping, or save it first' });
 
-    var host = 'daily-petrol-diesel-lpg-cng-fuel-prices-in-india.p.rapidapi.com';
+    var host = 'fuel-petrol-diesel-live-price-india.p.rapidapi.com';
     try {
-      var r = await fetch('https://' + host + '/v1/petrol/state/delhi', {
-        headers: { 'x-rapidapi-host': host, 'x-rapidapi-key': apiKey },
+      var r = await fetch('https://' + host + '/petrol_price_india_city_value/', {
+        headers: {
+          'x-rapidapi-host': host,
+          'x-rapidapi-key': apiKey,
+          'Content-Type': 'application/json',
+          'city': 'delhi',
+        },
       });
       if (r.ok || r.status === 200) {
         return res.json({ ok: true, status: r.status, message: 'RapidAPI key is valid' });
@@ -852,6 +872,175 @@ function createApiRouter(deps) {
     } catch (e) {
       res.json({ ok: false, error: e.message });
     }
+  });
+
+  // ─── PER-CITY FETCH ──────────────────────────────────────────────────────
+
+  router.post('/fuel/fetch-city', async function (req, res) {
+    try {
+      var fuel = req.app.locals.modules.fuel;
+      if (!fuel) return res.status(503).json({ error: 'Fuel module not loaded' });
+
+      var cityName = req.body && req.body.city_name;
+      if (!cityName) return res.status(400).json({ error: 'city_name required' });
+
+      var apiKey = fuel._getApiKey();
+      if (!apiKey) return res.json({ success: false, error: 'No FUEL_RAPIDAPI_KEY set' });
+
+      var cityRow = fuel.db.prepare(
+        'SELECT * FROM fuel_cities WHERE city_name = ? AND is_enabled = 1'
+      ).get(cityName);
+      if (!cityRow) return res.json({ success: false, error: 'City not found or disabled: ' + cityName });
+      if (!cityRow.api3_city) return res.json({ success: false, error: cityName + ' has no API mapping (api3_city is null)' });
+
+      await fuel.fetchCityPrice(cityRow, apiKey);
+
+      var price = fuel.db.prepare(
+        "SELECT * FROM fuel_prices WHERE city = ? AND price_date = date('now') ORDER BY id DESC LIMIT 1"
+      ).get(cityName);
+
+      res.json({ success: true, message: 'Fetched ' + cityName, price: price || null });
+    } catch (err) {
+      res.json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/metals/fetch-city', async function (req, res) {
+    try {
+      var metals = req.app.locals.modules.metals;
+      if (!metals) return res.status(503).json({ error: 'Metals module not loaded' });
+
+      var cityName = req.body && req.body.city_name;
+      if (!cityName) return res.status(400).json({ error: 'city_name required' });
+
+      var apiKey = metals._getApiKey();
+      if (!apiKey) return res.json({ success: false, error: 'No METALS_RAPIDAPI_KEY set' });
+
+      // Metals API is bulk — fetch all then filter
+      var metalTypes = (req.body.metal) ? [req.body.metal] : ['gold', 'silver', 'platinum'];
+      var results = {};
+      for (var m of metalTypes) {
+        try {
+          var count = await metals.fetchBulk(m, apiKey);
+          results[m] = count;
+        } catch (e) {
+          results[m] = { error: e.message };
+        }
+      }
+
+      var prices = metals.db.prepare(
+        "SELECT * FROM metals_prices WHERE city = ? AND price_date = date('now')"
+      ).all(cityName);
+
+      res.json({ success: true, message: 'Fetched metals for ' + cityName, results: results, prices: prices });
+    } catch (err) {
+      res.json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── TEST FETCH (5 cities / 1 metal) ───────────────────────────────────
+
+  router.post('/fuel/fetch-test', async function (req, res) {
+    try {
+      var fuel = req.app.locals.modules.fuel;
+      if (!fuel) return res.status(503).json({ error: 'Fuel module not loaded' });
+
+      var apiKey = fuel._getApiKey();
+      if (!apiKey) return res.json({ success: false, error: 'No FUEL_RAPIDAPI_KEY set. Add it in Settings first.' });
+
+      var cities = fuel.db.prepare(
+        'SELECT * FROM fuel_cities WHERE is_enabled = 1 AND api3_city IS NOT NULL LIMIT 5'
+      ).all();
+
+      var results = [];
+      for (var city of cities) {
+        try {
+          await fuel.fetchCityPrice(city, apiKey);
+          var price = fuel.db.prepare(
+            "SELECT petrol, diesel FROM fuel_prices WHERE city = ? AND price_date = date('now')"
+          ).get(city.city_name);
+          results.push({ city: city.city_name, ok: true, petrol: price ? price.petrol : null, diesel: price ? price.diesel : null });
+        } catch (e) {
+          results.push({ city: city.city_name, ok: false, error: e.message });
+        }
+      }
+
+      fuel.stats.lastFetchAt = new Date().toISOString();
+      res.json({ success: true, results: results });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/metals/fetch-test', async function (req, res) {
+    try {
+      var metals = req.app.locals.modules.metals;
+      if (!metals) return res.status(503).json({ error: 'Metals module not loaded' });
+
+      var apiKey = metals._getApiKey();
+      if (!apiKey) return res.json({ success: false, error: 'No METALS_RAPIDAPI_KEY set. Add it in Settings first.' });
+
+      var count = await metals.fetchBulk('gold', apiKey);
+      metals.stats.lastFetchAt = new Date().toISOString();
+
+      var sample = metals.db.prepare(
+        "SELECT city, price_24k, price_22k FROM metals_prices WHERE metal_type = 'gold' AND price_date = date('now') LIMIT 5"
+      ).all();
+
+      res.json({ success: true, message: count + ' gold prices fetched', sample: sample });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── DIAGNOSTICS ────────────────────────────────────────────────────────
+
+  router.get('/diagnostics', function (req, res) {
+    var checks = [];
+
+    // API keys
+    var fuelKey = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
+    checks.push({ name: 'Fuel API Key', ok: !!(fuelKey && fuelKey.value), detail: fuelKey && fuelKey.value ? 'Set (' + fuelKey.value.length + ' chars)' : 'NOT SET' });
+
+    var metalsKey = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
+    checks.push({ name: 'Metals API Key', ok: !!(metalsKey && metalsKey.value), detail: metalsKey && metalsKey.value ? 'Set (' + metalsKey.value.length + ' chars)' : 'NOT SET' });
+
+    // Cities seeded
+    var fuelCities = db.prepare('SELECT COUNT(*) AS c FROM fuel_cities').get().c;
+    checks.push({ name: 'Fuel Cities Seeded', ok: fuelCities > 0, detail: fuelCities + ' cities' });
+
+    var fuelApi3 = db.prepare('SELECT COUNT(*) AS c FROM fuel_cities WHERE api3_city IS NOT NULL').get().c;
+    checks.push({ name: 'Fuel Cities with API Mapping', ok: fuelApi3 > 0, detail: fuelApi3 + ' of ' + fuelCities + ' have api3_city' });
+
+    var metalsCities = db.prepare('SELECT COUNT(*) AS c FROM metals_cities').get().c;
+    checks.push({ name: 'Metals Cities Seeded', ok: metalsCities > 0, detail: metalsCities + ' cities' });
+
+    // Prices today
+    var fuelToday = db.prepare("SELECT COUNT(*) AS c FROM fuel_prices WHERE price_date = date('now')").get().c;
+    checks.push({ name: 'Fuel Prices Today', ok: fuelToday > 0, detail: fuelToday + ' rows' });
+
+    var metalsToday = db.prepare("SELECT COUNT(*) AS c FROM metals_prices WHERE price_date = date('now')").get().c;
+    checks.push({ name: 'Metals Prices Today', ok: metalsToday > 0, detail: metalsToday + ' rows' });
+
+    // WP credentials
+    var wpUrl = db.prepare("SELECT value FROM settings WHERE key = 'WP_SITE_URL'").get();
+    var wpUser = db.prepare("SELECT value FROM settings WHERE key = 'WP_USERNAME'").get();
+    var wpPass = db.prepare("SELECT value FROM settings WHERE key = 'WP_APP_PASSWORD'").get();
+    checks.push({ name: 'WP Credentials', ok: !!(wpUrl && wpUser && wpPass && wpUrl.value), detail: wpUrl && wpUrl.value ? wpUrl.value : 'NOT SET' });
+
+    // Last fetch
+    var lastFetch = db.prepare('SELECT * FROM fetch_log ORDER BY created_at DESC LIMIT 1').get();
+    checks.push({ name: 'Last Fetch', ok: !!lastFetch, detail: lastFetch ? lastFetch.module + ' ' + lastFetch.fetch_type + ' at ' + lastFetch.created_at + ' (' + lastFetch.cities_ok + ' ok, ' + lastFetch.cities_fail + ' fail)' : 'Never fetched' });
+
+    // Module status
+    var fuel = req.app.locals.modules.fuel;
+    checks.push({ name: 'Fuel Module', ok: !!(fuel && fuel.status === 'ready'), detail: fuel ? (fuel.status || 'unknown') : 'Not loaded' });
+
+    var metals = req.app.locals.modules.metals;
+    checks.push({ name: 'Metals Module', ok: !!(metals && metals.status === 'ready'), detail: metals ? (metals.status || 'unknown') : 'Not loaded' });
+
+    var allOk = checks.every(function(c) { return c.ok; });
+    res.json({ ok: allOk, checks: checks });
   });
 
   // ─── POST GENERATION + WP ROUTES ───────────────────────────────────────

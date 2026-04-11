@@ -187,8 +187,15 @@ class MetalsModule extends EventEmitter {
       throw new Error('API returned ' + res.status);
     }
 
-    const data = await res.json();
-    if (!Array.isArray(data)) return 0;
+    const raw = await res.json();
+    // API returns { data: { prices: [...] } } or a flat array
+    const data = Array.isArray(raw) ? raw
+      : (raw && raw.data && Array.isArray(raw.data.prices)) ? raw.data.prices
+      : (raw && Array.isArray(raw.data)) ? raw.data
+      : null;
+    if (!data) {
+      throw new Error('Unexpected API response format for ' + metal + ': ' + JSON.stringify(raw).slice(0, 200));
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     let count = 0;
@@ -360,6 +367,23 @@ class MetalsModule extends EventEmitter {
 
     // Top-level fetched = gold fetched (primary metal)
     result.fetched = result.gold ? result.gold.fetched : 0;
+
+    // Last fetch from log
+    try {
+      const lastFetch = this.db.prepare(
+        'SELECT * FROM fetch_log WHERE module = ? ORDER BY created_at DESC LIMIT 1'
+      ).get('metals');
+      if (lastFetch) {
+        result.lastFetchResult = {
+          type: lastFetch.fetch_type,
+          ok: lastFetch.cities_ok,
+          fail: lastFetch.cities_fail,
+          duration: lastFetch.duration_ms,
+          time: lastFetch.created_at,
+          details: lastFetch.details ? JSON.parse(lastFetch.details) : null,
+        };
+      }
+    } catch (e) { /* ignore */ }
 
     return result;
   }

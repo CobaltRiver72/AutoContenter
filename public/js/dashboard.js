@@ -5094,6 +5094,115 @@
     });
   }
 
+  // ─── Per-city fetch ──────────────────────────────────────────────────────
+
+  async function fetchSingleFuelCity(cityName) {
+    var btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+    try {
+      var res = await fetch('/api/fuel/fetch-city', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city_name: cityName }),
+      });
+      var data = await res.json();
+      if (data.success) {
+        showToast('✅ ' + cityName + ': ₹' + (data.price ? data.price.petrol : '—') + ' / ₹' + (data.price ? data.price.diesel : '—'), 'success');
+        loadFuelPage();
+      } else {
+        showToast('❌ ' + cityName + ': ' + data.error, 'error');
+      }
+    } catch (e) {
+      showToast('❌ ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '⚡'; }
+    }
+  }
+
+  async function fetchSingleMetalsCity(cityName) {
+    var btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+    try {
+      var res = await fetch('/api/metals/fetch-city', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city_name: cityName }),
+      });
+      var data = await res.json();
+      if (data.success) {
+        showToast('✅ Metals fetched for ' + cityName, 'success');
+        loadMetalsPage();
+      } else {
+        showToast('❌ ' + cityName + ': ' + data.error, 'error');
+      }
+    } catch (e) {
+      showToast('❌ ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '⚡'; }
+    }
+  }
+
+  // ─── Test fetch (quick validation) ─────────────────────────────────────
+
+  async function testFuelFetch() {
+    var btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = '🧪 Testing...'; }
+    try {
+      var res = await fetch('/api/fuel/fetch-test', { method: 'POST' });
+      var data = await res.json();
+      if (data.success) {
+        var msg = data.results.map(function(r) {
+          return r.city + ': ' + (r.ok ? '₹' + r.petrol + '/' + r.diesel : '❌ ' + r.error);
+        }).join('\n');
+        showToast('Test results:\n' + msg, 'success');
+        loadFuelPage();
+      } else {
+        showToast('❌ ' + data.error, 'error');
+      }
+    } catch (e) { showToast('❌ ' + e.message, 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '🧪 Test (5 cities)'; } }
+  }
+
+  async function testMetalsFetch() {
+    var btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = '🧪 Testing...'; }
+    try {
+      var res = await fetch('/api/metals/fetch-test', { method: 'POST' });
+      var data = await res.json();
+      if (data.success) {
+        var msg = data.message;
+        if (data.sample && data.sample.length > 0) {
+          msg += '\nSample: ' + data.sample.map(function(s) { return s.city + ' ₹' + s.price_24k; }).join(', ');
+        }
+        showToast('✅ ' + msg, 'success');
+        loadMetalsPage();
+      } else {
+        showToast('❌ ' + data.error, 'error');
+      }
+    } catch (e) { showToast('❌ ' + e.message, 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '🧪 Test (Gold)'; } }
+  }
+
+  // ─── Diagnostics ───────────────────────────────────────────────────────
+
+  async function runDiagnostics() {
+    var el = document.getElementById('diagnostics-result');
+    if (!el) return;
+    el.innerHTML = '⏳ Checking...';
+    try {
+      var res = await fetch('/api/diagnostics');
+      var data = await res.json();
+      var html = '<table class="data-table"><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>';
+      data.checks.forEach(function(c) {
+        html += '<tr><td>' + esc(c.name) + '</td>';
+        html += '<td>' + (c.ok ? '<span class="text-green">✅ OK</span>' : '<span class="text-red">❌ FAIL</span>') + '</td>';
+        html += '<td class="text-sm">' + esc(c.detail) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    } catch (e) { el.textContent = '❌ ' + e.message; }
+  }
+
   // ─── Global onclick= exposure ────────────────────────────────────────────
   // All functions called from HTML onclick/oninput/onchange must be on window.
 
@@ -5111,6 +5220,11 @@
   window.loadSourcesPage         = loadSourcesPage;
   window.filterSourcesTable      = filterSourcesTable;
   window.sortSourcesTable        = sortSourcesTable;
+  window.fetchSingleFuelCity     = fetchSingleFuelCity;
+  window.fetchSingleMetalsCity   = fetchSingleMetalsCity;
+  window.testFuelFetch           = testFuelFetch;
+  window.testMetalsFetch         = testMetalsFetch;
+  window.runDiagnostics          = runDiagnostics;
 
   // ─── Init ───────────────────────────────────────────────────────────────
 
@@ -5137,6 +5251,24 @@
       set('fuel-fetched-today', data.fetched || 0);
       set('fuel-missing-today', data.missing || 0);
       set('fuel-last-fetch', data.lastFetchAt ? timeAgo(data.lastFetchAt) : 'Never');
+
+      // Show last fetch result detail
+      var lfr = data.lastFetchResult;
+      var target = document.getElementById('fuel-last-fetch-detail');
+      if (target && lfr) {
+        var lfrHtml = '<div class="mini-panel"><strong>Last Fetch:</strong> ' + timeAgo(lfr.time) + ' (' + lfr.type + ')';
+        lfrHtml += ' — <span class="text-green">' + lfr.ok + ' OK</span>';
+        if (lfr.fail > 0) {
+          lfrHtml += ', <span class="text-red">' + lfr.fail + ' failed</span>';
+          if (lfr.details && lfr.details.failedCities) {
+            lfrHtml += '<br><span class="text-sm text-muted">Failed: ' + lfr.details.failedCities.join(', ') + '</span>';
+          }
+        }
+        lfrHtml += '</div>';
+        target.innerHTML = lfrHtml;
+      } else if (target) {
+        target.innerHTML = '';
+      }
     });
 
     fetchApi('/api/fuel/states').then(function(data) {
@@ -5193,8 +5325,10 @@
         '<td><span style="font-size:11px;background:var(--bg3);padding:2px 6px;border-radius:4px;">' + (c.source || '—') + '</span></td>' +
         '<td style="font-size:12px;color:#888">' + (pd || '—') + '</td>' +
         '<td><button class="btn-icon" onclick="toggleFuelCity(\'' + cityEsc.replace(/'/g, "\\'") + '\',' + (enabled ? '0' : '1') + ')" title="Toggle enabled">' + (enabled ? '✅' : '❌') + '</button></td>' +
-        '<td class="col-actions"><button class="btn-icon" title="Edit prices" onclick="startEditFuelPrice(\'' + cityEsc.replace(/'/g, "\\'") + '\',\'' + stateEsc.replace(/'/g, "\\'") + '\',' + p + ',' + d + ',\'' + pd + '\')">✏️</button></td>' +
-        '</tr>';
+        '<td class="col-actions">' +
+          '<button class="btn-icon" title="Fetch this city" onclick="fetchSingleFuelCity(\'' + cityEsc.replace(/'/g, "\\'") + '\')">⚡</button>' +
+          '<button class="btn-icon" title="Edit prices" onclick="startEditFuelPrice(\'' + cityEsc.replace(/'/g, "\\'") + '\',\'' + stateEsc.replace(/'/g, "\\'") + '\',' + p + ',' + d + ',\'' + pd + '\')">✏️</button>' +
+        '</td></tr>';
     }).join('');
   }
 
@@ -5233,15 +5367,23 @@
     });
   }
 
-  function triggerFuelFetch() {
+  async function triggerFuelFetch() {
     var btn = $('fuelFetchBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Fetching...'; }
-    fetchApi('/api/fuel/fetch', { method: 'POST' })
-      .then(function() { showToast('Fuel fetch started', 'info'); })
-      .catch(function(err) { showToast('Fetch failed: ' + err.message, 'error'); })
-      .finally(function() {
-        if (btn) { btn.disabled = false; btn.textContent = '⚡ Fetch All Prices'; }
-      });
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Fetching...'; }
+    try {
+      var res = await fetch('/api/fuel/fetch', { method: 'POST' });
+      var data = await res.json();
+      if (data.success) {
+        showToast('✅ ' + data.message, 'success');
+      } else {
+        showToast('❌ ' + (data.error || 'Fetch failed'), 'error');
+      }
+    } catch (err) {
+      showToast('❌ Error: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '⚡ Fetch All Prices'; }
+      loadFuelPage();
+    }
   }
 
   // ─── Metals Page ────────────────────────────────────────────────────────
@@ -5281,6 +5423,20 @@
       set('metals-fetched-today', metalData.fetched || data.fetched || 0);
       set('metals-avg-price', metalData.avgPrice ? '₹' + Number(metalData.avgPrice).toLocaleString() : '—');
       set('metals-last-fetch', data.lastFetchAt ? timeAgo(data.lastFetchAt) : 'Never');
+
+      // Show last fetch result detail
+      var lfr = data.lastFetchResult;
+      var target = document.getElementById('metals-last-fetch-detail');
+      if (target && lfr) {
+        var lfrHtml = '<div class="mini-panel"><strong>Last Fetch:</strong> ' + timeAgo(lfr.time) + ' (' + lfr.type + ')';
+        lfrHtml += ' — <span class="text-green">' + lfr.ok + ' OK</span>';
+        if (lfr.fail > 0) lfrHtml += ', <span class="text-red">' + lfr.fail + ' failed</span>';
+        if (lfr.details && lfr.details.perMetal) lfrHtml += '<br><span class="text-sm text-muted">' + JSON.stringify(lfr.details.perMetal) + '</span>';
+        lfrHtml += '</div>';
+        target.innerHTML = lfrHtml;
+      } else if (target) {
+        target.innerHTML = '';
+      }
     });
 
     fetchApi('/api/metals/cities?metal=' + metal).then(function(data) {
@@ -5333,10 +5489,23 @@
     }).catch(function() {});
   }
 
-  function triggerMetalsFetch() {
-    fetchApi('/api/metals/fetch', { method: 'POST' })
-      .then(function() { showToast('Metals fetch started', 'info'); })
-      .catch(function(err) { showToast('Fetch failed: ' + err.message, 'error'); });
+  async function triggerMetalsFetch() {
+    var btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Fetching...'; }
+    try {
+      var res = await fetch('/api/metals/fetch', { method: 'POST' });
+      var data = await res.json();
+      if (data.success) {
+        showToast('✅ ' + data.message, 'success');
+      } else {
+        showToast('❌ ' + (data.error || 'Fetch failed'), 'error');
+      }
+    } catch (err) {
+      showToast('❌ Error: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '⚡ Fetch All Prices'; }
+      loadMetalsPage();
+    }
   }
 
   // ─── Fuel & Metals Settings ─────────────────────────────────────────────
@@ -5774,6 +5943,7 @@
         '<td><span class="text-sm text-muted">' + esc(c.source || '—') + '</span></td>' +
         '<td><button class="btn-icon" onclick="toggleMetalsCity(\'' + esc(c.city_name) + '\',' + (c.is_active ? '0' : '1') + ')" title="Toggle active">' + activeToggle + '</button></td>' +
         '<td>' +
+          '<button class="btn-icon" title="Fetch this city" onclick="fetchSingleMetalsCity(\'' + esc(c.city_name).replace(/'/g, "\\'") + '\')">⚡</button>' +
           '<button class="btn-icon" title="Edit prices" onclick="startEditMetalsPrice(\'' + esc(c.city_name).replace(/'/g, "\\'") + '\',\'' + metal + '\')">✏️</button>' +
         '</td></tr>';
     }).join('');
