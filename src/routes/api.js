@@ -4109,6 +4109,8 @@ function createApiRouter(deps) {
 
     var stats = { total: 0, inserted: 0, skipped: 0, errors: [] };
 
+    var lookupFuelState = db.prepare('SELECT state FROM fuel_cities WHERE LOWER(city_name) = LOWER(?) LIMIT 1');
+
     var insertStmt = db.prepare(`
       INSERT INTO fuel_prices (city, state, petrol, diesel, price_date, source, fetched_at)
       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
@@ -4132,7 +4134,8 @@ function createApiRouter(deps) {
         var petrol = toDec(row.petrol);
         var diesel = toDec(row.diesel);
         if (petrol === null && diesel === null) { stats.skipped++; continue; }
-        var state  = (row.state  || '').trim() || null;
+        var state = (row.state || '').trim();
+        if (!state) { var sl = lookupFuelState.get(city); state = sl ? sl.state : ''; }
         var source = (row.source || 'imported').trim();
         if (!dryRun) {
           try { insertStmt.run(city, state, petrol, diesel, row.price_date, source); stats.inserted++; }
@@ -4237,6 +4240,8 @@ function createApiRouter(deps) {
 
     var stats = { total: 0, inserted: 0, skipped: 0, errors: [] };
 
+    var lookupFuelStateJ = db.prepare('SELECT state FROM fuel_cities WHERE LOWER(city_name) = LOWER(?) LIMIT 1');
+
     var insertStmt = db.prepare(`
       INSERT INTO fuel_prices (city, state, petrol, diesel, price_date, source, fetched_at)
       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
@@ -4261,7 +4266,8 @@ function createApiRouter(deps) {
         var petrol = toDec(row.petrol);
         var diesel = toDec(row.diesel);
         if (petrol === null && diesel === null) { stats.skipped++; continue; }
-        var state  = String(row.state  || '').trim() || null;
+        var state = String(row.state || '').trim();
+        if (!state) { var slj = lookupFuelStateJ.get(city); state = slj ? slj.state : ''; }
         var source = String(row.source || 'imported').trim();
         if (!dryRun) {
           try { insertStmt.run(city, state, petrol, diesel, dateVal, source); stats.inserted++; }
