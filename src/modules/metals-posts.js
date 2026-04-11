@@ -338,52 +338,86 @@ class MetalsPostCreator {
   _buildCityContent(city, metalType, prices, allCities, stateUrl, nationalUrl) {
     const today = new Date();
     const dateStr = today.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const isoDate = today.toISOString().split('T')[0];
     const metal = this.METAL_CONFIG[metalType];
     const metalLabel = metal.label;
     const primaryVariant = metalType === 'gold' ? '24K' : '1g';
     const primaryPrice = prices[primaryVariant];
     const priceDisplay = primaryPrice ? '\u20b9' + primaryPrice.toLocaleString('en-IN') : 'N/A';
+    const cityCount = allCities.length;
     const stateCount = [...new Set(allCities.map(c => c.state))].filter(Boolean).length;
-    const stateCitiesForFallback = allCities.filter(c => c.state === city.state_name && c.city_name !== city.city_name).slice(0, 5);
+
+    const displayVariants = (metal.variants && metal.variants.length > 0) ? [...metal.variants, '1g'] : ['1g'];
+    const variantRows = displayVariants.map(function(v) {
+      const p = prices[v];
+      const per10 = p ? '\u20b9' + (p * 10).toLocaleString('en-IN') : '\u2014';
+      return '<tr><td>' + v + ' ' + metalLabel + '</td><td>' + (p ? '\u20b9' + p.toLocaleString('en-IN') : '\u2014') + '</td><td>' + per10 + '</td></tr>';
+    }).join('');
+
+    const nearbyCities = allCities.filter(function(c) { return c.state === city.state_name && c.city_name !== city.city_name; }).slice(0, 8);
+    const nearbyRows = nearbyCities.map(function(c) {
+      const p = prices[primaryVariant];
+      return '<tr><td>' + c.city_name + '</td><td>' + (p ? '\u20b9' + p.toLocaleString('en-IN') : '\u2014') + '</td></tr>';
+    }).join('');
+
+    const faqs = [
+      { q: 'What is ' + metalLabel + ' price in ' + city.city_name + ' today?', a: 'The ' + metalLabel + ' (' + primaryVariant + ') price in ' + city.city_name + ' today is ' + priceDisplay + ' per gram as on ' + dateStr + ', sourced from IBJA.' },
+      { q: 'Is ' + metalLabel + ' price the same across all cities in ' + city.state_name + '?', a: 'The IBJA benchmark rate is uniform nationally. Minor variations can occur at local jewellers due to dealer margins and local body taxes.' },
+      { q: 'Why does ' + metalLabel + ' price change daily?', a: metalLabel + ' prices change due to international commodity markets, USD/INR exchange rates, import duties, and RBI monetary policy decisions.' },
+      { q: 'What is GST on ' + metalLabel + ' in India?', a: metalLabel + ' attracts 3% GST in India on the purchase price. Making charges on jewellery attract an additional 5% GST.' },
+      { q: 'Where to buy ' + metalLabel + ' in ' + city.city_name + '?', a: 'Buy ' + metalLabel + ' at BIS-hallmarked jewellers, bank branches, India Post Gold, or reputed platforms like Tanishq, Malabar Gold, or Joyalukkas. Always check for BIS 916/999 hallmark.' }
+    ];
+    const faqItems = faqs.map(function(f) {
+      return '<div class="hdf-faq-item" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question"><h3 itemprop="name">' + f.q + '</h3><div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><p itemprop="text">' + f.a + '</p></div></div>';
+    }).join('\n');
+    const articleJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'NewsArticle', 'headline': metalLabel + ' Price in ' + city.city_name + ' Today \u2014 ' + dateStr, 'description': metalLabel + ' price in ' + city.city_name + ' today is ' + priceDisplay + ' per gram (' + primaryVariant + ') on ' + dateStr + '. Source: IBJA.', 'datePublished': today.toISOString(), 'dateModified': today.toISOString(), 'author': { '@type': 'Organization', 'name': 'HDF News' }, 'publisher': { '@type': 'Organization', 'name': 'HDF News' } });
+    const faqJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage', 'mainEntity': faqs.map(function(f) { return { '@type': 'Question', 'name': f.q, 'acceptedAnswer': { '@type': 'Answer', 'text': f.a } }; }) });
 
     return [
-      '<nav class="hdf-breadcrumb" aria-label="Breadcrumb">',
-      '  <a href="/">Home</a><span>\u203a</span>',
-      '  <a href="' + nationalUrl + '">' + metalLabel + ' Price</a><span>\u203a</span>',
-      '  <a href="' + stateUrl + '">' + city.state_name + '</a><span>\u203a</span>',
-      '  ' + city.city_name,
-      '</nav>',
-
+      '<script type="application/ld+json">' + articleJsonLd + '</script>',
+      '<script type="application/ld+json">' + faqJsonLd + '</script>',
+      '',
       '<div data-hdf="price-box" data-module="metals" data-city="' + city.city_name + '" data-metal="' + metalType + '">',
       '  <p><strong>' + metalLabel + ' price in ' + city.city_name + ' today</strong> is <strong>' + priceDisplay + ' per gram</strong> (' + primaryVariant + ') as on ' + dateStr + '. Source: IBJA.</p>',
       '</div>',
-
+      '',
       '<article>',
-
-      '<p>The <strong>' + metalLabel + ' price in ' + city.city_name + '</strong> today is <strong>' + priceDisplay + ' per gram</strong> for ' + primaryVariant + ' ' + metalLabel + ' as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>, sourced from the IBJA (Indian Bullion and Jewellers Association). We track ' + metalLabel + ' prices daily across ' + allCities.length + ' cities in ' + stateCount + ' states.</p>',
-
+      '',
+      '<p>The <strong>' + metalLabel + ' price in ' + city.city_name + '</strong> today is <strong>' + priceDisplay + ' per gram</strong> for ' + primaryVariant + ' ' + metalLabel + ' as on <time datetime="' + isoDate + '">' + dateStr + '</time>, sourced from IBJA (Indian Bullion and Jewellers Association). We track ' + metalLabel + ' prices daily across <strong>' + cityCount + ' cities in ' + stateCount + ' states</strong>.</p>',
+      '',
       '<span class="hdf-source">\ud83d\udcca Source: IBJA \u2014 Indian Bullion and Jewellers Association</span>',
-
+      '',
       '<h2>' + metalLabel + ' Price by Variant in ' + city.city_name + ' \u2014 ' + dateStr + '</h2>',
-
+      '',
       '<div data-hdf="price-table" data-module="metals" data-state="' + city.state_name + '" data-metal="' + metalType + '">',
-      '  <table class="hdf-table"><caption>' + metalLabel + ' prices in ' + city.state_name + ' cities</caption>',
-      '  <thead><tr><th>City</th><th>Price/gram</th></tr></thead>',
-      '  <tbody>',
-      stateCitiesForFallback.map(c => '    <tr><td>' + c.city_name + '</td><td>' + priceDisplay + '</td></tr>').join('\n'),
-      '  </tbody></table>',
+      '  <div class="hdf-table-wrap"><table class="hdf-table"><caption>' + metalLabel + ' variants in ' + city.city_name + ' today</caption>',
+      '  <thead><tr><th>Variant</th><th>Per Gram</th><th>Per 10 Grams</th></tr></thead>',
+      '  <tbody>' + variantRows + '</tbody></table></div>',
       '</div>',
-
+      '',
       '<div class="hdf-callout">',
       '  <div class="hdf-callout-label">Read Also</div>',
-      '  <a href="' + stateUrl + '">' + metalLabel + ' Price in ' + city.state_name + ' \u2014 All Cities (' + dateStr + ')</a>',
+      '  <a href="' + stateUrl + '">' + metalLabel + ' Price in ' + city.state_name + ' Today \u2014 All Cities (' + dateStr + ')</a>',
       '</div>',
-
+      '',
+      '<h2>' + metalLabel + ' Price in Cities Near ' + city.city_name + ' \u2014 ' + city.state_name + '</h2>',
+      '',
+      '<div data-hdf="price-table" data-module="metals" data-state="' + city.state_name + '" data-metal="' + metalType + '">',
+      '  <div class="hdf-table-wrap"><table class="hdf-table"><caption>' + metalLabel + ' price in ' + city.state_name + ' cities</caption>',
+      '  <thead><tr><th>City</th><th>' + primaryVariant + ' (per gram)</th></tr></thead>',
+      '  <tbody>' + nearbyRows + '</tbody></table></div>',
+      '</div>',
+      '',
+      '<div class="hdf-info">\ud83d\udca1 Prices shown are IBJA benchmark rates. Actual purchase price at jewellers includes 3% GST and making charges. Always verify before purchase.</div>',
+      '',
       '<h2>Factors Affecting ' + metalLabel + ' Price in ' + city.city_name + '</h2>',
-      '<p>' + metalLabel + ' prices in ' + city.city_name + ' are influenced by global commodity markets, USD/INR exchange rates, import duties (currently 15%), and 3% GST. The IBJA rate is a national benchmark updated each morning and is applicable across all cities including ' + city.city_name + '.</p>',
-
-      this._buildFaq(city.city_name, metalLabel, priceDisplay, dateStr, primaryVariant),
-
+      '<p>The <strong>' + metalLabel + ' price in ' + city.city_name + '</strong> is influenced by the same national factors that drive rates across India \u2014 international commodity spot prices (USD/troy oz), the USD/INR exchange rate, import duty (currently 15%), and 3% GST. Local jeweller margins and seasonal demand during festivals and weddings can add minor premiums above the IBJA benchmark.</p>',
+      '',
+      '<section class="hdf-faq" itemscope itemtype="https://schema.org/FAQPage">',
+      '<h2>Frequently Asked Questions</h2>',
+      faqItems,
+      '</section>',
+      '',
       '</article>'
     ].join('\n').trim();
   }
@@ -507,43 +541,54 @@ class MetalsPostCreator {
       : null;
     const avgDisplay = avgPrice ? '\u20b9' + avgPrice.toLocaleString('en-IN') : 'N/A';
 
+    const cityRows = validCities.sort(function(a, b) { return a.city_name.localeCompare(b.city_name); }).map(function(c) {
+      const p = c.prices[primaryVariant];
+      return '<tr><td>' + c.city_name + '</td><td>\u20b9' + p.toLocaleString('en-IN') + '</td></tr>';
+    }).join('');
+
+    const stateFaqs = [
+      { q: 'What is ' + metalLabel + ' price in ' + stateName + ' today?', a: 'The average ' + metalLabel + ' (' + primaryVariant + ') price in ' + stateName + ' today is ' + avgDisplay + ' per gram as on ' + dateStr + ', tracked across ' + validCities.length + ' cities.' },
+      { q: 'Which city has the cheapest ' + metalLabel + ' in ' + stateName + '?', a: metalLabel + ' prices across ' + stateName + ' are benchmarked to the IBJA national rate. Minor differences between cities occur due to local dealer margins.' },
+      { q: 'Is ' + metalLabel + ' price in ' + stateName + ' different from other states?', a: 'The IBJA rate is uniform nationally. State-level differences arise only from local body taxes or dealer premiums, typically within \u20b950\u2013\u20b9100 per gram.' }
+    ];
+    const stateFaqItems = stateFaqs.map(function(f) {
+      return '<div class="hdf-faq-item" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question"><h3 itemprop="name">' + f.q + '</h3><div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><p itemprop="text">' + f.a + '</p></div></div>';
+    }).join('\n');
+    const stateArticleJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'NewsArticle', 'headline': metalLabel + ' Price in ' + stateName + ' Today \u2014 ' + dateStr, 'description': metalLabel + ' price in ' + stateName + ' today averages ' + avgDisplay + ' per gram. Check rates in all ' + validCities.length + ' cities in ' + stateName + '.', 'datePublished': today.toISOString(), 'dateModified': today.toISOString(), 'author': { '@type': 'Organization', 'name': 'HDF News' }, 'publisher': { '@type': 'Organization', 'name': 'HDF News' } });
+    const stateFaqJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage', 'mainEntity': stateFaqs.map(function(f) { return { '@type': 'Question', 'name': f.q, 'acceptedAnswer': { '@type': 'Answer', 'text': f.a } }; }) });
+
     return [
-      '<nav class="hdf-breadcrumb" aria-label="Breadcrumb">',
-      '  <a href="/">Home</a><span>\u203a</span>',
-      '  <a href="' + nationalUrl + '">' + metalLabel + ' Price</a><span>\u203a</span>',
-      '  ' + stateName + ' ' + metalLabel + ' Price Today',
-      '</nav>',
-
+      '<script type="application/ld+json">' + stateArticleJsonLd + '</script>',
+      '<script type="application/ld+json">' + stateFaqJsonLd + '</script>',
+      '',
       '<div data-hdf="national" data-module="metals" data-metal="' + metalType + '">',
-      '  <p>Average <strong>' + metalLabel + ' price in ' + stateName + '</strong> today is <strong>' + avgDisplay + ' per gram</strong> (' + primaryVariant + ') as on ' + dateStr + '.</p>',
+      '  <p>Average <strong>' + metalLabel + ' price in ' + stateName + '</strong> today is <strong>' + avgDisplay + ' per gram</strong> (' + primaryVariant + ') as on ' + dateStr + '. Source: IBJA.</p>',
       '</div>',
-
+      '',
       '<article>',
-
-      '<p>The average <strong>' + metalLabel + ' price in ' + stateName + '</strong> today is <strong>' + avgDisplay + ' per gram</strong> for ' + primaryVariant + ' ' + metalLabel + ' as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. We track ' + metalLabel + ' rates across ' + validCities.length + ' cities in ' + stateName + ', sourced from the IBJA (Indian Bullion and Jewellers Association).</p>',
-
+      '',
+      '<p>The average <strong>' + metalLabel + ' price in ' + stateName + '</strong> today is <strong>' + avgDisplay + ' per gram</strong> for ' + primaryVariant + ' ' + metalLabel + ' as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. We track ' + metalLabel + ' rates across <strong>' + validCities.length + ' cities in ' + stateName + '</strong>, sourced from IBJA.</p>',
+      '',
       '<span class="hdf-source">\ud83d\udcca Source: IBJA \u2014 Indian Bullion and Jewellers Association</span>',
-
-      '<h2>' + metalLabel + ' Price in All Cities of ' + stateName + ' \u2014 ' + dateStr + '</h2>',
-
-      '<div data-hdf="price-table" data-module="metals" data-state="' + stateName + '" data-metal="' + metalType + '">',
-      '  <table class="hdf-table"><caption>' + metalLabel + ' price in cities of ' + stateName + '</caption>',
-      '  <thead><tr><th>City</th><th>Price/gram</th></tr></thead>',
-      '  <tbody>',
-      validCities.slice(0, 10).map(c => '    <tr><td>' + c.city_name + '</td><td>\u20b9' + c.prices[primaryVariant].toLocaleString('en-IN') + '</td></tr>').join('\n'),
-      '  </tbody></table>',
-      '</div>',
-
+      '',
       '<div class="hdf-callout">',
       '  <div class="hdf-callout-label">See Also</div>',
-      '  <a href="' + nationalUrl + '">' + metalLabel + ' Price in India Today \u2014 National Average</a>',
+      '  <a href="' + nationalUrl + '">' + metalLabel + ' Price in India Today \u2014 National Average (' + dateStr + ')</a>',
       '</div>',
-
-      '<h2>About ' + metalLabel + ' Prices in ' + stateName + '</h2>',
-      '<p>' + metalLabel + ' prices across ' + stateName + ' are benchmarked to the IBJA national rate. Minor variations between cities may occur due to local dealer margins and transportation costs. The IBJA publishes the official rate each morning that jewellers across ' + stateName + ' use as their benchmark.</p>',
-
-      this._buildFaq(stateName, metalLabel, avgDisplay, dateStr, primaryVariant),
-
+      '',
+      '<h2>' + metalLabel + ' Price in All Cities of ' + stateName + ' \u2014 ' + dateStr + '</h2>',
+      '',
+      '<div data-hdf="price-table" data-module="metals" data-state="' + stateName + '" data-metal="' + metalType + '">',
+      '  <div class="hdf-table-wrap"><table class="hdf-table"><caption>' + metalLabel + ' price in ' + stateName + ' \u2014 all cities</caption>',
+      '  <thead><tr><th>City</th><th>' + primaryVariant + ' (per gram)</th></tr></thead>',
+      '  <tbody>' + cityRows + '</tbody></table></div>',
+      '</div>',
+      '',
+      '<section class="hdf-faq" itemscope itemtype="https://schema.org/FAQPage">',
+      '<h2>Frequently Asked Questions</h2>',
+      stateFaqItems,
+      '</section>',
+      '',
       '</article>'
     ].join('\n').trim();
   }
@@ -750,28 +795,64 @@ class MetalsPostCreator {
     const avgDisplay = avgPrice ? '\u20b9' + avgPrice.toLocaleString('en-IN') : 'N/A';
     const stateCount = [...new Set(valid.map(c => c.state_name))].filter(Boolean).length;
 
+    const byState = {};
+    valid.forEach(function(c) {
+      if (!byState[c.state_name]) byState[c.state_name] = [];
+      byState[c.state_name].push(c.prices[primaryVariant]);
+    });
+    const stateRows = Object.entries(byState).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(entry) {
+      const avg = Math.round(entry[1].reduce(function(s, p) { return s + p; }, 0) / entry[1].length);
+      return '<tr><td>' + entry[0] + '</td><td>\u20b9' + avg.toLocaleString('en-IN') + '</td><td>' + entry[1].length + '</td></tr>';
+    }).join('');
+
+    const natFaqs = [
+      { q: 'What is ' + metalLabel + ' price in India today (' + dateStr + ')?', a: 'The national average ' + metalLabel + ' (' + primaryVariant + ') price in India today is ' + avgDisplay + ' per gram as on ' + dateStr + ', sourced from IBJA.' },
+      { q: 'How is ' + metalLabel + ' price set in India?', a: metalLabel + ' prices in India are benchmarked by IBJA based on international spot prices, USD/INR exchange rate, import duty, and GST.' },
+      { q: 'What is the best time to buy ' + metalLabel + ' in India?', a: metalLabel + ' prices tend to be lower in non-festive periods (February\u2013March, July\u2013August). However, ' + metalLabel + ' is primarily a long-term store of value \u2014 timing short-term fluctuations is difficult.' },
+      { q: 'What is GST on ' + metalLabel + ' in India?', a: metalLabel + ' attracts 3% GST in India. Making charges attract an additional 5% GST. Import duty is currently 15%.' },
+      { q: 'How often is ' + metalLabel + ' price updated in India?', a: 'IBJA updates ' + metalLabel + ' rates every morning. International spot prices change continuously \u2014 Indian rates reflect the morning fix based on overnight global markets.' }
+    ];
+    const natFaqItems = natFaqs.map(function(f) {
+      return '<div class="hdf-faq-item" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question"><h3 itemprop="name">' + f.q + '</h3><div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer"><p itemprop="text">' + f.a + '</p></div></div>';
+    }).join('\n');
+    const natArticleJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'NewsArticle', 'headline': metalLabel + ' Price in India Today \u2014 ' + dateStr, 'description': 'National average ' + metalLabel + ' price in India today is ' + avgDisplay + ' per gram. Check state-wise rates across ' + valid.length + ' cities and ' + stateCount + ' states.', 'datePublished': today.toISOString(), 'dateModified': today.toISOString(), 'author': { '@type': 'Organization', 'name': 'HDF News' }, 'publisher': { '@type': 'Organization', 'name': 'HDF News' } });
+    const natFaqJsonLd = JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage', 'mainEntity': natFaqs.map(function(f) { return { '@type': 'Question', 'name': f.q, 'acceptedAnswer': { '@type': 'Answer', 'text': f.a } }; }) });
+
     return [
+      '<script type="application/ld+json">' + natArticleJsonLd + '</script>',
+      '<script type="application/ld+json">' + natFaqJsonLd + '</script>',
+      '',
       '<div data-hdf="national" data-module="metals" data-metal="' + metalType + '">',
-      '  <p><strong>' + metalLabel + ' price in India today</strong> is <strong>' + avgDisplay + ' per gram</strong> (' + primaryVariant + ', national average) as on ' + dateStr + '. Source: IBJA.</p>',
+      '  <p>National average <strong>' + metalLabel + ' price in India</strong> today is <strong>' + avgDisplay + ' per gram</strong> (' + primaryVariant + ') as on ' + dateStr + '. Source: IBJA.</p>',
       '</div>',
-
+      '',
       '<article>',
-
-      '<p>The national average <strong>' + metalLabel + ' price in India</strong> today is <strong>' + avgDisplay + ' per gram</strong> for ' + primaryVariant + ' ' + metalLabel + ' as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. We track ' + metalLabel + ' rates across <strong>' + valid.length + ' cities in ' + stateCount + ' states</strong>, sourced from the IBJA (Indian Bullion and Jewellers Association).</p>',
-
+      '',
+      '<p>The national average <strong>' + metalLabel + ' price in India</strong> today is <strong>' + avgDisplay + ' per gram</strong> for ' + primaryVariant + ' ' + metalLabel + ' as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. We track ' + metalLabel + ' rates across <strong>' + valid.length + ' cities in ' + stateCount + ' states</strong>, sourced from IBJA (Indian Bullion and Jewellers Association).</p>',
+      '',
       '<span class="hdf-source">\ud83d\udcca Source: IBJA \u2014 Indian Bullion and Jewellers Association</span>',
-
-      '<h2>' + metalLabel + ' Price by State \u2014 ' + dateStr + '</h2>',
-
-      '<div data-hdf="ranking" data-module="metals" data-metal="' + metalType + '" data-sort="asc" data-limit="20" data-label="' + metalLabel + ' Price in India \u2014 City Ranking">',
-      '  <p>Live city-wise ' + metalLabel + ' price ranking loading...</p>',
+      '',
+      '<h2>' + metalLabel + ' Price by State in India \u2014 ' + dateStr + '</h2>',
+      '',
+      '<div data-hdf="ranking" data-module="metals" data-metal="' + metalType + '" data-sort="asc" data-limit="30" data-label="State-wise ' + metalLabel + ' Price in India Today">',
+      '  <div class="hdf-table-wrap"><table class="hdf-table"><caption>' + metalLabel + ' price across Indian states</caption>',
+      '  <thead><tr><th>State</th><th>Avg Price (per gram)</th><th>Cities Tracked</th></tr></thead>',
+      '  <tbody>' + stateRows + '</tbody></table></div>',
       '</div>',
-
-      '<h2>How ' + metalLabel + ' Prices Are Determined in India</h2>',
-      '<p>' + metalLabel + ' prices in India are set by the IBJA (Indian Bullion and Jewellers Association) based on international spot prices (USD/troy oz), converted to INR using the prevailing exchange rate. The final price includes a 15% import duty and 3% GST. The IBJA benchmark is published each morning and used by jewellers across all ' + stateCount + ' states we track.</p>',
-
-      this._buildFaq('India', metalLabel, avgDisplay, dateStr, primaryVariant),
-
+      '',
+      '<h2>Top 10 Cities with Cheapest ' + metalLabel + ' in India Today</h2>',
+      '',
+      '<div data-hdf="ranking" data-module="metals" data-metal="' + metalType + '" data-sort="asc" data-limit="10" data-label="Cheapest ' + metalLabel + ' Cities in India \u2014 ' + dateStr + '">',
+      '  <p>Loading cheapest ' + metalLabel + ' cities...</p>',
+      '</div>',
+      '',
+      '<div class="hdf-info">\ud83d\udca1 ' + metalLabel + ' prices shown are IBJA benchmark rates. Actual purchase price includes 3% GST and making charges. Rates are updated every morning.</div>',
+      '',
+      '<section class="hdf-faq" itemscope itemtype="https://schema.org/FAQPage">',
+      '<h2>Frequently Asked Questions</h2>',
+      natFaqItems,
+      '</section>',
+      '',
       '</article>'
     ].join('\n').trim();
   }

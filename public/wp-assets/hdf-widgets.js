@@ -90,8 +90,10 @@
           unit = 'petrol per litre';
           state = data.state;
         }
+        var metalLabel = (metal || fuel || '').charAt(0).toUpperCase() + (metal || fuel || '').slice(1);
+        var cityLabel = city.split(' ').map(function(w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(' ');
         el.innerHTML = renderHero(
-          (metal || fuel) + ' price in ' + city,
+          metalLabel + ' Price in ' + cityLabel,
           price, unit,
           [{ value: price, label: unit }, { value: state || '', label: '' }],
           'Updated ' + timeAgo(data.price_date)
