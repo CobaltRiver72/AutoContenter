@@ -5337,27 +5337,44 @@
 
   function testFuelApi() {
     var statusEl = $('fuel-key-status');
-    if (statusEl) statusEl.textContent = 'Testing...';
-    fetchApi('/api/fuel/summary')
+    if (statusEl) { statusEl.textContent = 'Testing...'; statusEl.style.color = '#888'; }
+    fetchApi('/api/fuel/ping-api')
       .then(function(data) {
-        if (statusEl) { statusEl.textContent = 'Connected — ' + (data.total || 0) + ' cities'; statusEl.style.color = '#10b981'; }
+        if (!statusEl) return;
+        if (data.ok) {
+          statusEl.textContent = '✓ Key valid — RapidAPI connected';
+          statusEl.style.color = '#10b981';
+        } else {
+          statusEl.textContent = '✗ ' + (data.error || ('HTTP ' + data.status));
+          statusEl.style.color = '#ef4444';
+        }
       })
-      .catch(function() {
-        if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = '#ef4444'; }
+      .catch(function(e) {
+        if (statusEl) { statusEl.textContent = '✗ ' + e.message; statusEl.style.color = '#ef4444'; }
       });
   }
 
   function testMetalsApi() {
     var statusEl = $('metals-key-status');
-    if (statusEl) statusEl.textContent = 'Testing...';
-    fetchApi('/api/metals/summary')
+    if (statusEl) { statusEl.textContent = 'Testing...'; statusEl.style.color = '#888'; }
+    fetchApi('/api/metals/ping-api')
       .then(function(data) {
-        if (statusEl) { statusEl.textContent = 'Connected — ' + (data.total || 0) + ' cities'; statusEl.style.color = '#10b981'; }
+        if (!statusEl) return;
+        if (data.ok) {
+          statusEl.textContent = '✓ Key valid — RapidAPI connected';
+          statusEl.style.color = '#10b981';
+        } else {
+          statusEl.textContent = '✗ ' + (data.error || ('HTTP ' + data.status));
+          statusEl.style.color = '#ef4444';
+        }
       })
-      .catch(function() {
-        if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = '#ef4444'; }
+      .catch(function(e) {
+        if (statusEl) { statusEl.textContent = '✗ ' + e.message; statusEl.style.color = '#ef4444'; }
       });
   }
+
+  window.testFuelApi = testFuelApi;
+  window.testMetalsApi = testMetalsApi;
 
   // ─── Post Generation Triggers ──────────────────────────────────────────
 

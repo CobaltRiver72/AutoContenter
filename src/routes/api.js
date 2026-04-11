@@ -804,6 +804,50 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/fuel/ping-api — Test RapidAPI key for fuel ─────────────────
+
+  router.get('/fuel/ping-api', async function (req, res) {
+    var row = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
+    var apiKey = row ? row.value : null;
+    if (!apiKey) return res.json({ ok: false, error: 'FUEL_RAPIDAPI_KEY not set' });
+
+    var host = 'daily-petrol-diesel-lpg-cng-fuel-prices-in-india.p.rapidapi.com';
+    try {
+      var r = await fetch('https://' + host + '/v1/petrol/state/delhi', {
+        headers: { 'x-rapidapi-host': host, 'x-rapidapi-key': apiKey },
+      });
+      if (r.ok || r.status === 200) {
+        return res.json({ ok: true, status: r.status, message: 'RapidAPI key is valid' });
+      }
+      var body = await r.text().catch(function() { return ''; });
+      res.json({ ok: false, status: r.status, error: 'API returned ' + r.status + (body ? ': ' + body.slice(0, 200) : '') });
+    } catch (e) {
+      res.json({ ok: false, error: e.message });
+    }
+  });
+
+  // ─── GET /api/metals/ping-api — Test RapidAPI key for metals ─────────────
+
+  router.get('/metals/ping-api', async function (req, res) {
+    var row = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
+    var apiKey = row ? row.value : null;
+    if (!apiKey) return res.json({ ok: false, error: 'METALS_RAPIDAPI_KEY not set' });
+
+    var host = 'gold-silver-platinum-price-in-india.p.rapidapi.com';
+    try {
+      var r = await fetch('https://' + host + '/GoldPriceTodayForCities', {
+        headers: { 'x-rapidapi-host': host, 'x-rapidapi-key': apiKey },
+      });
+      if (r.ok || r.status === 200) {
+        return res.json({ ok: true, status: r.status, message: 'RapidAPI key is valid' });
+      }
+      var body = await r.text().catch(function() { return ''; });
+      res.json({ ok: false, status: r.status, error: 'API returned ' + r.status + (body ? ': ' + body.slice(0, 200) : '') });
+    } catch (e) {
+      res.json({ ok: false, error: e.message });
+    }
+  });
+
   // ─── POST GENERATION + WP ROUTES ───────────────────────────────────────
 
   router.post('/fuel/generate-posts', function (req, res) {
