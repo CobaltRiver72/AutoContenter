@@ -6156,29 +6156,57 @@
 
   // ─── CSV Import ───────────────────────────────────────────────────────────
 
-  function runImport(type) {
-    var el = document.getElementById('import-result');
-    if (!el) return;
-    el.innerHTML = '<span style="color:#888;">⏳ Running ' + escapeHtml(type) + ' import...</span>';
-    fetch('/api/import/run', {
+  function importCsv(type, dryRun) {
+    var fileInput = document.getElementById(type === 'fuel' ? 'fuelCsvFile' : 'metalsCsvFile');
+    if (!fileInput || !fileInput.files.length) {
+      showImportResult('error', '❌ Please select a CSV file first.');
+      return;
+    }
+    var file = fileInput.files[0];
+    if (!file.name.endsWith('.csv')) {
+      showImportResult('error', '❌ Please select a .csv file.');
+      return;
+    }
+    showImportResult('loading', (dryRun ? 'Dry-running' : 'Importing') + ' ' + escapeHtml(file.name) + ' (' + (file.size / 1024).toFixed(0) + ' KB)…');
+    var formData = new FormData();
+    formData.append('file', file);
+    fetch('/api/import/' + type + (dryRun ? '?dry=1' : ''), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: type }),
+      credentials: 'include',
+      body: formData,
     })
-      .then(function(res) { return res.json(); })
-      .then(function(data) {
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
         if (data.ok) {
-          el.innerHTML = '<pre style="font-size:11px;white-space:pre-wrap;color:#4ade80;background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;margin:0;">' + escapeHtml(data.output) + '</pre>';
+          var s = data.stats;
+          showImportResult('success',
+            '✅ ' + escapeHtml(data.message) + '<br>' +
+            '<small style="color:#888;">Total rows: ' + s.total + ' · Inserted: ' + s.inserted + ' · Skipped: ' + s.skipped +
+            (s.errors && s.errors.length ? ' · ' + s.errors.length + ' warnings' : '') + '</small>'
+          );
         } else {
-          el.innerHTML = '<pre style="font-size:11px;white-space:pre-wrap;color:#f87171;background:rgba(0,0,0,0.2);padding:8px;border-radius:4px;margin:0;">' + escapeHtml(data.error || data.output || 'Unknown error') + '</pre>';
+          showImportResult('error', '❌ ' + escapeHtml(data.error || 'Unknown error'));
         }
       })
-      .catch(function(e) {
-        el.innerHTML = '<span style="color:#f87171;">❌ ' + escapeHtml(e.message) + '</span>';
+      .catch(function (e) {
+        showImportResult('error', '❌ Network error: ' + escapeHtml(e.message));
       });
   }
 
-  window.runImport = runImport;
+  function showImportResult(type, html) {
+    var div = document.getElementById('import-result');
+    if (!div) return;
+    div.style.display = 'block';
+    var styles = {
+      success: 'background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);',
+      error:   'background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);',
+      loading: 'background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);',
+    };
+    div.style.cssText = 'margin-top:12px;padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.6;' + (styles[type] || styles.loading);
+    div.innerHTML = html;
+  }
+
+  window.importCsv = importCsv;
 
   // ─── Sources Analytics Page ───────────────────────────────────────────────
 

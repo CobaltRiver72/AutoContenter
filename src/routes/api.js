@@ -3,6 +3,51 @@
 var express = require('express');
 var { getConfig } = require('../utils/config');
 
+// ── CSV helpers (used by inline import routes) ─────────────────────────────
+
+function parseCsv(text) {
+  var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  var headers = splitCsvLine(lines[0]).map(function (h) { return h.trim().toLowerCase().replace(/^"|"$/g, ''); });
+  var rows = [];
+  for (var i = 1; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    var values = splitCsvLine(line);
+    var row = {};
+    headers.forEach(function (h, idx) {
+      row[h] = (values[idx] || '').trim().replace(/^"|"$/g, '');
+    });
+    rows.push(row);
+  }
+  return { headers: headers, rows: rows };
+}
+
+function splitCsvLine(line) {
+  var result = [];
+  var current = '';
+  var inQuotes = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+function toDec(v) {
+  if (v === null || v === undefined || v === '') return null;
+  var n = parseFloat(v);
+  return isNaN(n) ? null : Math.round(n * 100) / 100;
+}
+
 /**
  * Create the API router.
  *
@@ -4047,44 +4092,137 @@ function createApiRouter(deps) {
     }
   });
 
-  // ─── POST /api/import/run ─────────────────────────────────────────────────
+  // ─── CSV upload middleware (memory storage, 50 MB cap) ───────────────────
+  var multer  = require('multer');
+  var _upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-  router.post('/import/run', function (req, res) {
-    var type = (req.body && req.body.type) || 'all';
-    if (['fuel', 'metals', 'all'].indexOf(type) === -1) {
-      return res.status(400).json({ ok: false, error: 'type must be fuel, metals, or all' });
-    }
+  // ─── POST /api/import/fuel ────────────────────────────────────────────────
 
-    var spawn = require('child_process').spawn;
-    var nodePath = require('path');
-    var fsSys = require('fs');
-    var scriptPath = nodePath.join(__dirname, '../../scripts/import-csv.js');
+  router.post('/import/fuel', _upload.single('file'), function (req, res) {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'No file uploaded' });
 
-    if (!fsSys.existsSync(scriptPath)) {
-      return res.status(500).json({ ok: false, error: 'Import script not found at ' + scriptPath });
-    }
+    var dryRun  = req.query.dry === '1' || req.query.dry === 'true';
+    var csvText = req.file.buffer.toString('utf8');
+
+    var parsed;
+    try { parsed = parseCsv(csvText); }
+    catch (e) { return res.status(400).json({ ok: false, error: 'CSV parse failed: ' + e.message }); }
+
+    var missing = ['city', 'price_date'].filter(function (c) { return !parsed.headers.includes(c); });
+    if (missing.length) return res.status(400).json({ ok: false, error: 'Missing columns: ' + missing.join(', ') });
+
+    var stats = { total: 0, inserted: 0, skipped: 0, errors: [] };
+
+    var insertStmt = db.prepare(`
+      INSERT INTO fuel_prices (city, state, petrol, diesel, price_date, source, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(city, price_date) DO UPDATE SET
+        petrol  = COALESCE(excluded.petrol,  fuel_prices.petrol),
+        diesel  = COALESCE(excluded.diesel,  fuel_prices.diesel),
+        state   = COALESCE(excluded.state,   fuel_prices.state),
+        source  = COALESCE(excluded.source,  fuel_prices.source)
+    `);
+
+    var runFuelImport = db.transaction(function (rows) {
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        stats.total++;
+        var city = (row.city || '').trim();
+        if (!city) { stats.skipped++; continue; }
+        if (!row.price_date || !/^\d{4}-\d{2}-\d{2}$/.test(row.price_date)) {
+          stats.errors.push('Row ' + stats.total + ': invalid date "' + row.price_date + '"');
+          stats.skipped++; continue;
+        }
+        var petrol = toDec(row.petrol);
+        var diesel = toDec(row.diesel);
+        if (petrol === null && diesel === null) { stats.skipped++; continue; }
+        var state  = (row.state  || '').trim() || null;
+        var source = (row.source || 'imported').trim();
+        if (!dryRun) {
+          try { insertStmt.run(city, state, petrol, diesel, row.price_date, source); stats.inserted++; }
+          catch (e) { stats.errors.push('Row ' + stats.total + ': ' + e.message); stats.skipped++; }
+        } else { stats.inserted++; }
+      }
+    });
 
     try {
-      var child = spawn(process.execPath, [scriptPath, '--type=' + type], {
-        cwd: nodePath.join(__dirname, '../..'),
-        env: process.env,
-      });
-
-      var stdout = '';
-      var stderr = '';
-      child.stdout.on('data', function (d) { stdout += d.toString(); });
-      child.stderr.on('data', function (d) { stderr += d.toString(); });
-
-      child.on('close', function (code) {
-        res.json({
-          ok: code === 0,
-          output: stdout,
-          error: stderr || null,
-          exitCode: code,
-        });
+      runFuelImport(parsed.rows);
+      res.json({
+        ok: true, dryRun: dryRun, stats: stats,
+        message: dryRun
+          ? 'Dry run: would insert/update ~' + stats.inserted + ' rows from ' + stats.total + ' CSV rows'
+          : 'Imported ' + stats.inserted + ' rows (' + stats.skipped + ' skipped) from ' + stats.total + ' CSV rows',
       });
     } catch (e) {
-      res.json({ ok: false, error: e.message });
+      res.status(500).json({ ok: false, error: e.message, stats: stats });
+    }
+  });
+
+  // ─── POST /api/import/metals ──────────────────────────────────────────────
+
+  router.post('/import/metals', _upload.single('file'), function (req, res) {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'No file uploaded' });
+
+    var dryRun  = req.query.dry === '1' || req.query.dry === 'true';
+    var csvText = req.file.buffer.toString('utf8');
+
+    var parsed;
+    try { parsed = parseCsv(csvText); }
+    catch (e) { return res.status(400).json({ ok: false, error: 'CSV parse failed: ' + e.message }); }
+
+    var missing = ['city', 'metal_type', 'price_date'].filter(function (c) { return !parsed.headers.includes(c); });
+    if (missing.length) return res.status(400).json({ ok: false, error: 'Missing columns: ' + missing.join(', ') });
+
+    var stats = { total: 0, inserted: 0, skipped: 0, errors: [] };
+
+    var insertStmt = db.prepare(`
+      INSERT INTO metals_prices (city, metal_type, price_24k, price_22k, price_18k, price_1g, price_date, source, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(city, metal_type, price_date) DO UPDATE SET
+        price_24k = COALESCE(excluded.price_24k, metals_prices.price_24k),
+        price_22k = COALESCE(excluded.price_22k, metals_prices.price_22k),
+        price_18k = COALESCE(excluded.price_18k, metals_prices.price_18k),
+        price_1g  = COALESCE(excluded.price_1g,  metals_prices.price_1g),
+        source    = COALESCE(excluded.source,    metals_prices.source)
+    `);
+
+    var VALID_METALS = ['gold', 'silver', 'platinum'];
+
+    var runMetalsImport = db.transaction(function (rows) {
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        stats.total++;
+        var city  = (row.city || '').trim();
+        var metal = (row.metal_type || '').toLowerCase().trim();
+        if (!city) { stats.skipped++; continue; }
+        if (!row.price_date || !/^\d{4}-\d{2}-\d{2}$/.test(row.price_date)) {
+          stats.errors.push('Row ' + stats.total + ': invalid date "' + row.price_date + '"');
+          stats.skipped++; continue;
+        }
+        if (!VALID_METALS.includes(metal)) { stats.skipped++; continue; }
+        var p24k = toDec(row.price_24k);
+        var p22k = toDec(row.price_22k);
+        var p18k = toDec(row.price_18k);
+        var p1g  = toDec(row.price_1g);
+        if (p24k === null && p22k === null && p18k === null && p1g === null) { stats.skipped++; continue; }
+        var source = (row.source || 'imported').trim();
+        if (!dryRun) {
+          try { insertStmt.run(city, metal, p24k, p22k, p18k, p1g, row.price_date, source); stats.inserted++; }
+          catch (e) { stats.errors.push('Row ' + stats.total + ': ' + e.message); stats.skipped++; }
+        } else { stats.inserted++; }
+      }
+    });
+
+    try {
+      runMetalsImport(parsed.rows);
+      res.json({
+        ok: true, dryRun: dryRun, stats: stats,
+        message: dryRun
+          ? 'Dry run: would insert/update ~' + stats.inserted + ' rows from ' + stats.total + ' CSV rows'
+          : 'Imported ' + stats.inserted + ' rows (' + stats.skipped + ' skipped) from ' + stats.total + ' CSV rows',
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message, stats: stats });
     }
   });
 

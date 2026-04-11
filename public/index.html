@@ -482,20 +482,35 @@
         <div class="settings-form" id="csv-import-section">
           <div class="settings-group">
             <div class="settings-group-title">Historical Data Import</div>
-            <p style="color:#888;font-size:13px;margin-bottom:12px;">Import historical price data from CSV exports of the WordPress plugins. Place your CSV files in the <code>data/</code> folder before importing.</p>
-            <div class="settings-row">
-              <label class="settings-label">Expected files</label>
-              <div style="font-family:monospace;font-size:12px;line-height:1.8;color:#888;">
-                data/import-fuel.csv &nbsp;— columns: city, state, petrol, diesel, price_date, source<br>
-                data/import-metals.csv — columns: city, state, metal_type, price_24k, price_22k, price_18k, price_1g, price_date, source
+            <p style="color:#888;font-size:13px;margin-bottom:16px;">Upload CSV exports from the WordPress plugins to backfill price history for trend charts.</p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+              <!-- Fuel Import -->
+              <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;">
+                <div style="font-size:14px;font-weight:700;margin-bottom:8px;">⛽ Import Fuel CSV</div>
+                <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: city, state, petrol, diesel, price_date, source</div>
+                <input type="file" id="fuelCsvFile" accept=".csv" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
+                <div style="display:flex;gap:6px;">
+                  <button onclick="importCsv('fuel', true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button onclick="importCsv('fuel', false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                </div>
               </div>
+
+              <!-- Metals Import -->
+              <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;">
+                <div style="font-size:14px;font-weight:700;margin-bottom:8px;">🥇 Import Metals CSV</div>
+                <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: city, state, metal_type, price_24k, price_22k, price_18k, price_1g, price_date, source</div>
+                <input type="file" id="metalsCsvFile" accept=".csv" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
+                <div style="display:flex;gap:6px;">
+                  <button onclick="importCsv('metals', true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button onclick="importCsv('metals', false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                </div>
+              </div>
+
             </div>
-            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-              <button class="btn btn-secondary" onclick="runImport('fuel')">⛽ Import Fuel CSV</button>
-              <button class="btn btn-secondary" onclick="runImport('metals')">🥇 Import Metals CSV</button>
-              <button class="btn btn-purple" onclick="runImport('all')">📥 Import Both</button>
-            </div>
-            <div id="import-result" style="margin-top:10px;"></div>
+
+            <div id="import-result" style="margin-top:12px;display:none;"></div>
           </div>
         </div>
 
