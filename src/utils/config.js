@@ -224,6 +224,10 @@ function loadRuntimeOverrides(db) {
       }
     }
 
+    // Sync WP URL aliases: WP_SITE_URL (dashboard key) ↔ WP_URL (env/config key)
+    if (merged.WP_SITE_URL && !merged.WP_URL) merged.WP_URL = merged.WP_SITE_URL;
+    if (merged.WP_URL && !merged.WP_SITE_URL) merged.WP_SITE_URL = merged.WP_URL;
+
     // Update IS_CONFIGURED based on whether required vars are now filled
     var stillMissing = REQUIRED_VARS.filter(function(k) { return !merged[k]; });
     merged.MISSING_REQUIRED = stillMissing;

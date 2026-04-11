@@ -29,12 +29,21 @@ class WPPublisher {
    */
   async init() {
     try {
-      const getVal = (key) => {
+      // Read from settings table, falling back to env-based config
+      const { getConfig } = require('../utils/config');
+      const envConfig = getConfig();
+      const getVal = (key, alias) => {
         const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-        return row ? row.value : null;
+        if (row && row.value) return row.value;
+        if (alias) {
+          const aliasRow = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(alias);
+          if (aliasRow && aliasRow.value) return aliasRow.value;
+        }
+        return envConfig[key] || (alias ? envConfig[alias] : null) || null;
       };
 
-      this.siteUrl = getVal('WP_SITE_URL');
+      // WP_SITE_URL (dashboard key) and WP_URL (env key) are aliases
+      this.siteUrl = getVal('WP_SITE_URL', 'WP_URL');
       this.username = getVal('WP_USERNAME');
       this.appPassword = getVal('WP_APP_PASSWORD');
 

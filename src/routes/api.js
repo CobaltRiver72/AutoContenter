@@ -1022,11 +1022,12 @@ function createApiRouter(deps) {
     var metalsToday = db.prepare("SELECT COUNT(*) AS c FROM metals_prices WHERE price_date = date('now')").get().c;
     checks.push({ name: 'Metals Prices Today', ok: metalsToday > 0, detail: metalsToday + ' rows' });
 
-    // WP credentials
-    var wpUrl = db.prepare("SELECT value FROM settings WHERE key = 'WP_SITE_URL'").get();
-    var wpUser = db.prepare("SELECT value FROM settings WHERE key = 'WP_USERNAME'").get();
-    var wpPass = db.prepare("SELECT value FROM settings WHERE key = 'WP_APP_PASSWORD'").get();
-    checks.push({ name: 'WP Credentials', ok: !!(wpUrl && wpUser && wpPass && wpUrl.value), detail: wpUrl && wpUrl.value ? wpUrl.value : 'NOT SET' });
+    // WP credentials — check config (merges DB + env, aliases WP_URL ↔ WP_SITE_URL)
+    var diagConfig = getConfig();
+    var wpUrlVal = diagConfig.WP_SITE_URL || diagConfig.WP_URL || '';
+    var wpUserVal = diagConfig.WP_USERNAME || '';
+    var wpPassVal = diagConfig.WP_APP_PASSWORD || '';
+    checks.push({ name: 'WP Credentials', ok: !!(wpUrlVal && wpUserVal && wpPassVal), detail: wpUrlVal || 'NOT SET' });
 
     // Last fetch
     var lastFetch = db.prepare('SELECT * FROM fetch_log ORDER BY created_at DESC LIMIT 1').get();

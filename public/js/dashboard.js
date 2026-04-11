@@ -5515,9 +5515,9 @@
       var s = data.settings || {};
       var el;
       el = $('fuel-rapidapi-key');
-      if (el && s.FUEL_RAPIDAPI_KEY) el.placeholder = s.FUEL_RAPIDAPI_KEY;
+      if (el) el.placeholder = s.FUEL_RAPIDAPI_KEY ? '(key saved — enter new key to change)' : 'Enter RapidAPI key';
       el = $('metals-rapidapi-key');
-      if (el && s.METALS_RAPIDAPI_KEY) el.placeholder = s.METALS_RAPIDAPI_KEY;
+      if (el) el.placeholder = s.METALS_RAPIDAPI_KEY ? '(key saved — enter new key to change)' : 'Enter RapidAPI key';
     }).catch(function() {});
   }
 
@@ -5652,11 +5652,11 @@
       var s = data.settings || {};
       var el;
       el = $('wp-site-url');
-      if (el && s.WP_SITE_URL) el.value = s.WP_SITE_URL;
+      if (el) el.value = s.WP_SITE_URL || s.WP_URL || '';
       el = $('wp-pub-username');
-      if (el && s.WP_USERNAME) el.placeholder = s.WP_USERNAME;
+      if (el) el.placeholder = s.WP_USERNAME ? '(saved — enter new to change)' : 'WordPress username';
       el = $('wp-pub-password');
-      if (el && s.WP_APP_PASSWORD) el.placeholder = s.WP_APP_PASSWORD;
+      if (el) el.placeholder = s.WP_APP_PASSWORD ? '(saved — enter new to change)' : 'App password';
     }).catch(function() {});
   }
 
