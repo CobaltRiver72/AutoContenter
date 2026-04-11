@@ -5094,6 +5094,24 @@
     });
   }
 
+  // ─── Global onclick= exposure ────────────────────────────────────────────
+  // All functions called from HTML onclick/oninput/onchange must be on window.
+
+  window.saveFuelMetalsSettings  = saveFuelMetalsSettings;
+  window.saveWPPublishingSettings = saveWPPublishingSettings;
+  window.testWPConnection        = testWPConnection;
+  window.loadFuelPage            = loadFuelPage;
+  window.loadMetalsPage          = loadMetalsPage;
+  window.filterFuelCities        = filterFuelCities;
+  window.triggerFuelFetch        = triggerFuelFetch;
+  window.triggerFuelPosts        = triggerFuelPosts;
+  window.triggerMetalsFetch      = triggerMetalsFetch;
+  window.triggerMetalsPosts      = triggerMetalsPosts;
+  window.switchMetal             = switchMetal;
+  window.loadSourcesPage         = loadSourcesPage;
+  window.filterSourcesTable      = filterSourcesTable;
+  window.sortSourcesTable        = sortSourcesTable;
+
   // ─── Init ───────────────────────────────────────────────────────────────
 
   function init() {
