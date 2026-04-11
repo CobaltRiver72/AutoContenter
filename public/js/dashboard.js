@@ -5149,21 +5149,34 @@
     fetchApi('/api/fuel/history?city=Delhi&days=30').then(function(data) {
       renderFuelNationalChart(data);
     }).catch(function() {});
+
+    switchFuelTab('overview');
+    _loadFuelOverviewActivity();
   }
 
   function renderFuelCities(cities) {
     var tbody = $('fuel-cities-tbody');
     if (!tbody) return;
-    if (!cities.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">No data</td></tr>'; return; }
+    if (!cities.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888">No data</td></tr>'; return; }
     tbody.innerHTML = cities.map(function(c) {
       var pColor = c.petrol > 0 ? 'var(--text)' : '#ef4444';
       var dColor = c.diesel > 0 ? 'var(--text)' : '#ef4444';
-      return '<tr><td><strong>' + escapeHtml(c.city_name) + '</strong></td>' +
-        '<td>' + escapeHtml(c.state) + '</td>' +
-        '<td style="color:' + pColor + '">' + (c.petrol ? '₹' + Number(c.petrol).toFixed(2) : '—') + '</td>' +
-        '<td style="color:' + dColor + '">' + (c.diesel ? '₹' + Number(c.diesel).toFixed(2) : '—') + '</td>' +
+      var pd = c.price_date || '';
+      var p = c.petrol || '';
+      var d = c.diesel || '';
+      var cityEsc = escapeHtml(c.city_name);
+      var stateEsc = escapeHtml(c.state);
+      var enabled = c.is_enabled !== 0;
+      return '<tr data-fuel-city="' + cityEsc + '">' +
+        '<td><strong>' + cityEsc + '</strong></td>' +
+        '<td>' + stateEsc + '</td>' +
+        '<td class="col-petrol" style="color:' + pColor + '">' + (c.petrol ? '₹' + Number(c.petrol).toFixed(2) : '—') + '</td>' +
+        '<td class="col-diesel" style="color:' + dColor + '">' + (c.diesel ? '₹' + Number(c.diesel).toFixed(2) : '—') + '</td>' +
         '<td><span style="font-size:11px;background:var(--bg3);padding:2px 6px;border-radius:4px;">' + (c.source || '—') + '</span></td>' +
-        '<td style="font-size:12px;color:#888">' + (c.price_date || '—') + '</td></tr>';
+        '<td style="font-size:12px;color:#888">' + (pd || '—') + '</td>' +
+        '<td><button class="btn-icon" onclick="toggleFuelCity(\'' + cityEsc.replace(/'/g, "\\'") + '\',' + (enabled ? '0' : '1') + ')" title="Toggle enabled">' + (enabled ? '✅' : '❌') + '</button></td>' +
+        '<td class="col-actions"><button class="btn-icon" title="Edit prices" onclick="startEditFuelPrice(\'' + cityEsc.replace(/'/g, "\\'") + '\',\'' + stateEsc.replace(/'/g, "\\'") + '\',' + p + ',' + d + ',\'' + pd + '\')">✏️</button></td>' +
+        '</tr>';
     }).join('');
   }
 
@@ -5220,6 +5233,8 @@
 
   function loadMetalsPage() {
     fetchMetalsData(_currentMetal);
+    switchMetalsTab('overview');
+    _loadMetalsOverviewActivity();
   }
 
   function switchMetal(metal) {
@@ -5449,6 +5464,499 @@
       if (el && s.WP_USERNAME) el.placeholder = s.WP_USERNAME;
       el = $('wp-pub-password');
       if (el && s.WP_APP_PASSWORD) el.placeholder = s.WP_APP_PASSWORD;
+    }).catch(function() {});
+  }
+
+  // ─── Shared helpers (Day 3) ──────────────────────────────────────────────
+
+  function timeAgo(dateStr) {
+    if (!dateStr) return 'Never';
+    var diff = Date.now() - new Date(dateStr).getTime();
+    var mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    return Math.floor(hrs / 24) + 'd ago';
+  }
+
+  function esc(s) {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function durFmt(ms) {
+    if (!ms) return '—';
+    if (ms < 60000) return Math.round(ms / 1000) + 's';
+    return Math.round(ms / 60000) + 'm ' + Math.round((ms % 60000) / 1000) + 's';
+  }
+
+  function renderPosts(tbodyId, data, module) {
+    var tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    if (!data.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No posts yet</td></tr>'; return; }
+    tbody.innerHTML = data.map(function(p) {
+      var typeColor = p.item_type === 'petrol' ? 'badge-petrol' : p.item_type === 'diesel' ? 'badge-diesel' :
+        p.item_type === 'gold' ? 'badge-gold' : p.item_type === 'silver' ? 'badge-silver' : 'badge-platinum';
+      var dotClass = p.wp_status === 'publish' ? 'dot-green' : p.wp_status === 'draft' ? 'dot-yellow' : 'dot-red';
+      return '<tr class="' + (p.action === 'failed' ? 'row-error' : '') + '">' +
+        '<td><strong>' + esc(p.item_name) + '</strong></td>' +
+        '<td><span class="badge ' + typeColor + '">' + esc(p.item_type) + '</span></td>' +
+        '<td><span class="badge badge-tier">' + esc(p.post_type) + '</span></td>' +
+        '<td><span class="dot ' + dotClass + '"></span>' + esc(p.wp_status || 'unknown') + '</td>' +
+        '<td>' + esc(p.action || '—') + (p.error_message ? ' <span class="text-red text-sm" title="' + esc(p.error_message) + '">⚠</span>' : '') + '</td>' +
+        '<td class="text-muted text-sm" title="' + esc(p.created_at) + '">' + timeAgo(p.created_at) + '</td>' +
+        '<td>' +
+          (p.wp_url ? '<a href="' + esc(p.wp_url) + '" target="_blank" class="btn-icon" title="Open WP">🔗</a>' : '') +
+          '<button class="btn-icon" title="Regenerate" onclick="regeneratePost(\'' + esc(module) + '\',\'' + esc(p.item_type) + '\',\'' + esc(p.post_type) + '\',\'' + esc(p.item_name).replace(/'/g, "\\'") + '\')">🔄</button>' +
+        '</td></tr>';
+    }).join('');
+  }
+
+  function renderPagination(containerId, currentPage, totalPages, onPage) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    if (totalPages <= 1) { el.innerHTML = ''; return; }
+    var html = '';
+    if (currentPage > 1) html += '<button class="btn-page" data-p="' + (currentPage-1) + '">← Prev</button>';
+    var start = Math.max(1, currentPage-2), end = Math.min(totalPages, currentPage+2);
+    for (var i = start; i <= end; i++) {
+      html += '<button class="btn-page' + (i === currentPage ? ' active' : '') + '" data-p="' + i + '">' + i + '</button>';
+    }
+    if (currentPage < totalPages) html += '<button class="btn-page" data-p="' + (currentPage+1) + '">Next →</button>';
+    el.innerHTML = html;
+    el.onclick = function(e) {
+      var p = e.target.dataset && e.target.dataset.p;
+      if (p) onPage(parseInt(p));
+    };
+  }
+
+  async function regeneratePost(module, itemType, postType, itemName) {
+    if (!confirm('Regenerate ' + itemType + ' ' + postType + ' post for ' + itemName + '?')) return;
+    try {
+      var res = await fetch('/api/posts/regenerate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module: module, item_type: itemType, post_type: postType, item_name: itemName })
+      });
+      var data = await res.json();
+      if (data.ok) {
+        showToast('✅ ' + (data.result && data.result.action ? data.result.action : 'done') + ': ' + itemName);
+        if (module === 'fuel') loadFuelPosts();
+        else loadMetalsPosts();
+      } else {
+        showToast('❌ ' + (data.error || 'Failed'), 'error');
+      }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  }
+  window.regeneratePost = regeneratePost;
+
+  // ─── Fuel Tab System ────────────────────────────────────────────────────
+
+  function switchFuelTab(tab) {
+    document.querySelectorAll('#fuel-tabs .tab').forEach(function(b) { b.classList.remove('active'); });
+    var activeBtn = document.querySelector('#fuel-tabs [data-tab="fuel-tab-' + tab + '"]');
+    if (activeBtn) activeBtn.classList.add('active');
+    document.querySelectorAll('#page-fuel .tab-content').forEach(function(el) { el.style.display = 'none'; });
+    var tabEl = document.getElementById('fuel-tab-' + tab);
+    if (tabEl) tabEl.style.display = '';
+    if (tab === 'posts') loadFuelPosts();
+    if (tab === 'logs') loadFuelFetchLog();
+    if (tab === 'quality') loadFuelDataQuality();
+  }
+  window.switchFuelTab = switchFuelTab;
+
+  var _fuelPostsPage = 1;
+
+  function loadFuelPosts(page) {
+    _fuelPostsPage = page || 1;
+    var type = (document.getElementById('fuel-posts-type-filter') || {}).value || '';
+    var tier = (document.getElementById('fuel-posts-tier-filter') || {}).value || '';
+    var status = (document.getElementById('fuel-posts-status-filter') || {}).value || '';
+    var search = (document.getElementById('fuel-posts-search') || {}).value || '';
+
+    var params = 'module=fuel&page=' + _fuelPostsPage + '&limit=50';
+    if (type) params += '&item_type=' + encodeURIComponent(type);
+    if (tier) params += '&post_type=' + encodeURIComponent(tier);
+    if (status) params += '&action=' + encodeURIComponent(status);
+    if (search) params += '&search=' + encodeURIComponent(search);
+
+    fetchApi('/api/posts/list?' + params).then(function(json) {
+      renderPosts('fuel-posts-tbody', json.data || [], 'fuel');
+      renderPagination('fuel-posts-pagination', json.page, json.pages, loadFuelPosts);
+    }).catch(function() {});
+
+    fetchApi('/api/posts/stats').then(function(data) {
+      var f = data.fuel || {};
+      var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+      set('fuel-posts-total', f.total || 0);
+      set('fuel-posts-updated-today', f.updated_today || 0);
+      set('fuel-posts-failed', f.failed || 0);
+    }).catch(function() {});
+  }
+  window.loadFuelPosts = loadFuelPosts;
+
+  function loadFuelFetchLog() {
+    fetchApi('/api/fetch-log?module=fuel&limit=30').then(function(json) {
+      var tbody = document.getElementById('fuel-fetch-log-tbody');
+      if (!tbody) return;
+      var rows = json.data || [];
+      if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No fetch history yet</td></tr>'; return; }
+      tbody.innerHTML = rows.map(function(l) {
+        var details = {};
+        try { details = JSON.parse(l.details || '{}'); } catch (e) {}
+        var failed = details.failedCities && details.failedCities.length > 0 ? details.failedCities.join(', ') : '—';
+        return '<tr>' +
+          '<td class="text-muted text-sm" title="' + esc(l.created_at) + '">' + timeAgo(l.created_at) + '</td>' +
+          '<td><span class="badge badge-' + esc(l.fetch_type || 'scheduled') + '">' + esc(l.fetch_type || 'scheduled') + '</span></td>' +
+          '<td class="text-green">' + (l.cities_ok || 0) + '</td>' +
+          '<td class="' + (l.cities_fail > 0 ? 'text-red' : 'text-muted') + '">' + (l.cities_fail || 0) + '</td>' +
+          '<td class="text-muted">' + durFmt(l.duration_ms) + '</td>' +
+          '<td class="text-sm text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">' + esc(failed) + '</td>' +
+          '</tr>';
+      }).join('');
+    }).catch(function() {});
+  }
+
+  function loadFuelDataQuality() {
+    fetchApi('/api/fuel/data-quality').then(function(q) {
+      // Coverage table
+      var tbody = document.getElementById('fuel-coverage-tbody');
+      if (tbody && q.coverageByState) {
+        tbody.innerHTML = q.coverageByState.map(function(s) {
+          var pct = s.total > 0 ? Math.round(s.fetched / s.total * 100) : 0;
+          var color = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+          return '<tr><td>' + esc(s.state) + '</td><td>' + s.total + '</td><td style="color:' + color + '">' + s.fetched +
+            '</td><td style="color:' + color + '">' + pct + '%</td>' +
+            '<td><div class="bar-bg"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div></td></tr>';
+        }).join('');
+      }
+      // Stale cities
+      var staleEl = document.getElementById('fuel-stale-cities');
+      if (staleEl) {
+        if (!q.staleCities || !q.staleCities.length) {
+          staleEl.innerHTML = '<span class="text-green">✅ All cities have recent data</span>';
+        } else {
+          staleEl.innerHTML = q.staleCities.map(function(c) {
+            return '<span class="pill pill-warn">' + esc(c.city_name) + ' (' + esc(c.state) + ') — ' + (c.days_since || '?') + 'd</span>';
+          }).join('');
+        }
+      }
+      // Source chart
+      if (q.sourceBreakdown && window.Chart) {
+        var ctx = document.getElementById('fuel-source-chart');
+        if (ctx) {
+          if (ctx._chartInstance) ctx._chartInstance.destroy();
+          var labels = Object.keys(q.sourceBreakdown);
+          var values = Object.values(q.sourceBreakdown);
+          var colors = { api3: '#10b981', derived: '#3b82f6', carryforward: '#f59e0b', manual: '#a78bfa', imported: '#6b7280', autofill: '#f59e0b' };
+          ctx._chartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: { labels: labels, datasets: [{ data: values, backgroundColor: labels.map(function(l) { return colors[l] || '#6b7280'; }) }] },
+            options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#9ca3af', font: { size: 11 } } } } }
+          });
+        }
+      }
+    }).catch(function() {});
+  }
+
+  // ─── Metals Tab System ──────────────────────────────────────────────────
+
+  function switchMetalsTab(tab) {
+    document.querySelectorAll('#metals-tabs .tab').forEach(function(b) { b.classList.remove('active'); });
+    var activeBtn = document.querySelector('#metals-tabs [data-tab="metals-tab-' + tab + '"]');
+    if (activeBtn) activeBtn.classList.add('active');
+    document.querySelectorAll('#page-metals .tab-content').forEach(function(el) { el.style.display = 'none'; });
+    var tabEl = document.getElementById('metals-tab-' + tab);
+    if (tabEl) tabEl.style.display = '';
+    if (tab === 'cities') loadMetalsCitiesExtended();
+    if (tab === 'posts') loadMetalsPosts();
+    if (tab === 'logs') loadMetalsFetchLog();
+    if (tab === 'quality') loadMetalsDataQuality();
+  }
+  window.switchMetalsTab = switchMetalsTab;
+
+  var _metalsPostsPage = 1;
+
+  function loadMetalsPosts(page) {
+    _metalsPostsPage = page || 1;
+    var type = (document.getElementById('metals-posts-type-filter') || {}).value || '';
+    var tier = (document.getElementById('metals-posts-tier-filter') || {}).value || '';
+    var status = (document.getElementById('metals-posts-status-filter') || {}).value || '';
+    var search = (document.getElementById('metals-posts-search') || {}).value || '';
+
+    var params = 'module=metals&page=' + _metalsPostsPage + '&limit=50';
+    if (type) params += '&item_type=' + encodeURIComponent(type);
+    if (tier) params += '&post_type=' + encodeURIComponent(tier);
+    if (status) params += '&action=' + encodeURIComponent(status);
+    if (search) params += '&search=' + encodeURIComponent(search);
+
+    fetchApi('/api/posts/list?' + params).then(function(json) {
+      renderPosts('metals-posts-tbody', json.data || [], 'metals');
+      renderPagination('metals-posts-pagination', json.page, json.pages, loadMetalsPosts);
+    }).catch(function() {});
+
+    fetchApi('/api/posts/stats').then(function(data) {
+      var m = data.metals || {};
+      var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+      set('metals-posts-total', m.total || 0);
+      set('metals-posts-updated-today', m.updated_today || 0);
+      set('metals-posts-failed', m.failed || 0);
+    }).catch(function() {});
+  }
+  window.loadMetalsPosts = loadMetalsPosts;
+
+  function loadMetalsCitiesExtended() {
+    fetchApi('/api/metals/cities?metal=' + (_currentMetal || 'gold')).then(function(data) {
+      var rows = data.data || [];
+      var sel = document.getElementById('metals-state-filter');
+      if (sel && sel.options.length <= 1) {
+        var states = [...new Set(rows.map(function(r) { return r.state; }))].sort();
+        states.forEach(function(s) { var o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+      }
+      _metalsCitiesData = rows;
+      renderMetalsCitiesExtended(rows);
+    }).catch(function() {});
+  }
+
+  function filterMetalsCities() {
+    var state = (document.getElementById('metals-state-filter') || {}).value || '';
+    var search = (document.getElementById('metals-city-search') || {}).value || '';
+    var filtered = _metalsCitiesData.filter(function(c) {
+      if (state && c.state !== state) return false;
+      if (search && c.city_name.toLowerCase().indexOf(search.toLowerCase()) === -1) return false;
+      return true;
+    });
+    renderMetalsCitiesExtended(filtered);
+  }
+  window.filterMetalsCities = filterMetalsCities;
+
+  function renderMetalsCitiesExtended(cities) {
+    var tbody = document.getElementById('metals-cities-extended-tbody');
+    if (!tbody) return;
+    if (!cities.length) { tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No data</td></tr>'; return; }
+    var metal = _currentMetal || 'gold';
+    tbody.innerHTML = cities.slice(0, 200).map(function(c) {
+      var activeToggle = c.is_active ? '✅' : '❌';
+      var priceDisplay = metal === 'gold'
+        ? (c.price_24k ? '₹' + Number(c.price_24k).toLocaleString('en-IN') : '—') + '</td><td>' +
+          (c.price_22k ? '₹' + Number(c.price_22k).toLocaleString('en-IN') : '—') + '</td><td>' +
+          (c.price_18k ? '₹' + Number(c.price_18k).toLocaleString('en-IN') : '—') + '</td><td>' +
+          (c.price_1g ? '₹' + Number(c.price_1g).toFixed(2) : '—')
+        : '—</td><td>—</td><td>—</td><td>' + (c.price_1g ? '₹' + Number(c.price_1g).toFixed(2) : '—');
+      return '<tr data-metals-city="' + esc(c.city_name) + '">' +
+        '<td><strong>' + esc(c.city_name) + '</strong></td>' +
+        '<td>' + esc(c.state) + '</td>' +
+        '<td>' + priceDisplay + '</td>' +
+        '<td><span class="text-sm text-muted">' + esc(c.source || '—') + '</span></td>' +
+        '<td><button class="btn-icon" onclick="toggleMetalsCity(\'' + esc(c.city_name) + '\',' + (c.is_active ? '0' : '1') + ')" title="Toggle active">' + activeToggle + '</button></td>' +
+        '<td>' +
+          '<button class="btn-icon" title="Edit prices" onclick="startEditMetalsPrice(\'' + esc(c.city_name).replace(/'/g, "\\'") + '\',\'' + metal + '\')">✏️</button>' +
+        '</td></tr>';
+    }).join('');
+  }
+
+  function loadMetalsFetchLog() {
+    fetchApi('/api/fetch-log?module=metals&limit=30').then(function(json) {
+      var tbody = document.getElementById('metals-fetch-log-tbody');
+      if (!tbody) return;
+      var rows = json.data || [];
+      if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No fetch history yet</td></tr>'; return; }
+      tbody.innerHTML = rows.map(function(l) {
+        var details = {};
+        try { details = JSON.parse(l.details || '{}'); } catch (e) {}
+        var perMetal = details.perMetal ? JSON.stringify(details.perMetal) : '—';
+        return '<tr>' +
+          '<td class="text-muted text-sm" title="' + esc(l.created_at) + '">' + timeAgo(l.created_at) + '</td>' +
+          '<td><span class="badge badge-' + esc(l.fetch_type || 'scheduled') + '">' + esc(l.fetch_type || 'scheduled') + '</span></td>' +
+          '<td class="text-green">' + (l.cities_ok || 0) + '</td>' +
+          '<td class="text-muted">' + durFmt(l.duration_ms) + '</td>' +
+          '<td class="text-sm text-muted">' + esc(perMetal) + '</td>' +
+          '</tr>';
+      }).join('');
+    }).catch(function() {});
+  }
+
+  function loadMetalsDataQuality() {
+    fetchApi('/api/metals/data-quality?metal=' + (_currentMetal || 'gold')).then(function(q) {
+      var tbody = document.getElementById('metals-coverage-tbody');
+      if (tbody && q.coverageByState) {
+        tbody.innerHTML = q.coverageByState.map(function(s) {
+          var pct = s.total > 0 ? Math.round(s.fetched / s.total * 100) : 0;
+          var color = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+          return '<tr><td>' + esc(s.state) + '</td><td>' + s.total + '</td><td style="color:' + color + '">' + s.fetched +
+            '</td><td style="color:' + color + '">' + pct + '%</td>' +
+            '<td><div class="bar-bg"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div></td></tr>';
+        }).join('');
+      }
+      var staleEl = document.getElementById('metals-stale-cities');
+      if (staleEl) {
+        if (!q.staleCities || !q.staleCities.length) {
+          staleEl.innerHTML = '<span class="text-green">✅ All cities have recent data</span>';
+        } else {
+          staleEl.innerHTML = q.staleCities.map(function(c) {
+            return '<span class="pill pill-warn">' + esc(c.city_name) + ' (' + esc(c.state) + ') — ' + (c.days_since || '?') + 'd</span>';
+          }).join('');
+        }
+      }
+      if (q.sourceBreakdown && window.Chart) {
+        var ctx = document.getElementById('metals-source-chart');
+        if (ctx) {
+          if (ctx._chartInstance) ctx._chartInstance.destroy();
+          var labels = Object.keys(q.sourceBreakdown);
+          var values = Object.values(q.sourceBreakdown);
+          var colors = { api1: '#10b981', carryforward: '#f59e0b', manual: '#a78bfa', imported: '#6b7280' };
+          ctx._chartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: { labels: labels, datasets: [{ data: values, backgroundColor: labels.map(function(l) { return colors[l] || '#6b7280'; }) }] },
+            options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#9ca3af', font: { size: 11 } } } } }
+          });
+        }
+      }
+    }).catch(function() {});
+  }
+
+  // ─── Inline price edit — Fuel ────────────────────────────────────────────
+
+  function startEditFuelPrice(city, state, petrol, diesel, priceDate) {
+    var row = document.querySelector('tr[data-fuel-city="' + city + '"]');
+    if (!row) return;
+    row.classList.add('editing');
+    row.querySelector('.col-petrol').innerHTML = '<input type="number" step="0.01" min="30" max="300" value="' + (petrol || '') + '" class="edit-input" id="efp-' + city + '">';
+    row.querySelector('.col-diesel').innerHTML = '<input type="number" step="0.01" min="20" max="300" value="' + (diesel || '') + '" class="edit-input" id="efd-' + city + '">';
+    row.querySelector('.col-actions').innerHTML =
+      '<button class="btn-icon text-green" onclick="saveEditFuelPrice(\'' + city.replace(/'/g, "\\'") + '\',\'' + priceDate + '\')" title="Save">💾</button>' +
+      '<button class="btn-icon text-red" onclick="loadFuelPage()" title="Cancel">✖</button>';
+  }
+  window.startEditFuelPrice = startEditFuelPrice;
+
+  async function saveEditFuelPrice(city, priceDate) {
+    var petrol = parseFloat((document.getElementById('efp-' + city) || {}).value) || null;
+    var diesel = parseFloat((document.getElementById('efd-' + city) || {}).value) || null;
+    try {
+      var res = await fetch('/api/fuel/price', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city: city, price_date: priceDate, petrol: petrol, diesel: diesel })
+      });
+      var data = await res.json();
+      if (data.ok) { showToast('✅ Price updated for ' + city); loadFuelPage(); }
+      else showToast('❌ ' + data.error, 'error');
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  }
+  window.saveEditFuelPrice = saveEditFuelPrice;
+
+  function toggleFuelCity(city, active) {
+    fetch('/api/fuel/city', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ city_name: city, is_enabled: active })
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.ok) { showToast((active ? '✅ Enabled' : '❌ Disabled') + ' ' + city); loadFuelPage(); }
+      else showToast('❌ ' + d.error, 'error');
+    }).catch(function(e) { showToast('Error: ' + e.message, 'error'); });
+  }
+  window.toggleFuelCity = toggleFuelCity;
+
+  // ─── Inline price edit — Metals ─────────────────────────────────────────
+
+  function startEditMetalsPrice(city, metal) {
+    var row = document.querySelector('tr[data-metals-city="' + city + '"]');
+    if (!row) return;
+    var today = new Date().toISOString().slice(0, 10);
+    row.classList.add('editing');
+    var actionsCell = row.querySelector('td:last-child');
+    if (actionsCell) {
+      actionsCell.innerHTML =
+        '<input type="number" step="0.01" class="edit-input" placeholder="24K" id="em24-' + city + '" style="width:60px">' +
+        '<input type="number" step="0.01" class="edit-input" placeholder="1g" id="em1g-' + city + '" style="width:55px;margin-left:4px">' +
+        '<button class="btn-icon text-green" onclick="saveEditMetalsPrice(\'' + city.replace(/'/g, "\\'") + '\',\'' + metal + '\',\'' + today + '\')" title="Save">💾</button>' +
+        '<button class="btn-icon text-red" onclick="loadMetalsCitiesExtended()" title="Cancel">✖</button>';
+    }
+  }
+  window.startEditMetalsPrice = startEditMetalsPrice;
+
+  async function saveEditMetalsPrice(city, metal, priceDate) {
+    var p24k = parseFloat((document.getElementById('em24-' + city) || {}).value) || null;
+    var p1g  = parseFloat((document.getElementById('em1g-' + city) || {}).value) || null;
+    try {
+      var res = await fetch('/api/metals/price', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city: city, metal_type: metal, price_date: priceDate, price_24k: p24k, price_1g: p1g })
+      });
+      var data = await res.json();
+      if (data.ok) { showToast('✅ Price updated for ' + city); loadMetalsCitiesExtended(); }
+      else showToast('❌ ' + data.error, 'error');
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  }
+  window.saveEditMetalsPrice = saveEditMetalsPrice;
+
+  function toggleMetalsCity(city, active) {
+    fetch('/api/metals/city', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ city_name: city, is_active: active })
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.ok) { showToast((active ? '✅ Enabled' : '❌ Disabled') + ' ' + city); loadMetalsCitiesExtended(); }
+      else showToast('❌ ' + d.error, 'error');
+    }).catch(function(e) { showToast('Error: ' + e.message, 'error'); });
+  }
+  window.toggleMetalsCity = toggleMetalsCity;
+
+  // ─── Update loadFuelPage to add overview activity panels ─────────────────
+
+  function _loadFuelOverviewActivity() {
+    fetchApi('/api/fetch-log?module=fuel&limit=5').then(function(json) {
+      var el = document.getElementById('fuel-overview-fetchlog');
+      if (!el) return;
+      var rows = json.data || [];
+      if (!rows.length) { el.innerHTML = '<span class="text-muted">No fetch history</span>'; return; }
+      el.innerHTML = rows.map(function(l) {
+        return '<div style="padding:4px 0;border-bottom:1px solid #1f2937;">' +
+          '<span class="badge badge-' + esc(l.fetch_type || 'scheduled') + '">' + esc(l.fetch_type || 'sched') + '</span> ' +
+          '<span class="text-green">' + (l.cities_ok || 0) + ' ok</span>' +
+          (l.cities_fail > 0 ? ' <span class="text-red">' + l.cities_fail + ' fail</span>' : '') +
+          ' <span class="text-muted">' + durFmt(l.duration_ms) + '</span>' +
+          ' <span class="text-muted text-sm">' + timeAgo(l.created_at) + '</span></div>';
+      }).join('');
+    }).catch(function() {});
+    fetchApi('/api/posts/list?module=fuel&limit=5').then(function(json) {
+      var el = document.getElementById('fuel-overview-postlog');
+      if (!el) return;
+      var rows = json.data || [];
+      if (!rows.length) { el.innerHTML = '<span class="text-muted">No posts yet</span>'; return; }
+      el.innerHTML = rows.map(function(p) {
+        return '<div style="padding:4px 0;border-bottom:1px solid #1f2937;">' +
+          '<span class="badge badge-' + esc(p.item_type) + '">' + esc(p.item_type) + '</span> ' +
+          esc(p.item_name) + ' <span class="text-muted text-sm">' + esc(p.action) + ' · ' + timeAgo(p.created_at) + '</span></div>';
+      }).join('');
+    }).catch(function() {});
+  }
+
+  function _loadMetalsOverviewActivity() {
+    fetchApi('/api/fetch-log?module=metals&limit=5').then(function(json) {
+      var el = document.getElementById('metals-overview-fetchlog');
+      if (!el) return;
+      var rows = json.data || [];
+      if (!rows.length) { el.innerHTML = '<span class="text-muted">No fetch history</span>'; return; }
+      el.innerHTML = rows.map(function(l) {
+        return '<div style="padding:4px 0;border-bottom:1px solid #1f2937;">' +
+          '<span class="badge badge-' + esc(l.fetch_type || 'scheduled') + '">' + esc(l.fetch_type || 'sched') + '</span> ' +
+          '<span class="text-green">' + (l.cities_ok || 0) + ' ok</span>' +
+          ' <span class="text-muted">' + durFmt(l.duration_ms) + '</span>' +
+          ' <span class="text-muted text-sm">' + timeAgo(l.created_at) + '</span></div>';
+      }).join('');
+    }).catch(function() {});
+    fetchApi('/api/posts/list?module=metals&limit=5').then(function(json) {
+      var el = document.getElementById('metals-overview-postlog');
+      if (!el) return;
+      var rows = json.data || [];
+      if (!rows.length) { el.innerHTML = '<span class="text-muted">No posts yet</span>'; return; }
+      el.innerHTML = rows.map(function(p) {
+        return '<div style="padding:4px 0;border-bottom:1px solid #1f2937;">' +
+          '<span class="badge badge-' + esc(p.item_type) + '">' + esc(p.item_type) + '</span> ' +
+          esc(p.item_name) + ' <span class="text-muted text-sm">' + esc(p.action) + ' · ' + timeAgo(p.created_at) + '</span></div>';
+      }).join('');
     }).catch(function() {});
   }
 

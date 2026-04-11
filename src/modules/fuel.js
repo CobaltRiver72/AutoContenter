@@ -96,7 +96,7 @@ class FuelModule extends EventEmitter {
     const dataDir = path.resolve(__dirname, '../../data');
     const citiesPath = path.join(dataDir, 'fuel-cities.json');
     if (!fs.existsSync(citiesPath)) {
-      this.logger.warn(MODULE, 'Seed file not found: ' + citiesPath);
+      this.logger.error(MODULE, 'SEED FILE MISSING: ' + citiesPath + ' — fuel_cities will be empty!');
       return;
     }
 
@@ -137,7 +137,8 @@ class FuelModule extends EventEmitter {
   /**
    * Fetch prices for all enabled cities.
    */
-  async runDailyFetch() {
+  async runDailyFetch(isManual = false) {
+    const startTime = Date.now();
     this.logger.info(MODULE, 'Starting daily fuel fetch...');
     const apiKey = this._getApiKey();
     if (!apiKey) {
@@ -148,6 +149,7 @@ class FuelModule extends EventEmitter {
     const cities = this.db.prepare('SELECT * FROM fuel_cities WHERE is_enabled = 1 AND api3_city IS NOT NULL').all();
     let ok = 0;
     let fail = 0;
+    const failedCities = [];
 
     for (const city of cities) {
       try {
@@ -155,6 +157,7 @@ class FuelModule extends EventEmitter {
         ok++;
       } catch (err) {
         fail++;
+        failedCities.push(city.city_name);
         this.logger.warn(MODULE, 'Fetch failed for ' + city.city_name + ': ' + err.message);
       }
       // 100ms delay between cities
@@ -164,10 +167,20 @@ class FuelModule extends EventEmitter {
     // Derive missing prices from state averages
     this.deriveMissing();
 
+    const duration = Date.now() - startTime;
     this.stats.totalFetched += ok;
     this.stats.lastFetchAt = new Date().toISOString();
     this.stats.citiesOk = ok;
     this.stats.citiesFail = fail;
+
+    try {
+      this.db.prepare(
+        'INSERT INTO fetch_log (module, fetch_type, cities_ok, cities_fail, cities_skipped, duration_ms, details) VALUES (?, ?, ?, ?, 0, ?, ?)'
+      ).run('fuel', isManual ? 'manual' : 'scheduled', ok, fail, duration,
+        JSON.stringify({ failedCities: failedCities.slice(0, 20) }));
+    } catch (e) {
+      this.logger.warn(MODULE, 'fetch_log insert failed: ' + e.message);
+    }
 
     this.logger.info(MODULE, 'Daily fetch complete: ' + ok + ' ok, ' + fail + ' fail out of ' + cities.length);
     return { ok, fail, total: cities.length };

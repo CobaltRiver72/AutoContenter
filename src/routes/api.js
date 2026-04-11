@@ -715,7 +715,7 @@ function createApiRouter(deps) {
     try {
       var fuel = req.app.locals.modules.fuel;
       if (!fuel) return res.status(503).json({ error: 'Fuel module not loaded' });
-      fuel.runDailyFetch().catch(function(err) {
+      fuel.runDailyFetch(true).catch(function(err) {
         logger.error('api', 'Manual fuel fetch failed: ' + err.message);
       });
       res.json({ success: true, message: 'Fetch started in background' });
@@ -795,7 +795,7 @@ function createApiRouter(deps) {
     try {
       var metals = req.app.locals.modules.metals;
       if (!metals) return res.status(503).json({ error: 'Metals module not loaded' });
-      metals.runDailyFetch().catch(function(err) {
+      metals.runDailyFetch(true).catch(function(err) {
         logger.error('api', 'Manual metals fetch failed: ' + err.message);
       });
       res.json({ success: true, message: 'Metals fetch started in background' });
@@ -3433,6 +3433,404 @@ function createApiRouter(deps) {
       res.json(data);
     } catch (err) {
       res.status(500).json({ error: 'Failed to get performance data' });
+    }
+  });
+
+  // ─── GET /api/posts/list ──────────────────────────────────────────────────
+
+  router.get('/posts/list', function (req, res) {
+    try {
+      var module = req.query.module || null;
+      var itemType = req.query.item_type || null;
+      var postType = req.query.post_type || null;
+      var action = req.query.action || null;
+      var search = req.query.search || null;
+      var page = Math.max(1, parseInt(req.query.page) || 1);
+      var limit = Math.min(parseInt(req.query.limit) || 50, 200);
+      var offset = (page - 1) * limit;
+
+      var conditions = [];
+      var params = [];
+      if (module) { conditions.push('module = ?'); params.push(module); }
+      if (itemType) { conditions.push('item_type = ?'); params.push(itemType); }
+      if (postType) { conditions.push('post_type = ?'); params.push(postType); }
+      if (action) { conditions.push('action = ?'); params.push(action); }
+      if (search) { conditions.push('item_name LIKE ?'); params.push('%' + search + '%'); }
+
+      var where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+      var total = db.prepare('SELECT COUNT(*) as c FROM wp_posts_log ' + where).get(params).c;
+      var data = db.prepare('SELECT * FROM wp_posts_log ' + where + ' ORDER BY created_at DESC LIMIT ? OFFSET ?')
+        .all(params.concat([limit, offset]));
+
+      res.json({ ok: true, data: data, total: total, page: page, pages: Math.ceil(total / limit) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/posts/stats ─────────────────────────────────────────────────
+
+  router.get('/posts/stats', function (req, res) {
+    try {
+      var today = new Date().toISOString().slice(0, 10);
+      var stat = function (mod) {
+        var r = db.prepare(`
+          SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN post_type='city' THEN 1 ELSE 0 END) as cities,
+            SUM(CASE WHEN post_type='state' THEN 1 ELSE 0 END) as states,
+            SUM(CASE WHEN post_type='national' THEN 1 ELSE 0 END) as national,
+            SUM(CASE WHEN action='failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN DATE(created_at)=? THEN 1 ELSE 0 END) as updated_today
+          FROM wp_posts_log WHERE module=?
+        `).get(today, mod);
+        return r || { total: 0, cities: 0, states: 0, national: 0, failed: 0, updated_today: 0 };
+      };
+      res.json({ ok: true, fuel: stat('fuel'), metals: stat('metals') });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/posts/regenerate ───────────────────────────────────────────
+
+  router.post('/posts/regenerate', async function (req, res) {
+    try {
+      var body = req.body || {};
+      var mod = body.module;
+      var itemType = body.item_type;
+      var postType = body.post_type;
+      var itemName = body.item_name;
+
+      if (!mod || !itemType || !postType || !itemName) {
+        return res.status(400).json({ ok: false, error: 'module, item_type, post_type, item_name required' });
+      }
+
+      var fuelPosts = req.app.locals.modules.fuelPosts;
+      var metalsPosts = req.app.locals.modules.metalsPosts;
+
+      if (mod === 'fuel') {
+        if (!fuelPosts) return res.status(503).json({ ok: false, error: 'fuelPosts not loaded' });
+        if (postType === 'city') {
+          var cityRow = db.prepare('SELECT state FROM fuel_cities WHERE city_name = ?').get(itemName);
+          if (!cityRow) return res.status(404).json({ ok: false, error: 'City not found: ' + itemName });
+          await fuelPosts.generateCityPost(itemName, cityRow.state, itemType);
+        } else if (postType === 'state') {
+          await fuelPosts.generateStatePost(itemName, itemType);
+        } else if (postType === 'national') {
+          await fuelPosts.generateNationalPost(itemType);
+        } else {
+          return res.status(400).json({ ok: false, error: 'Unknown post_type: ' + postType });
+        }
+      } else if (mod === 'metals') {
+        if (!metalsPosts) return res.status(503).json({ ok: false, error: 'metalsPosts not loaded' });
+        if (postType === 'city') {
+          var mCityRow = db.prepare('SELECT state FROM metals_cities WHERE city_name = ?').get(itemName);
+          if (!mCityRow) return res.status(404).json({ ok: false, error: 'City not found: ' + itemName });
+          await metalsPosts.generateCityPost(itemName, mCityRow.state, itemType);
+        } else if (postType === 'state') {
+          await metalsPosts.generateStatePost(itemName, itemType);
+        } else if (postType === 'national') {
+          await metalsPosts.generateNationalPost(itemType);
+        } else {
+          return res.status(400).json({ ok: false, error: 'Unknown post_type: ' + postType });
+        }
+      } else {
+        return res.status(400).json({ ok: false, error: 'Unknown module: ' + mod });
+      }
+
+      var logEntry = db.prepare(
+        'SELECT * FROM wp_posts_log WHERE module=? AND item_type=? AND post_type=? AND item_name=?'
+      ).get(mod, itemType, postType, itemName);
+
+      res.json({ ok: true, result: logEntry || { action: 'done' } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/fetch-log ───────────────────────────────────────────────────
+
+  router.get('/fetch-log', function (req, res) {
+    try {
+      var mod = req.query.module || null;
+      var limit = Math.min(parseInt(req.query.limit) || 20, 100);
+      var where = mod ? 'WHERE module = ?' : '';
+      var params = mod ? [mod] : [];
+      var rows = db.prepare('SELECT * FROM fetch_log ' + where + ' ORDER BY created_at DESC LIMIT ?')
+        .all(params.concat([limit]));
+      res.json({ ok: true, data: rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/fuel/city-detail ────────────────────────────────────────────
+
+  router.get('/fuel/city-detail', function (req, res) {
+    try {
+      var city = req.query.city;
+      if (!city) return res.status(400).json({ error: 'city required' });
+
+      var cityRow = db.prepare('SELECT * FROM fuel_cities WHERE city_name = ?').get(city);
+      if (!cityRow) return res.status(404).json({ error: 'City not found' });
+
+      var today = new Date().toISOString().slice(0, 10);
+      var todayPrice = db.prepare('SELECT * FROM fuel_prices WHERE city = ? AND price_date = ?').get(city, today);
+      var history = db.prepare(
+        'SELECT price_date, petrol, diesel FROM fuel_prices WHERE city = ? ORDER BY price_date DESC LIMIT 30'
+      ).all(city);
+      var posts = {
+        petrol: db.prepare("SELECT * FROM wp_posts_log WHERE module='fuel' AND item_type='petrol' AND post_type='city' AND item_name=?").get(city),
+        diesel: db.prepare("SELECT * FROM wp_posts_log WHERE module='fuel' AND item_type='diesel' AND post_type='city' AND item_name=?").get(city),
+      };
+
+      res.json({ ok: true, city: cityRow, today: todayPrice, history: history.reverse(), posts: posts });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/metals/city-detail ─────────────────────────────────────────
+
+  router.get('/metals/city-detail', function (req, res) {
+    try {
+      var city = req.query.city;
+      if (!city) return res.status(400).json({ error: 'city required' });
+
+      var cityRow = db.prepare('SELECT * FROM metals_cities WHERE city_name = ?').get(city);
+      if (!cityRow) return res.status(404).json({ error: 'City not found' });
+
+      var today = new Date().toISOString().slice(0, 10);
+      var todayPrices = {};
+      var history = {};
+      var posts = {};
+      for (var metal of ['gold', 'silver', 'platinum']) {
+        todayPrices[metal] = db.prepare(
+          'SELECT * FROM metals_prices WHERE city=? AND metal_type=? AND price_date=?'
+        ).get(city, metal, today);
+        history[metal] = db.prepare(
+          'SELECT price_date, price_24k, price_22k, price_18k, price_1g FROM metals_prices WHERE city=? AND metal_type=? ORDER BY price_date DESC LIMIT 30'
+        ).all(city, metal).reverse();
+        posts[metal] = db.prepare(
+          "SELECT * FROM wp_posts_log WHERE module='metals' AND item_type=? AND post_type='city' AND item_name=?"
+        ).get(metal, city);
+      }
+
+      res.json({ ok: true, city: cityRow, today: todayPrices, history: history, posts: posts });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── PUT /api/fuel/price ──────────────────────────────────────────────────
+
+  router.put('/fuel/price', function (req, res) {
+    try {
+      var body = req.body || {};
+      var city = body.city;
+      var priceDate = body.price_date;
+      var petrol = body.petrol !== undefined && body.petrol !== null && body.petrol !== '' ? parseFloat(body.petrol) : null;
+      var diesel = body.diesel !== undefined && body.diesel !== null && body.diesel !== '' ? parseFloat(body.diesel) : null;
+
+      if (!city || !priceDate) return res.status(400).json({ ok: false, error: 'city and price_date required' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(priceDate)) return res.status(400).json({ ok: false, error: 'Invalid date format' });
+      if (petrol !== null && (petrol < 30 || petrol > 300)) return res.status(400).json({ ok: false, error: 'Petrol price out of range (30-300)' });
+      if (diesel !== null && (diesel < 20 || diesel > 300)) return res.status(400).json({ ok: false, error: 'Diesel price out of range (20-300)' });
+
+      var cityRow = db.prepare('SELECT state FROM fuel_cities WHERE city_name = ?').get(city);
+      var state = cityRow ? cityRow.state : null;
+
+      db.prepare(`
+        INSERT INTO fuel_prices (city, state, petrol, diesel, price_date, source, fetched_at)
+        VALUES (?, ?, ?, ?, ?, 'manual', datetime('now'))
+        ON CONFLICT(city, price_date) DO UPDATE SET
+          petrol = COALESCE(?, petrol), diesel = COALESCE(?, diesel),
+          source = 'manual', fetched_at = datetime('now')
+      `).run(city, state, petrol, diesel, priceDate, petrol, diesel);
+
+      res.json({ ok: true, updated: { city, price_date: priceDate, petrol, diesel } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── PUT /api/metals/price ────────────────────────────────────────────────
+
+  router.put('/metals/price', function (req, res) {
+    try {
+      var body = req.body || {};
+      var city = body.city;
+      var metalType = body.metal_type;
+      var priceDate = body.price_date;
+      var p24k = body.price_24k !== undefined && body.price_24k !== '' ? parseFloat(body.price_24k) || null : null;
+      var p22k = body.price_22k !== undefined && body.price_22k !== '' ? parseFloat(body.price_22k) || null : null;
+      var p18k = body.price_18k !== undefined && body.price_18k !== '' ? parseFloat(body.price_18k) || null : null;
+      var p1g = body.price_1g !== undefined && body.price_1g !== '' ? parseFloat(body.price_1g) || null : null;
+
+      if (!city || !metalType || !priceDate) return res.status(400).json({ ok: false, error: 'city, metal_type, price_date required' });
+      if (!['gold', 'silver', 'platinum'].includes(metalType)) return res.status(400).json({ ok: false, error: 'Invalid metal_type' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(priceDate)) return res.status(400).json({ ok: false, error: 'Invalid date format' });
+
+      db.prepare(`
+        INSERT INTO metals_prices (city, metal_type, price_24k, price_22k, price_18k, price_1g, price_date, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', datetime('now'))
+        ON CONFLICT(city, metal_type, price_date) DO UPDATE SET
+          price_24k = COALESCE(?, price_24k), price_22k = COALESCE(?, price_22k),
+          price_18k = COALESCE(?, price_18k), price_1g = COALESCE(?, price_1g),
+          source = 'manual', created_at = datetime('now')
+      `).run(city, metalType, p24k, p22k, p18k, p1g, priceDate, p24k, p22k, p18k, p1g);
+
+      res.json({ ok: true, updated: { city, metal_type: metalType, price_date: priceDate, price_24k: p24k, price_22k: p22k, price_18k: p18k, price_1g: p1g } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── PUT /api/fuel/city ───────────────────────────────────────────────────
+
+  router.put('/fuel/city', function (req, res) {
+    try {
+      var body = req.body || {};
+      var city = body.city_name;
+      if (!city) return res.status(400).json({ ok: false, error: 'city_name required' });
+
+      var updates = [];
+      var params = [];
+      if (body.is_enabled !== undefined) { updates.push('is_enabled = ?'); params.push(body.is_enabled ? 1 : 0); }
+      if (body.has_post !== undefined) { updates.push('has_post = ?'); params.push(body.has_post ? 1 : 0); }
+      if (!updates.length) return res.status(400).json({ ok: false, error: 'Nothing to update' });
+
+      params.push(city);
+      db.prepare('UPDATE fuel_cities SET ' + updates.join(', ') + ' WHERE city_name = ?').run(params);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── PUT /api/metals/city ─────────────────────────────────────────────────
+
+  router.put('/metals/city', function (req, res) {
+    try {
+      var body = req.body || {};
+      var city = body.city_name;
+      if (!city) return res.status(400).json({ ok: false, error: 'city_name required' });
+
+      var updates = [];
+      var params = [];
+      if (body.is_active !== undefined) { updates.push('is_active = ?'); params.push(body.is_active ? 1 : 0); }
+      if (!updates.length) return res.status(400).json({ ok: false, error: 'Nothing to update' });
+
+      params.push(city);
+      db.prepare('UPDATE metals_cities SET ' + updates.join(', ') + ' WHERE city_name = ?').run(params);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/fuel/data-quality ──────────────────────────────────────────
+
+  router.get('/fuel/data-quality', function (req, res) {
+    try {
+      var today = new Date().toISOString().slice(0, 10);
+      var totalCities = db.prepare('SELECT COUNT(*) as c FROM fuel_cities').get().c;
+      var enabledCities = db.prepare('SELECT COUNT(*) as c FROM fuel_cities WHERE is_enabled=1').get().c;
+      var fetchedToday = db.prepare('SELECT COUNT(*) as c FROM fuel_prices WHERE price_date=? AND (petrol>0 OR diesel>0)').get(today).c;
+
+      var staleCities = db.prepare(`
+        SELECT fc.city_name, fc.state,
+          CAST(julianday('now') - julianday(MAX(fp.price_date)) AS INTEGER) as days_since
+        FROM fuel_cities fc
+        LEFT JOIN fuel_prices fp ON fc.city_name = fp.city
+        WHERE fc.is_enabled = 1
+        GROUP BY fc.city_name
+        HAVING days_since >= 3 OR days_since IS NULL
+        ORDER BY days_since DESC LIMIT 50
+      `).all();
+
+      var priceSuspicious = db.prepare(`
+        SELECT t.city, t.petrol as today, y.petrol as yesterday,
+          ROUND(ABS(t.petrol - y.petrol) / y.petrol * 100, 1) as pct_change, 'petrol' as fuel
+        FROM fuel_prices t
+        JOIN fuel_prices y ON t.city = y.city
+        WHERE t.price_date = date('now')
+          AND y.price_date = date('now', '-1 day')
+          AND y.petrol > 0 AND t.petrol > 0
+          AND ABS(t.petrol - y.petrol) / y.petrol > 0.05
+        UNION ALL
+        SELECT t.city, t.diesel, y.diesel,
+          ROUND(ABS(t.diesel - y.diesel) / y.diesel * 100, 1), 'diesel'
+        FROM fuel_prices t
+        JOIN fuel_prices y ON t.city = y.city
+        WHERE t.price_date = date('now')
+          AND y.price_date = date('now', '-1 day')
+          AND y.diesel > 0 AND t.diesel > 0
+          AND ABS(t.diesel - y.diesel) / y.diesel > 0.05
+        ORDER BY pct_change DESC LIMIT 20
+      `).all();
+
+      var sourceBreakdown = {};
+      var srcRows = db.prepare('SELECT source, COUNT(*) as c FROM fuel_prices GROUP BY source').all();
+      srcRows.forEach(function (r) { sourceBreakdown[r.source || 'unknown'] = r.c; });
+
+      var coverageByState = db.prepare(`
+        SELECT fc.state,
+          COUNT(DISTINCT fc.city_name) as total,
+          COUNT(DISTINCT CASE WHEN fp.petrol > 0 THEN fc.city_name END) as fetched
+        FROM fuel_cities fc
+        LEFT JOIN fuel_prices fp ON fc.city_name = fp.city AND fp.price_date = ?
+        WHERE fc.is_enabled = 1
+        GROUP BY fc.state ORDER BY fc.state
+      `).all(today);
+
+      res.json({ ok: true, totalCities, enabledCities, fetchedToday, staleCities, priceSuspicious, sourceBreakdown, coverageByState });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/metals/data-quality ────────────────────────────────────────
+
+  router.get('/metals/data-quality', function (req, res) {
+    try {
+      var metal = req.query.metal || 'gold';
+      var today = new Date().toISOString().slice(0, 10);
+      var totalCities = db.prepare('SELECT COUNT(*) as c FROM metals_cities').get().c;
+      var activeCities = db.prepare('SELECT COUNT(*) as c FROM metals_cities WHERE is_active=1').get().c;
+      var fetchedToday = db.prepare(
+        'SELECT COUNT(*) as c FROM metals_prices WHERE metal_type=? AND price_date=? AND (price_24k>0 OR price_1g>0)'
+      ).get(metal, today).c;
+
+      var staleCities = db.prepare(`
+        SELECT mc.city_name, mc.state,
+          CAST(julianday('now') - julianday(MAX(mp.price_date)) AS INTEGER) as days_since
+        FROM metals_cities mc
+        LEFT JOIN metals_prices mp ON mc.city_name = mp.city AND mp.metal_type = ?
+        WHERE mc.is_active = 1
+        GROUP BY mc.city_name
+        HAVING days_since >= 3 OR days_since IS NULL
+        ORDER BY days_since DESC LIMIT 50
+      `).all(metal);
+
+      var sourceBreakdown = {};
+      var srcRows = db.prepare('SELECT source, COUNT(*) as c FROM metals_prices WHERE metal_type=? GROUP BY source').all(metal);
+      srcRows.forEach(function (r) { sourceBreakdown[r.source || 'unknown'] = r.c; });
+
+      var coverageByState = db.prepare(`
+        SELECT mc.state,
+          COUNT(DISTINCT mc.city_name) as total,
+          COUNT(DISTINCT CASE WHEN mp.price_24k > 0 OR mp.price_1g > 0 THEN mc.city_name END) as fetched
+        FROM metals_cities mc
+        LEFT JOIN metals_prices mp ON mc.city_name = mp.city AND mp.metal_type = ? AND mp.price_date = ?
+        WHERE mc.is_active = 1
+        GROUP BY mc.state ORDER BY mc.state
+      `).all(metal, today);
+
+      res.json({ ok: true, metal, totalCities, activeCities, fetchedToday, staleCities, sourceBreakdown, coverageByState });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 

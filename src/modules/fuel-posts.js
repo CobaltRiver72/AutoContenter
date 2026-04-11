@@ -1,6 +1,7 @@
 'use strict';
 
 const MODULE = 'fuel-posts';
+const crypto = require('crypto');
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -89,6 +90,37 @@ class FuelPostCreator {
     this.wp = wpPublisher;
     this.db = db;
     this.logger = logger;
+  }
+
+  // =========================================================================
+  // wp_posts_log helper
+  // =========================================================================
+
+  _logPost(postType, itemType, itemName, result, contentHash) {
+    try {
+      this.db.prepare(`
+        INSERT INTO wp_posts_log (module, post_type, item_type, item_name, wp_post_id, wp_slug, wp_url, wp_status, action, content_hash)
+        VALUES ('fuel', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(module, item_type, post_type, item_name) DO UPDATE SET
+          wp_post_id = excluded.wp_post_id, wp_url = excluded.wp_url,
+          wp_status = excluded.wp_status, action = excluded.action,
+          content_hash = excluded.content_hash, created_at = datetime('now')
+      `).run(postType, itemType, itemName, result.id || null, result.slug || null,
+        result.url || null, result.status || 'publish', result.action || 'updated', contentHash || null);
+    } catch (e) {
+      this.logger.warn(MODULE, 'wp_posts_log insert failed: ' + e.message);
+    }
+  }
+
+  _logPostFailed(postType, itemType, itemName, errorMsg) {
+    try {
+      this.db.prepare(`
+        INSERT INTO wp_posts_log (module, post_type, item_type, item_name, action, error_message)
+        VALUES ('fuel', ?, ?, ?, 'failed', ?)
+        ON CONFLICT(module, item_type, post_type, item_name) DO UPDATE SET
+          action = 'failed', error_message = excluded.error_message, created_at = datetime('now')
+      `).run(postType, itemType, itemName, errorMsg);
+    } catch (e) { /* silent */ }
   }
 
   // =========================================================================
@@ -446,6 +478,8 @@ class FuelPostCreator {
       }
     });
 
+    const contentHash = crypto.createHash('md5').update(html).digest('hex');
+    this._logPost('city', fuelType, city, result, contentHash);
     return result.action;
   }
 
@@ -660,6 +694,8 @@ class FuelPostCreator {
       }
     });
 
+    const contentHash = crypto.createHash('md5').update(html).digest('hex');
+    this._logPost('state', fuelType, state, result, contentHash);
     return result.action;
   }
 
@@ -897,6 +933,8 @@ class FuelPostCreator {
       }
     });
 
+    const contentHash = crypto.createHash('md5').update(html).digest('hex');
+    this._logPost('national', fuelType, 'India', result, contentHash);
     return result.action;
   }
 }

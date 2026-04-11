@@ -93,7 +93,7 @@ class MetalsModule extends EventEmitter {
 
     const citiesPath = path.resolve(__dirname, '../../data/metals-cities.json');
     if (!fs.existsSync(citiesPath)) {
-      this.logger.warn(MODULE, 'Seed file not found: ' + citiesPath);
+      this.logger.error(MODULE, 'SEED FILE MISSING: ' + citiesPath + ' — metals_cities will be empty!');
       return;
     }
 
@@ -125,7 +125,8 @@ class MetalsModule extends EventEmitter {
   /**
    * Fetch all metals for all cities.
    */
-  async runDailyFetch() {
+  async runDailyFetch(isManual = false) {
+    const startTime = Date.now();
     this.logger.info(MODULE, 'Starting daily metals fetch...');
     const apiKey = this._getApiKey();
     if (!apiKey) {
@@ -134,17 +135,30 @@ class MetalsModule extends EventEmitter {
     }
 
     const results = {};
+    let totalOk = 0;
     for (const metal of ['gold', 'silver', 'platinum']) {
       try {
         const count = await this.fetchBulk(metal, apiKey);
         results[metal] = count;
+        totalOk += count;
       } catch (err) {
         this.logger.error(MODULE, 'fetchBulk(' + metal + ') failed: ' + err.message);
         results[metal] = 0;
       }
     }
 
+    const duration = Date.now() - startTime;
     this.stats.lastFetchAt = new Date().toISOString();
+
+    try {
+      this.db.prepare(
+        'INSERT INTO fetch_log (module, fetch_type, cities_ok, cities_fail, cities_skipped, duration_ms, details) VALUES (?, ?, ?, 0, 0, ?, ?)'
+      ).run('metals', isManual ? 'manual' : 'scheduled', totalOk, duration,
+        JSON.stringify({ perMetal: results }));
+    } catch (e) {
+      this.logger.warn(MODULE, 'fetch_log insert failed: ' + e.message);
+    }
+
     this.logger.info(MODULE, 'Daily metals fetch complete: ' + JSON.stringify(results));
     return results;
   }

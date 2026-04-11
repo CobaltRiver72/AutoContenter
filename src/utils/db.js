@@ -506,6 +506,48 @@ function runMigrations() {
       );
     `);
 
+    // ═══════════════════════════════════════════════════════════════════
+    // WP POST LOG + FETCH LOG TABLES
+    // ═══════════════════════════════════════════════════════════════════
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS wp_posts_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module TEXT NOT NULL,
+        post_type TEXT NOT NULL,
+        item_type TEXT NOT NULL,
+        item_name TEXT NOT NULL,
+        wp_post_id INTEGER,
+        wp_slug TEXT,
+        wp_url TEXT,
+        wp_status TEXT,
+        action TEXT,
+        error_message TEXT,
+        content_hash TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(module, item_type, post_type, item_name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wp_posts_module ON wp_posts_log(module);
+      CREATE INDEX IF NOT EXISTS idx_wp_posts_type ON wp_posts_log(item_type, post_type);
+      CREATE INDEX IF NOT EXISTS idx_wp_posts_action ON wp_posts_log(action);
+
+      CREATE TABLE IF NOT EXISTS fetch_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module TEXT NOT NULL,
+        fetch_type TEXT DEFAULT 'scheduled',
+        cities_ok INTEGER DEFAULT 0,
+        cities_fail INTEGER DEFAULT 0,
+        cities_skipped INTEGER DEFAULT 0,
+        duration_ms INTEGER,
+        error_message TEXT,
+        details TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_fetch_log_module ON fetch_log(module, created_at);
+    `);
+
     // One-time fix: clean known-wrong model IDs from settings
     var wrongModelIds = {
       'claude-opus-4-6-20250610': 'claude-opus-4-6',

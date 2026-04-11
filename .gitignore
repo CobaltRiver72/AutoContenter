@@ -1,5 +1,8 @@
 node_modules/
-data/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/import-*.csv
 .env
 .env.local
 .env.*.local

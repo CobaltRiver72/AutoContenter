@@ -1,6 +1,7 @@
 'use strict';
 
 const MODULE = 'metals-posts';
+const crypto = require('crypto');
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 
@@ -86,6 +87,35 @@ class MetalsPostCreator {
     this.wp = wpPublisher;
     this.db = db;
     this.logger = logger;
+  }
+
+  // ─── wp_posts_log helpers ────────────────────────────────────────────────
+
+  _logPost(postType, metalType, itemName, result, contentHash) {
+    try {
+      this.db.prepare(`
+        INSERT INTO wp_posts_log (module, post_type, item_type, item_name, wp_post_id, wp_slug, wp_url, wp_status, action, content_hash)
+        VALUES ('metals', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(module, item_type, post_type, item_name) DO UPDATE SET
+          wp_post_id = excluded.wp_post_id, wp_url = excluded.wp_url,
+          wp_status = excluded.wp_status, action = excluded.action,
+          content_hash = excluded.content_hash, created_at = datetime('now')
+      `).run(postType, metalType, itemName, result.id || null, result.slug || null,
+        result.url || null, result.status || 'publish', result.action || 'updated', contentHash || null);
+    } catch (e) {
+      this.logger.warn(MODULE, 'wp_posts_log insert failed: ' + e.message);
+    }
+  }
+
+  _logPostFailed(postType, metalType, itemName, errorMsg) {
+    try {
+      this.db.prepare(`
+        INSERT INTO wp_posts_log (module, post_type, item_type, item_name, action, error_message)
+        VALUES ('metals', ?, ?, ?, 'failed', ?)
+        ON CONFLICT(module, item_type, post_type, item_name) DO UPDATE SET
+          action = 'failed', error_message = excluded.error_message, created_at = datetime('now')
+      `).run(postType, metalType, itemName, errorMsg);
+    } catch (e) { /* silent */ }
   }
 
   // ─── Main entry ─────────────────────────────────────────────────────────
@@ -457,6 +487,8 @@ class MetalsPostCreator {
       },
     });
 
+    const contentHash = crypto.createHash('md5').update(html).digest('hex');
+    this._logPost('city', metalType, city, result, contentHash);
     this.logger.info(MODULE, config.label + ' city post ' + result.action + ': ' + city);
     return result.action;
   }
@@ -687,6 +719,8 @@ class MetalsPostCreator {
       },
     });
 
+    const contentHash = crypto.createHash('md5').update(html).digest('hex');
+    this._logPost('state', metalType, state, result, contentHash);
     this.logger.info(MODULE, config.label + ' state post ' + result.action + ': ' + state);
     return result.action;
   }
@@ -993,6 +1027,8 @@ class MetalsPostCreator {
       },
     });
 
+    const contentHash = crypto.createHash('md5').update(html).digest('hex');
+    this._logPost('national', metalType, 'India', result, contentHash);
     this.logger.info(MODULE, config.label + ' national post ' + result.action);
     return result.action;
   }

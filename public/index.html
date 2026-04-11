@@ -661,6 +661,7 @@
       </section>
 
       <!-- ═══════════════════════════ FUEL PAGE ══════════════════════════ -->
+      <!-- ═══════════════════════════ FUEL PAGE ══════════════════════════ -->
       <section class="page hidden" id="page-fuel">
         <div class="page-header">
           <h2 class="page-title">Fuel Price Tracker</h2>
@@ -672,47 +673,133 @@
         </div>
 
         <!-- Summary cards -->
-        <div class="stats-grid" style="margin-bottom:20px;">
+        <div class="stats-grid" style="margin-bottom:16px;">
           <div class="stat-card"><div class="stat-value" id="fuel-total-cities">—</div><div class="stat-label">Total Cities</div></div>
           <div class="stat-card"><div class="stat-value" id="fuel-fetched-today">—</div><div class="stat-label">Fetched Today</div></div>
           <div class="stat-card"><div class="stat-value" id="fuel-missing-today">—</div><div class="stat-label">Missing</div></div>
           <div class="stat-card"><div class="stat-value" id="fuel-last-fetch">—</div><div class="stat-label">Last Fetch</div></div>
         </div>
 
-        <!-- State-level overview + chart -->
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
-          <div class="card">
-            <div class="card-title">National Average Trend (30d)</div>
-            <canvas id="fuel-national-chart" height="220"></canvas>
+        <!-- Tab Navigation -->
+        <div class="page-tabs" id="fuel-tabs">
+          <button class="tab active" data-tab="fuel-tab-overview" onclick="switchFuelTab('overview')">📊 Overview</button>
+          <button class="tab" data-tab="fuel-tab-cities" onclick="switchFuelTab('cities')">🏙️ Cities</button>
+          <button class="tab" data-tab="fuel-tab-posts" onclick="switchFuelTab('posts')">📝 Posts</button>
+          <button class="tab" data-tab="fuel-tab-logs" onclick="switchFuelTab('logs')">📋 Fetch Log</button>
+          <button class="tab" data-tab="fuel-tab-quality" onclick="switchFuelTab('quality')">🔍 Data Quality</button>
+        </div>
+
+        <!-- Tab 1: Overview -->
+        <div id="fuel-tab-overview" class="tab-content">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+            <div class="card">
+              <div class="card-title">National Average Trend (30d)</div>
+              <canvas id="fuel-national-chart" height="220"></canvas>
+            </div>
+            <div class="card">
+              <div class="card-title">States Overview</div>
+              <div style="overflow-y:auto; max-height:300px;">
+                <table class="data-table" id="fuel-states-table">
+                  <thead><tr><th>State</th><th>Cities</th><th>Fetched</th><th>Avg Petrol</th><th>Avg Diesel</th></tr></thead>
+                  <tbody id="fuel-states-tbody"><tr><td colspan="5" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+                </table>
+              </div>
+            </div>
           </div>
-          <div class="card">
-            <div class="card-title">States Overview</div>
-            <div style="overflow-y:auto; max-height:300px;">
-              <table class="data-table" id="fuel-states-table">
-                <thead><tr><th>State</th><th>Cities</th><th>Fetched</th><th>Avg Petrol</th><th>Avg Diesel</th></tr></thead>
-                <tbody id="fuel-states-tbody"><tr><td colspan="5" style="text-align:center;color:#888">Loading...</td></tr></tbody>
-              </table>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div class="card">
+              <div class="card-title">Recent Fetches</div>
+              <div id="fuel-overview-fetchlog" style="font-size:12px;"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Recent Post Activity</div>
+              <div id="fuel-overview-postlog" style="font-size:12px;"></div>
             </div>
           </div>
         </div>
 
-        <!-- City table with search -->
-        <div class="card">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
-            <span>All Cities — Today's Prices</span>
-            <div style="display:flex;gap:8px;">
-              <select id="fuel-state-filter" onchange="filterFuelCities()" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;">
-                <option value="">All States</option>
-              </select>
-              <input type="text" id="fuel-city-search" placeholder="Search city..." oninput="filterFuelCities()"
-                style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;width:180px;">
+        <!-- Tab 2: Cities -->
+        <div id="fuel-tab-cities" class="tab-content" style="display:none">
+          <div class="filter-row">
+            <select id="fuel-state-filter" onchange="filterFuelCities()">
+              <option value="">All States</option>
+            </select>
+            <input type="text" id="fuel-city-search" placeholder="Search city..." oninput="filterFuelCities()">
+          </div>
+          <div style="overflow-x:auto;max-height:600px;overflow-y:auto;">
+            <table class="data-table">
+              <thead><tr><th>City</th><th>State</th><th>Petrol (₹)</th><th>Diesel (₹)</th><th>Source</th><th>Date</th><th>Enabled</th><th>Actions</th></tr></thead>
+              <tbody id="fuel-cities-tbody"><tr><td colspan="8" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 3: Posts -->
+        <div id="fuel-tab-posts" class="tab-content" style="display:none">
+          <div class="stats-grid" style="margin-bottom:12px;">
+            <div class="stat-card"><div class="stat-value" id="fuel-posts-total">—</div><div class="stat-label">Total Posts</div></div>
+            <div class="stat-card"><div class="stat-value" id="fuel-posts-updated-today">—</div><div class="stat-label">Updated Today</div></div>
+            <div class="stat-card"><div class="stat-value" id="fuel-posts-failed">—</div><div class="stat-label">Failed</div></div>
+          </div>
+          <div class="filter-row">
+            <select id="fuel-posts-type-filter" onchange="loadFuelPosts()">
+              <option value="">All Types</option>
+              <option value="petrol">Petrol</option>
+              <option value="diesel">Diesel</option>
+            </select>
+            <select id="fuel-posts-tier-filter" onchange="loadFuelPosts()">
+              <option value="">All Tiers</option>
+              <option value="city">City</option>
+              <option value="state">State</option>
+              <option value="national">National</option>
+            </select>
+            <select id="fuel-posts-status-filter" onchange="loadFuelPosts()">
+              <option value="">All Actions</option>
+              <option value="created">Created</option>
+              <option value="updated">Updated</option>
+              <option value="failed">Failed</option>
+            </select>
+            <input id="fuel-posts-search" placeholder="Search name..." oninput="loadFuelPosts()">
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table">
+              <thead><tr><th>Name</th><th>Type</th><th>Tier</th><th>WP Status</th><th>Action</th><th>Updated</th><th>Actions</th></tr></thead>
+              <tbody id="fuel-posts-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="fuel-posts-pagination"></div>
+        </div>
+
+        <!-- Tab 4: Fetch Log -->
+        <div id="fuel-tab-logs" class="tab-content" style="display:none">
+          <div style="overflow-x:auto;">
+            <table class="data-table">
+              <thead><tr><th>Time</th><th>Type</th><th>OK</th><th>Failed</th><th>Duration</th><th>Failed Cities</th></tr></thead>
+              <tbody id="fuel-fetch-log-tbody"><tr><td colspan="6" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 5: Data Quality -->
+        <div id="fuel-tab-quality" class="tab-content" style="display:none">
+          <div class="card" style="margin-bottom:16px;">
+            <div class="card-title">State Coverage — Today</div>
+            <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+              <table class="data-table">
+                <thead><tr><th>State</th><th>Total</th><th>Fetched</th><th>Coverage</th><th style="width:120px">Bar</th></tr></thead>
+                <tbody id="fuel-coverage-tbody"></tbody>
+              </table>
             </div>
           </div>
-          <div style="overflow-x:auto;max-height:500px;overflow-y:auto;">
-            <table class="data-table">
-              <thead><tr><th>City</th><th>State</th><th>Petrol (₹)</th><th>Diesel (₹)</th><th>Source</th><th>Date</th></tr></thead>
-              <tbody id="fuel-cities-tbody"><tr><td colspan="6" style="text-align:center;color:#888">Loading...</td></tr></tbody>
-            </table>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="card">
+              <div class="card-title">⚠️ Stale Cities (3+ days)</div>
+              <div id="fuel-stale-cities" style="padding:8px;font-size:13px;"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Price Source Breakdown</div>
+              <canvas id="fuel-source-chart" height="200"></canvas>
+            </div>
           </div>
         </div>
       </section>
@@ -729,33 +816,140 @@
         </div>
 
         <!-- Metal type selector -->
-        <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
           <button class="btn btn-sm" id="metal-btn-gold" onclick="switchMetal('gold')" style="background:#f59e0b;color:#000;">Gold</button>
           <button class="btn btn-sm btn-ghost" id="metal-btn-silver" onclick="switchMetal('silver')">Silver</button>
           <button class="btn btn-sm btn-ghost" id="metal-btn-platinum" onclick="switchMetal('platinum')">Platinum</button>
         </div>
 
         <!-- Summary cards -->
-        <div class="stats-grid" style="margin-bottom:20px;">
+        <div class="stats-grid" style="margin-bottom:16px;">
           <div class="stat-card"><div class="stat-value" id="metals-total-cities">—</div><div class="stat-label">Total Cities</div></div>
           <div class="stat-card"><div class="stat-value" id="metals-fetched-today">—</div><div class="stat-label">Fetched Today</div></div>
           <div class="stat-card"><div class="stat-value" id="metals-avg-price">—</div><div class="stat-label">National Avg (10g)</div></div>
           <div class="stat-card"><div class="stat-value" id="metals-last-fetch">—</div><div class="stat-label">Last Fetch</div></div>
         </div>
 
-        <!-- Chart + top cities -->
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
-          <div class="card">
-            <div class="card-title" id="metals-chart-title">Gold National Trend (30d)</div>
-            <canvas id="metals-national-chart" height="220"></canvas>
+        <!-- Tab Navigation -->
+        <div class="page-tabs" id="metals-tabs">
+          <button class="tab active" data-tab="metals-tab-overview" onclick="switchMetalsTab('overview')">📊 Overview</button>
+          <button class="tab" data-tab="metals-tab-cities" onclick="switchMetalsTab('cities')">🏙️ Cities</button>
+          <button class="tab" data-tab="metals-tab-posts" onclick="switchMetalsTab('posts')">📝 Posts</button>
+          <button class="tab" data-tab="metals-tab-logs" onclick="switchMetalsTab('logs')">📋 Fetch Log</button>
+          <button class="tab" data-tab="metals-tab-quality" onclick="switchMetalsTab('quality')">🔍 Data Quality</button>
+        </div>
+
+        <!-- Tab 1: Overview -->
+        <div id="metals-tab-overview" class="tab-content">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+            <div class="card">
+              <div class="card-title" id="metals-chart-title">Gold National Trend (30d)</div>
+              <canvas id="metals-national-chart" height="220"></canvas>
+            </div>
+            <div class="card">
+              <div class="card-title">Price by City</div>
+              <div style="overflow-y:auto; max-height:300px;">
+                <table class="data-table">
+                  <thead><tr><th>City</th><th>24K</th><th>22K</th><th>18K</th><th>1g</th></tr></thead>
+                  <tbody id="metals-cities-tbody"><tr><td colspan="5" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+                </table>
+              </div>
+            </div>
           </div>
-          <div class="card">
-            <div class="card-title">Price by City</div>
-            <div style="overflow-y:auto; max-height:300px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div class="card">
+              <div class="card-title">Recent Fetches</div>
+              <div id="metals-overview-fetchlog" style="font-size:12px;"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Recent Post Activity</div>
+              <div id="metals-overview-postlog" style="font-size:12px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Cities -->
+        <div id="metals-tab-cities" class="tab-content" style="display:none">
+          <div class="filter-row">
+            <select id="metals-state-filter" onchange="filterMetalsCities()">
+              <option value="">All States</option>
+            </select>
+            <input type="text" id="metals-city-search" placeholder="Search city..." oninput="filterMetalsCities()">
+          </div>
+          <div style="overflow-x:auto;max-height:600px;overflow-y:auto;">
+            <table class="data-table">
+              <thead><tr><th>City</th><th>State</th><th id="metals-col-24k">24K (₹)</th><th>22K (₹)</th><th>18K (₹)</th><th>1g (₹)</th><th>Source</th><th>Active</th><th>Actions</th></tr></thead>
+              <tbody id="metals-cities-extended-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 3: Posts -->
+        <div id="metals-tab-posts" class="tab-content" style="display:none">
+          <div class="stats-grid" style="margin-bottom:12px;">
+            <div class="stat-card"><div class="stat-value" id="metals-posts-total">—</div><div class="stat-label">Total Posts</div></div>
+            <div class="stat-card"><div class="stat-value" id="metals-posts-updated-today">—</div><div class="stat-label">Updated Today</div></div>
+            <div class="stat-card"><div class="stat-value" id="metals-posts-failed">—</div><div class="stat-label">Failed</div></div>
+          </div>
+          <div class="filter-row">
+            <select id="metals-posts-type-filter" onchange="loadMetalsPosts()">
+              <option value="">All Metals</option>
+              <option value="gold">Gold</option>
+              <option value="silver">Silver</option>
+              <option value="platinum">Platinum</option>
+            </select>
+            <select id="metals-posts-tier-filter" onchange="loadMetalsPosts()">
+              <option value="">All Tiers</option>
+              <option value="city">City</option>
+              <option value="state">State</option>
+              <option value="national">National</option>
+            </select>
+            <select id="metals-posts-status-filter" onchange="loadMetalsPosts()">
+              <option value="">All Actions</option>
+              <option value="created">Created</option>
+              <option value="updated">Updated</option>
+              <option value="failed">Failed</option>
+            </select>
+            <input id="metals-posts-search" placeholder="Search name..." oninput="loadMetalsPosts()">
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table">
+              <thead><tr><th>Name</th><th>Metal</th><th>Tier</th><th>WP Status</th><th>Action</th><th>Updated</th><th>Actions</th></tr></thead>
+              <tbody id="metals-posts-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="metals-posts-pagination"></div>
+        </div>
+
+        <!-- Tab 4: Fetch Log -->
+        <div id="metals-tab-logs" class="tab-content" style="display:none">
+          <div style="overflow-x:auto;">
+            <table class="data-table">
+              <thead><tr><th>Time</th><th>Type</th><th>OK</th><th>Duration</th><th>Details</th></tr></thead>
+              <tbody id="metals-fetch-log-tbody"><tr><td colspan="5" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 5: Data Quality -->
+        <div id="metals-tab-quality" class="tab-content" style="display:none">
+          <div class="card" style="margin-bottom:16px;">
+            <div class="card-title">State Coverage — Today</div>
+            <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
               <table class="data-table">
-                <thead><tr><th>City</th><th>24K</th><th>22K</th><th>18K</th><th>1g</th></tr></thead>
-                <tbody id="metals-cities-tbody"><tr><td colspan="5" style="text-align:center;color:#888">Loading...</td></tr></tbody>
+                <thead><tr><th>State</th><th>Total</th><th>Fetched</th><th>Coverage</th><th style="width:120px">Bar</th></tr></thead>
+                <tbody id="metals-coverage-tbody"></tbody>
               </table>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="card">
+              <div class="card-title">⚠️ Stale Cities (3+ days)</div>
+              <div id="metals-stale-cities" style="padding:8px;font-size:13px;"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Price Source Breakdown</div>
+              <canvas id="metals-source-chart" height="200"></canvas>
             </div>
           </div>
         </div>
@@ -925,6 +1119,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=14"></script>
+  <script src="/js/dashboard.js?v=15"></script>
 </body>
 </html>

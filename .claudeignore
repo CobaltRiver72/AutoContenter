@@ -1,0 +1,10 @@
+node_modules/
+*.zip
+*.log
+*.lock
+data/
+public/css/
+public/js/
+.git/
+ecosystem.config.js
+package-lock.json
