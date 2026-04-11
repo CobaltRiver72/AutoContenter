@@ -132,7 +132,7 @@
 {"city_name":"Siliguri","state":"West Bengal","api1_name":null,"api2_name":"Siliguri"},
 {"city_name":"Howrah","state":"West Bengal","api1_name":null,"api2_name":"Howrah"},
 {"city_name":"Pondicherry","state":"Puducherry","api1_name":"PONDICHERRY","api2_name":"Pondicherry"},
-{"city_name":"Port Blair","state":"Andaman and Nicobar","api1_name":null,"api2_name":"Port blair"},
+{"city_name":"Port Blair","state":"Andaman and Nicobar Islands","api1_name":null,"api2_name":"Port Blair"},
 {"city_name":"Itanagar","state":"Arunachal Pradesh","api1_name":null,"api2_name":null},
 {"city_name":"Bokaro","state":"Jharkhand","api1_name":null,"api2_name":"Bokaro"}
 ]

@@ -567,6 +567,73 @@ function runMigrations() {
       } catch (e) { /* silent */ }
     }
 
+    // ─── Fuel api3_city backfill migration ──────────────────────────────
+    // Updates api3_city for cities that were seeded before api3_name overrides
+    // were added to fuel-cities.json (district/alt-name API mappings).
+    (function backfillFuelApi3() {
+      const api3Fixes = [
+        ['Amaravati',       'Guntur'],
+        ['Kakinada',        'East Godavari'],
+        ['Rajahmundry',     'East Godavari'],
+        ['Tirupati',        'Chittoor'],
+        ['Vijayawada',      'Krishna'],
+        ['Visakhapatnam',   'Vishakhapatnam'],
+        ['Itanagar',        'Papumpare'],
+        ['Guwahati',        'Kamrup Metro'],
+        ['Silchar',         'Cachar'],
+        ['Bhilai',          'Durg'],
+        ['Panaji',          'North Goa'],
+        ['Margao',          'South Goa'],
+        ['Gandhinagar',     'Gandhi Nagar'],
+        ['Gurugram',        'Gurgaon'],
+        ['Dharamshala',     'Kangra'],
+        ['Jamshedpur',      'East Singhbhum'],
+        ['Hubli',           'Dharwad'],
+        ['Kochi',           'Ernakulam'],
+        ['Mumbai',          'Mumbai City'],
+        ['Imphal',          'East Imphal'],
+        ['Shillong',        'East Khasi Hills'],
+        ['Bhubaneswar',     'Khordha'],
+        ['Rourkela',        'Sundargarh'],
+        ['Tiruchirappalli', 'Tiruchchirappalli'],
+        ['Karimnagar',      'Karim Nagar'],
+        ['Agartala',        'West Tripura'],
+        ['Kanpur',          'Kanpur Urban'],
+        ['Noida',           'Gautam Budh Nagar'],
+        ['Prayagraj',       'Allahabad'],
+        ['Asansol',         'Paschim Bardhaman'],
+        ['Durgapur',        'Paschim Bardhaman'],
+        ['Siliguri',        'Darjeeling'],
+        ['Port Blair',      'South Andaman'],
+        ['Delhi',           'New Delhi'],
+        ['Puducherry',      'Pondicherry'],
+      ];
+      try {
+        var upd = db.prepare(
+          "UPDATE fuel_cities SET api3_city = ? WHERE city_name = ? AND (api3_city IS NULL OR api3_city = '')"
+        );
+        var changed = 0;
+        for (var i = 0; i < api3Fixes.length; i++) {
+          var r = upd.run(api3Fixes[i][1], api3Fixes[i][0]);
+          changed += r.changes;
+        }
+        if (changed > 0) {
+          console.log('[db] Backfilled api3_city for ' + changed + ' fuel cities');
+        }
+      } catch (e) { /* fuel_cities may not exist yet — seeding runs later */ }
+
+      // Fix metals Port Blair state name if already seeded
+      try {
+        var metFix = db.prepare(
+          "UPDATE metals_cities SET state = 'Andaman and Nicobar Islands' WHERE city_name = 'Port Blair' AND state = 'Andaman and Nicobar'"
+        );
+        var mf = metFix.run();
+        if (mf.changes > 0) {
+          console.log('[db] Fixed metals Port Blair state name');
+        }
+      } catch (e) { /* metals_cities may not exist yet */ }
+    })();
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);

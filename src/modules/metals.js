@@ -200,13 +200,23 @@ class MetalsModule extends EventEmitter {
     const today = new Date().toISOString().slice(0, 10);
     let count = 0;
 
+    // Prepare lookup: API name (e.g. "GURGAON") → our canonical city_name (e.g. "Gurugram")
+    const cityLookup = this.db.prepare(
+      'SELECT city_name FROM metals_cities WHERE UPPER(api1_name) = UPPER(?)'
+    );
+
     for (const cityData of data) {
-      const cityName = cityData.city || cityData.City || cityData.city_name;
-      if (!cityName) continue;
+      const apiName = cityData.city || cityData.City || cityData.city_name;
+      if (!apiName) continue;
+
+      // Map to our canonical city_name via api1_name — skip if not in our list
+      const localRow = cityLookup.get(apiName.trim());
+      if (!localRow) continue;
+      const storeName = localRow.city_name;
 
       const prices = this.extractPrices(cityData);
       if (prices.price_24k || prices.price_1g) {
-        this.upsertPrice(cityName, metal, today, prices, 'api1');
+        this.upsertPrice(storeName, metal, today, prices, 'api1');
         count++;
       }
     }

@@ -117,7 +117,13 @@ class FuelModule extends EventEmitter {
 
     const insertMany = this.db.transaction((rows) => {
       for (const c of rows) {
-        const api3City = api3Set.has(c.city_name.toLowerCase()) ? c.city_name : null;
+        // Use explicit api3_name override if present, else try city_name against api3 list
+        let api3City = null;
+        if (c.api3_name) {
+          api3City = api3Set.has(c.api3_name.toLowerCase()) ? c.api3_name : null;
+        } else {
+          api3City = api3Set.has(c.city_name.toLowerCase()) ? c.city_name : null;
+        }
         stmt.run(c.city_name, c.state, c.is_ut || 0, c.region || null, api3City, c.is_top_city || 0);
       }
     });
