@@ -176,6 +176,7 @@ var _db = null;
 function loadRuntimeOverrides(db) {
   try {
     _db = db;
+    seedSettingsFromEnv(db);
     var rows = db.prepare('SELECT key, value FROM settings').all();
     if (!rows || rows.length === 0) return;
 
@@ -237,6 +238,49 @@ function loadRuntimeOverrides(db) {
     _frozen = Object.freeze(JSON.parse(JSON.stringify(_config)));
   } catch (err) {
     console.error('[config] Failed to load runtime overrides:', err.message);
+  }
+}
+
+/**
+ * Seed settings table from environment variables on first boot.
+ * Only writes a key if it does NOT already exist in the settings table.
+ */
+function seedSettingsFromEnv(db) {
+  var ENV_KEYS = [
+    'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY',
+    'WP_URL', 'WP_SITE_URL', 'WP_USERNAME', 'WP_APP_PASSWORD',
+    'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS',
+    'INFRANODUS_API_KEY', 'JINA_API_KEY',
+  ];
+
+  var stmt = db.prepare(
+    "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))"
+  );
+
+  var seeded = [];
+  for (var i = 0; i < ENV_KEYS.length; i++) {
+    var key = ENV_KEYS[i];
+    var val = process.env[key];
+    if (val) {
+      var existing = db.prepare('SELECT 1 FROM settings WHERE key = ?').get(key);
+      if (!existing) {
+        stmt.run(key, val);
+        seeded.push(key);
+      }
+    }
+  }
+
+  // If WP_URL is set in env but WP_SITE_URL isn't in settings, seed WP_SITE_URL too
+  if (process.env.WP_URL) {
+    var wpSiteExisting = db.prepare("SELECT 1 FROM settings WHERE key = 'WP_SITE_URL'").get();
+    if (!wpSiteExisting) {
+      stmt.run('WP_SITE_URL', process.env.WP_URL);
+      seeded.push('WP_SITE_URL (from WP_URL)');
+    }
+  }
+
+  if (seeded.length > 0) {
+    console.log('[config] Seeded settings from env: ' + seeded.join(', '));
   }
 }
 
@@ -369,6 +413,7 @@ function reload() {
 module.exports = {
   getConfig: getConfig,
   loadRuntimeOverrides: loadRuntimeOverrides,
+  seedSettingsFromEnv: seedSettingsFromEnv,
   get: get,
   set: set,
   isEnabled: isEnabled,

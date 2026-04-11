@@ -119,7 +119,9 @@ class MetalsModule extends EventEmitter {
    */
   _getApiKey() {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
-    return row ? row.value : null;
+    if (row && row.value) return row.value;
+    if (process.env.METALS_RAPIDAPI_KEY) return process.env.METALS_RAPIDAPI_KEY;
+    return null;
   }
 
   /**
@@ -135,31 +137,59 @@ class MetalsModule extends EventEmitter {
     }
 
     const results = {};
+    const errors = {};
     let totalOk = 0;
+    let totalFail = 0;
+
     for (const metal of ['gold', 'silver', 'platinum']) {
       try {
         const count = await this.fetchBulk(metal, apiKey);
         results[metal] = count;
         totalOk += count;
+        this.logger.info(MODULE, '  ' + metal + ': ' + count + ' cities fetched');
       } catch (err) {
         this.logger.error(MODULE, 'fetchBulk(' + metal + ') failed: ' + err.message);
         results[metal] = 0;
+        errors[metal] = err.message;
+        totalFail++;
+
+        if (err.message.includes('401') || err.message.includes('403')) {
+          this.logger.error(MODULE, 'API key rejected (401/403). Stopping metals fetch.');
+          for (const remaining of ['gold', 'silver', 'platinum']) {
+            if (results[remaining] === undefined) {
+              results[remaining] = 0;
+              errors[remaining] = 'Skipped due to auth failure';
+            }
+          }
+          break;
+        }
+
+        if (err.message.includes('429')) {
+          this.logger.warn(MODULE, 'Rate limited (429). Waiting 5 seconds...');
+          await new Promise(r => setTimeout(r, 5000));
+        }
       }
+
+      await new Promise(r => setTimeout(r, 500));
     }
 
     const duration = Date.now() - startTime;
     this.stats.lastFetchAt = new Date().toISOString();
+    this.stats.totalFetched += totalOk;
 
     try {
       this.db.prepare(
-        'INSERT INTO fetch_log (module, fetch_type, cities_ok, cities_fail, cities_skipped, duration_ms, details) VALUES (?, ?, ?, 0, 0, ?, ?)'
-      ).run('metals', isManual ? 'manual' : 'scheduled', totalOk, duration,
-        JSON.stringify({ perMetal: results }));
+        'INSERT INTO fetch_log (module, fetch_type, cities_ok, cities_fail, cities_skipped, duration_ms, details) VALUES (?, ?, ?, ?, 0, ?, ?)'
+      ).run('metals', isManual ? 'manual' : 'scheduled', totalOk, totalFail, duration,
+        JSON.stringify({
+          perMetal: results,
+          errors: Object.keys(errors).length > 0 ? errors : undefined,
+        }));
     } catch (e) {
       this.logger.warn(MODULE, 'fetch_log insert failed: ' + e.message);
     }
 
-    this.logger.info(MODULE, 'Daily metals fetch complete: ' + JSON.stringify(results));
+    this.logger.info(MODULE, 'Metals fetch complete: ' + JSON.stringify(results) + ' (' + Math.round(duration / 1000) + 's)');
     return results;
   }
 
@@ -176,19 +206,28 @@ class MetalsModule extends EventEmitter {
     if (!endpoint) return 0;
 
     const host = 'gold-silver-platinum-price-in-india.p.rapidapi.com';
-    const res = await fetch('https://' + host + '/' + endpoint, {
-      headers: {
-        'x-rapidapi-host': host,
-        'x-rapidapi-key': apiKey,
-      },
-    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    let res;
+    try {
+      res = await fetch('https://' + host + '/' + endpoint, {
+        headers: {
+          'x-rapidapi-host': host,
+          'x-rapidapi-key': apiKey,
+        },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) {
       throw new Error('API returned ' + res.status);
     }
 
     const raw = await res.json();
-    // API returns { data: { prices: [...] } } or a flat array
     const data = Array.isArray(raw) ? raw
       : (raw && raw.data && Array.isArray(raw.data.prices)) ? raw.data.prices
       : (raw && Array.isArray(raw.data)) ? raw.data
@@ -200,24 +239,26 @@ class MetalsModule extends EventEmitter {
     const today = new Date().toISOString().slice(0, 10);
     let count = 0;
 
-    // Prepare lookup: API name (e.g. "GURGAON") → our canonical city_name (e.g. "Gurugram")
     const cityLookup = this.db.prepare(
       'SELECT city_name FROM metals_cities WHERE UPPER(api1_name) = UPPER(?)'
     );
 
     for (const cityData of data) {
-      const apiName = cityData.city || cityData.City || cityData.city_name;
-      if (!apiName) continue;
+      try {
+        const apiName = cityData.city || cityData.City || cityData.city_name;
+        if (!apiName) continue;
 
-      // Map to our canonical city_name via api1_name — skip if not in our list
-      const localRow = cityLookup.get(apiName.trim());
-      if (!localRow) continue;
-      const storeName = localRow.city_name;
+        const localRow = cityLookup.get(apiName.trim());
+        if (!localRow) continue;
+        const storeName = localRow.city_name;
 
-      const prices = this.extractPrices(cityData);
-      if (prices.price_24k || prices.price_1g) {
-        this.upsertPrice(storeName, metal, today, prices, 'api1');
-        count++;
+        const prices = this.extractPrices(cityData);
+        if (prices.price_24k || prices.price_1g) {
+          this.upsertPrice(storeName, metal, today, prices, 'api1');
+          count++;
+        }
+      } catch (e) {
+        this.logger.warn(MODULE, 'Failed to process city entry for ' + metal + ': ' + e.message);
       }
     }
 

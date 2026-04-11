@@ -998,13 +998,6 @@ function createApiRouter(deps) {
   router.get('/diagnostics', function (req, res) {
     var checks = [];
 
-    // API keys
-    var fuelKey = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
-    checks.push({ name: 'Fuel API Key', ok: !!(fuelKey && fuelKey.value), detail: fuelKey && fuelKey.value ? 'Set (' + fuelKey.value.length + ' chars)' : 'NOT SET' });
-
-    var metalsKey = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
-    checks.push({ name: 'Metals API Key', ok: !!(metalsKey && metalsKey.value), detail: metalsKey && metalsKey.value ? 'Set (' + metalsKey.value.length + ' chars)' : 'NOT SET' });
-
     // Cities seeded
     var fuelCities = db.prepare('SELECT COUNT(*) AS c FROM fuel_cities').get().c;
     checks.push({ name: 'Fuel Cities Seeded', ok: fuelCities > 0, detail: fuelCities + ' cities' });
@@ -1022,12 +1015,36 @@ function createApiRouter(deps) {
     var metalsToday = db.prepare("SELECT COUNT(*) AS c FROM metals_prices WHERE price_date = date('now')").get().c;
     checks.push({ name: 'Metals Prices Today', ok: metalsToday > 0, detail: metalsToday + ' rows' });
 
+    // Fuel API key — check both DB settings and env var fallback
+    var fuelKeyDb = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
+    var fuelKeyEnv = process.env.FUEL_RAPIDAPI_KEY;
+    var fuelKeyVal = (fuelKeyDb && fuelKeyDb.value) || fuelKeyEnv || '';
+    checks.push({
+      name: 'Fuel API Key',
+      ok: !!fuelKeyVal,
+      detail: fuelKeyDb && fuelKeyDb.value
+        ? 'settings (' + fuelKeyDb.value.length + ' chars)'
+        : fuelKeyEnv ? 'env var (' + fuelKeyEnv.length + ' chars)' : 'NOT SET'
+    });
+
+    // Metals API key — same pattern
+    var metalsKeyDb = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
+    var metalsKeyEnv = process.env.METALS_RAPIDAPI_KEY;
+    var metalsKeyVal = (metalsKeyDb && metalsKeyDb.value) || metalsKeyEnv || '';
+    checks.push({
+      name: 'Metals API Key',
+      ok: !!metalsKeyVal,
+      detail: metalsKeyDb && metalsKeyDb.value
+        ? 'settings (' + metalsKeyDb.value.length + ' chars)'
+        : metalsKeyEnv ? 'env var (' + metalsKeyEnv.length + ' chars)' : 'NOT SET'
+    });
+
     // WP credentials — check config (merges DB + env, aliases WP_URL ↔ WP_SITE_URL)
     var diagConfig = getConfig();
     var wpUrlVal = diagConfig.WP_SITE_URL || diagConfig.WP_URL || '';
     var wpUserVal = diagConfig.WP_USERNAME || '';
     var wpPassVal = diagConfig.WP_APP_PASSWORD || '';
-    checks.push({ name: 'WP Credentials', ok: !!(wpUrlVal && wpUserVal && wpPassVal), detail: wpUrlVal || 'NOT SET' });
+    checks.push({ name: 'WP Credentials', ok: !!(wpUrlVal && wpUserVal && wpPassVal), detail: wpUrlVal || 'NOT SET (need WP_SITE_URL or WP_URL)' });
 
     // Last fetch
     var lastFetch = db.prepare('SELECT * FROM fetch_log ORDER BY created_at DESC LIMIT 1').get();

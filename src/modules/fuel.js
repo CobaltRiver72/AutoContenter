@@ -137,7 +137,9 @@ class FuelModule extends EventEmitter {
    */
   _getApiKey() {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
-    return row ? row.value : null;
+    if (row && row.value) return row.value;
+    if (process.env.FUEL_RAPIDAPI_KEY) return process.env.FUEL_RAPIDAPI_KEY;
+    return null;
   }
 
   /**
@@ -153,25 +155,75 @@ class FuelModule extends EventEmitter {
     }
 
     const cities = this.db.prepare('SELECT * FROM fuel_cities WHERE is_enabled = 1 AND api3_city IS NOT NULL').all();
+    if (cities.length === 0) {
+      this.logger.warn(MODULE, 'No enabled cities with API mapping found.');
+      return { ok: 0, fail: 0, total: 0, skipped: false };
+    }
+
     let ok = 0;
     let fail = 0;
+    let skipped = 0;
     const failedCities = [];
+    let consecutiveFails = 0;
+    const MAX_CONSECUTIVE_FAILS = 10;
 
+    // Group by state for organized fetching
+    const byState = {};
     for (const city of cities) {
-      try {
-        await this.fetchCityPrice(city, apiKey);
-        ok++;
-      } catch (err) {
-        fail++;
-        failedCities.push(city.city_name);
-        this.logger.warn(MODULE, 'Fetch failed for ' + city.city_name + ': ' + err.message);
+      if (!byState[city.state]) byState[city.state] = [];
+      byState[city.state].push(city);
+    }
+
+    const states = Object.keys(byState).sort();
+    this.logger.info(MODULE, 'Fetching ' + cities.length + ' cities across ' + states.length + ' states');
+
+    let authFailed = false;
+
+    for (const state of states) {
+      if (authFailed) {
+        skipped += byState[state].length;
+        continue;
       }
-      // 100ms delay between cities
-      await new Promise(r => setTimeout(r, 100));
+
+      for (const city of byState[state]) {
+        if (consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
+          skipped++;
+          continue;
+        }
+
+        try {
+          await this.fetchCityPrice(city, apiKey);
+          ok++;
+          consecutiveFails = 0;
+        } catch (err) {
+          fail++;
+          consecutiveFails++;
+          failedCities.push(city.city_name + ': ' + err.message.slice(0, 60));
+          this.logger.warn(MODULE, 'Fetch failed [' + city.city_name + ']: ' + err.message);
+
+          if (err.message.includes('401') || err.message.includes('403')) {
+            this.logger.error(MODULE, 'API key rejected. Stopping fetch.');
+            authFailed = true;
+            skipped = cities.length - ok - fail;
+            break;
+          }
+          if (err.message.includes('429')) {
+            await new Promise(r => setTimeout(r, 5000));
+          }
+        }
+
+        if (!authFailed) {
+          await new Promise(r => setTimeout(r, 200));
+        }
+      }
+    }
+
+    if (skipped > 0) {
+      this.logger.warn(MODULE, skipped + ' cities skipped (consecutive failures or auth error)');
     }
 
     // Derive missing prices from state averages
-    this.deriveMissing();
+    try { this.deriveMissing(); } catch (e) { /* non-fatal */ }
 
     const duration = Date.now() - startTime;
     this.stats.totalFetched += ok;
@@ -181,15 +233,15 @@ class FuelModule extends EventEmitter {
 
     try {
       this.db.prepare(
-        'INSERT INTO fetch_log (module, fetch_type, cities_ok, cities_fail, cities_skipped, duration_ms, details) VALUES (?, ?, ?, ?, 0, ?, ?)'
-      ).run('fuel', isManual ? 'manual' : 'scheduled', ok, fail, duration,
-        JSON.stringify({ failedCities: failedCities.slice(0, 20) }));
+        'INSERT INTO fetch_log (module, fetch_type, cities_ok, cities_fail, cities_skipped, duration_ms, details) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run('fuel', isManual ? 'manual' : 'scheduled', ok, fail, skipped, duration,
+        JSON.stringify({ failedCities: failedCities.slice(0, 30), stateCount: states.length }));
     } catch (e) {
       this.logger.warn(MODULE, 'fetch_log insert failed: ' + e.message);
     }
 
-    this.logger.info(MODULE, 'Daily fetch complete: ' + ok + ' ok, ' + fail + ' fail out of ' + cities.length);
-    return { ok, fail, total: cities.length };
+    this.logger.info(MODULE, 'Fetch complete: ' + ok + ' ok, ' + fail + ' fail, ' + skipped + ' skipped / ' + cities.length + ' total (' + Math.round(duration / 1000) + 's)');
+    return { ok, fail, skipped, total: cities.length, duration };
   }
 
   /**
@@ -204,44 +256,43 @@ class FuelModule extends EventEmitter {
       'city': city.api3_city,
     };
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
     let petrol = null;
     let diesel = null;
     const errors = [];
 
-    // Fetch petrol
     try {
-      const pRes = await fetch('https://' + host + '/petrol_price_india_city_value/', { headers });
-      if (!pRes.ok) {
-        errors.push('Petrol API returned ' + pRes.status);
-      } else {
-        const pData = await pRes.json();
-        const val = Object.values(pData)[0];
-        if (typeof val === 'number' && val >= 30 && val <= 300) {
-          petrol = val;
+      try {
+        const pRes = await fetch('https://' + host + '/petrol_price_india_city_value/', { headers, signal: controller.signal });
+        if (!pRes.ok) {
+          errors.push('Petrol API ' + pRes.status);
         } else {
-          errors.push('Petrol: invalid value ' + JSON.stringify(val));
+          const pData = await pRes.json();
+          const val = Object.values(pData)[0];
+          if (typeof val === 'number' && val >= 30 && val <= 200) petrol = val;
+          else errors.push('Petrol invalid: ' + JSON.stringify(val));
         }
+      } catch (e) {
+        errors.push('Petrol: ' + (e.name === 'AbortError' ? 'timeout 15s' : e.message));
       }
-    } catch (e) {
-      errors.push('Petrol fetch error: ' + e.message);
-    }
 
-    // Fetch diesel
-    try {
-      const dRes = await fetch('https://' + host + '/diesel_price_india_city_value/', { headers });
-      if (!dRes.ok) {
-        errors.push('Diesel API returned ' + dRes.status);
-      } else {
-        const dData = await dRes.json();
-        const val = Object.values(dData)[0];
-        if (typeof val === 'number' && val >= 20 && val <= 300) {
-          diesel = val;
+      try {
+        const dRes = await fetch('https://' + host + '/diesel_price_india_city_value/', { headers, signal: controller.signal });
+        if (!dRes.ok) {
+          errors.push('Diesel API ' + dRes.status);
         } else {
-          errors.push('Diesel: invalid value ' + JSON.stringify(val));
+          const dData = await dRes.json();
+          const val = Object.values(dData)[0];
+          if (typeof val === 'number' && val >= 30 && val <= 200) diesel = val;
+          else errors.push('Diesel invalid: ' + JSON.stringify(val));
         }
+      } catch (e) {
+        errors.push('Diesel: ' + (e.name === 'AbortError' ? 'timeout 15s' : e.message));
       }
-    } catch (e) {
-      errors.push('Diesel fetch error: ' + e.message);
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (errors.length > 0) {
@@ -253,10 +304,7 @@ class FuelModule extends EventEmitter {
       return true;
     }
 
-    // Both failed — throw so runDailyFetch counts it as a failure
-    if (errors.length > 0) {
-      throw new Error(errors.join('; '));
-    }
+    if (errors.length > 0) throw new Error(errors.join('; '));
     return false;
   }
 
