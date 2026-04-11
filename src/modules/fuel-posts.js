@@ -297,6 +297,41 @@ class FuelPostCreator {
   }
 
   // =========================================================================
+  // _buildFuelFaq
+  // =========================================================================
+
+  _buildFuelFaq(cityOrState, petrol, diesel, vatInfo, dateStr) {
+    const faqs = [
+      { q: 'What is the petrol price in ' + cityOrState + ' today?',
+        a: 'The petrol price in ' + cityOrState + ' today is <strong>' + petrol + ' per litre</strong> as on ' + dateStr + '.' },
+      ...(diesel ? [{ q: 'What is the diesel price in ' + cityOrState + ' today?',
+        a: 'The diesel price in ' + cityOrState + ' today is <strong>' + diesel + ' per litre</strong> as on ' + dateStr + '.' }] : []),
+      { q: 'What is VAT on petrol in ' + cityOrState + '?',
+        a: 'The VAT on petrol in ' + cityOrState + ' is <strong>' + vatInfo + '</strong>. In addition, the central government levies excise duty and there are dealer commissions and transportation charges.' },
+      { q: 'When are fuel prices updated in ' + cityOrState + '?',
+        a: 'Petrol and diesel prices in ' + cityOrState + ' are revised at 6:00 AM every day by Indian Oil, HPCL, and BPCL based on international crude oil prices and forex rates.' },
+      { q: 'How can I check today\'s fuel price in ' + cityOrState + '?',
+        a: 'You can check today\'s fuel price in ' + cityOrState + ' on this page \u2014 prices are updated daily at 6 AM. You can also SMS "RSP" to 9224992249 (HPCL) or use the Indian Oil One app.' },
+    ];
+    const items = faqs.map(f =>
+      '<div class="hdf-faq-item" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">' +
+      '<h3 itemprop="name">' + f.q + '</h3>' +
+      '<div itemscope itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">' +
+      '<p itemprop="text">' + f.a + '</p></div></div>'
+    ).join('\n');
+    const jsonld = JSON.stringify({
+      '@context': 'https://schema.org', '@type': 'FAQPage',
+      'mainEntity': faqs.map(f => ({
+        '@type': 'Question', 'name': f.q,
+        'acceptedAnswer': { '@type': 'Answer', 'text': f.a }
+      }))
+    });
+    return '<section class="hdf-faq" itemscope itemtype="https://schema.org/FAQPage">\n' +
+      '<h2>Frequently Asked Questions</h2>\n' + items + '\n</section>\n' +
+      '<script type="application/ld+json">' + jsonld + '</script>';
+  }
+
+  // =========================================================================
   // _buildCityContent
   // =========================================================================
 
@@ -305,83 +340,50 @@ class FuelPostCreator {
     const dateStr = today.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
     const petrol = prices.petrol ? '\u20b9' + prices.petrol.toFixed(2) : 'N/A';
     const diesel = prices.diesel ? '\u20b9' + prices.diesel.toFixed(2) : 'N/A';
-    const cng = prices.cng ? '\u20b9' + prices.cng.toFixed(2) : null;
-    const fuelRows = [
-      ['Petrol', petrol, stateInfo ? (stateInfo.vat || '\u2014') : '\u2014'],
-      ['Diesel', diesel, stateInfo ? (stateInfo.vat || '\u2014') : '\u2014'],
-      ...(cng ? [['CNG', cng, '\u2014']] : []),
-    ];
-    const litreRows = [1, 5, 10, 15, 20, 50].map(l => [
-      l + 'L',
-      prices.petrol ? '\u20b9' + (prices.petrol * l).toFixed(2) : '\u2014',
-      prices.diesel ? '\u20b9' + (prices.diesel * l).toFixed(2) : '\u2014'
-    ]);
-    const faqs = [
-      {
-        q: 'What is the petrol price in ' + city.city_name + ' today (' + dateStr + ')?',
-        a: 'The petrol price in ' + city.city_name + ' today is <strong>' + petrol + ' per litre</strong> as on ' + dateStr + '.'
-      },
-      {
-        q: 'What is the diesel price in ' + city.city_name + ' today?',
-        a: 'The diesel price in ' + city.city_name + ' today is <strong>' + diesel + ' per litre</strong> as on ' + dateStr + '.'
-      },
-      {
-        q: 'Why is petrol price different in ' + city.city_name + ' vs other cities?',
-        a: 'Fuel prices in ' + city.city_name + ' are determined by the base price set by OMCs plus state VAT (' + (stateInfo ? stateInfo.vat : 'varies') + '), local body taxes, freight charges, and dealer commission.'
-      },
-      {
-        q: 'When do fuel prices change in ' + city.city_name + '?',
-        a: 'Petrol and diesel prices in ' + city.city_name + ' are revised at 6:00 AM every day by Indian Oil, HPCL, and BPCL based on international crude oil prices and forex rates.'
-      },
-      {
-        q: 'How to check today\'s fuel price in ' + city.city_name + '?',
-        a: 'You can check today\'s fuel price in ' + city.city_name + ' on HDF News (updated daily), or SMS "RSP" to 9224992249 (HPCL), or use the Indian Oil One app.'
-      }
-    ];
-    const parts = [
-      breadcrumbs([
-        { name: 'Home', url: nationalUrl.replace(/\/[^/]+\/$/, '/') },
-        { name: 'Fuel Prices', url: nationalUrl },
-        { name: city.state_name, url: stateUrl },
-        { name: city.city_name + ' Fuel Price Today' }
-      ]),
-      priceHero({
-        title: 'Petrol & Diesel Price in ' + city.city_name + ' Today (' + dateStr + ')',
-        price: petrol,
-        unit: 'petrol per litre',
-        change: null,
-        direction: 'none',
-        subtitle: 'Updated at 6 AM daily \u00b7 ' + city.city_name + ', ' + city.state_name,
-        pills: [
-          { value: petrol, label: 'Petrol/L' },
-          { value: diesel, label: 'Diesel/L' },
-          ...(cng ? [{ value: cng, label: 'CNG/kg' }] : [])
-        ]
-      }),
-      articleSchema({
-        headline: 'Petrol Diesel Price in ' + city.city_name + ' Today \u2013 ' + dateStr,
-        description: 'Today\'s petrol price in ' + city.city_name + ' is ' + petrol + '/litre and diesel is ' + diesel + '/litre as on ' + dateStr + '.',
-        datePublished: today.toISOString(),
-        publisherName: 'HDF News'
-      }),
+    const vatInfo = stateInfo ? stateInfo.vat : 'varies';
+    const stateNote = stateInfo && stateInfo.note ? stateInfo.note : '';
+
+    return [
+      '<nav class="hdf-breadcrumb" aria-label="Breadcrumb">',
+      '  <a href="/">Home</a><span>\u203a</span>',
+      '  <a href="' + nationalUrl + '">Fuel Prices</a><span>\u203a</span>',
+      '  <a href="' + stateUrl + '">' + city.state_name + '</a><span>\u203a</span>',
+      '  ' + city.city_name + ' Fuel Price Today',
+      '</nav>',
+
+      '<div data-hdf="price-box" data-module="fuel" data-city="' + city.city_name + '">',
+      '  <p><strong>Petrol price in ' + city.city_name + ' today</strong> is <strong>' + petrol + ' per litre</strong> and diesel is <strong>' + diesel + ' per litre</strong> as on ' + dateStr + '.</p>',
+      '</div>',
+
       '<article>',
-      '<section>',
-      '<p style="font-size:15px;line-height:1.8;color:#374151;">The <strong>petrol price in ' + city.city_name + '</strong> today is <strong>' + petrol + ' per litre</strong> and <strong>diesel price in ' + city.city_name + '</strong> is <strong>' + diesel + ' per litre</strong> as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. Prices are revised at 6:00 AM daily by Oil Marketing Companies (OMCs).</p>',
-      sourceBadge('IOCL / HPCL / BPCL \u2014 Oil Marketing Companies'),
-      '</section>',
-      '<section>',
-      styledTable('Fuel Prices in ' + city.city_name + ' \u2014 ' + dateStr, ['Fuel Type', 'Price per Litre/Unit', 'State VAT'], fuelRows, ['45%', '30%', '25%']),
-      '</section>',
-      readAlsoBox('Read Also', 'Petrol & Diesel Price in ' + city.state_name + ' \u2014 All Cities', stateUrl),
-      '<section>',
-      styledTable('Petrol & Diesel Cost Calculator for ' + city.city_name, ['Volume', 'Petrol Cost', 'Diesel Cost'], litreRows, ['33%', '33%', '34%']),
-      infoBox('Prices above are calculated at today\'s ' + city.city_name + ' rates. Actual pump prices may vary by \u00b10.10 due to rounding. Prices include all taxes and dealer commissions.'),
-      '</section>',
-      stateInfo && stateInfo.note ? '<section><h2 style="font-size:20px;font-weight:700;color:#111827;margin-top:28px;">About Fuel Prices in ' + city.state_name + '</h2><p style="font-size:14px;color:#374151;line-height:1.8;">' + city.state_name + ' levies <strong>' + (stateInfo.vat || '\u2014') + '</strong> on fuel. ' + stateInfo.note + '</p></section>' : '',
-      faqSection(faqs),
+
+      '<p>The <strong>petrol price in ' + city.city_name + '</strong> today is <strong>' + petrol + ' per litre</strong> and <strong>diesel price in ' + city.city_name + '</strong> is <strong>' + diesel + ' per litre</strong> as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. Prices are revised at 6:00 AM daily by Oil Marketing Companies (OMCs) based on international crude oil rates.</p>',
+
+      '<span class="hdf-source">\ud83d\udcca Source: IOCL / HPCL / BPCL \u2014 Oil Marketing Companies</span>',
+
+      '<h2>Fuel Prices in ' + city.city_name + ' \u2014 ' + dateStr + '</h2>',
+
+      '<div data-hdf="price-table" data-module="fuel" data-state="' + city.state_name + '">',
+      '  <table class="hdf-table"><caption>Fuel prices in ' + city.state_name + ' cities</caption>',
+      '  <thead><tr><th>City</th><th>Petrol (\u20b9/L)</th><th>Diesel (\u20b9/L)</th></tr></thead>',
+      '  <tbody><tr><td>' + city.city_name + '</td><td>' + petrol + '</td><td>' + diesel + '</td></tr></tbody>',
+      '  </table>',
+      '</div>',
+
+      '<div class="hdf-callout">',
+      '  <div class="hdf-callout-label">Read Also</div>',
+      '  <a href="' + stateUrl + '">Petrol & Diesel Price in ' + city.state_name + ' \u2014 All Cities (' + dateStr + ')</a>',
+      '</div>',
+
+      '<h2>Petrol & Diesel Cost Calculator for ' + city.city_name + '</h2>',
+      '<div class="hdf-info">Fuel prices are calculated at today\'s ' + city.city_name + ' rates. Actual pump prices may vary by \u00b1\u20b90.10. All taxes and dealer commissions are included.</div>',
+
+      stateNote ? '<h2>About Fuel Prices in ' + city.state_name + '</h2><p>' + city.state_name + ' levies <strong>' + vatInfo + '</strong> on fuel. ' + stateNote + '</p>' : '',
+
+      this._buildFuelFaq(city.city_name, petrol, diesel, vatInfo, dateStr),
+
       '</article>'
-    ];
-    return parts.join('\n');
+    ].join('\n').trim();
   }
 
   // =========================================================================
@@ -568,142 +570,89 @@ class FuelPostCreator {
     const dateStr = today.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
     const valid = citiesWithPrices.filter(c => c.prices && (c.prices.petrol || c.prices.diesel));
     const petrolCities = valid.filter(c => c.prices.petrol);
-    const dieselCities = valid.filter(c => c.prices.diesel);
-    const avgPetrol = petrolCities.length ? (petrolCities.reduce((s, c) => s + c.prices.petrol, 0) / petrolCities.length).toFixed(2) : null;
-    const avgDiesel = dieselCities.length ? (dieselCities.reduce((s, c) => s + c.prices.diesel, 0) / dieselCities.length).toFixed(2) : null;
-    const tableRows = valid.sort((a, b) => a.city_name.localeCompare(b.city_name)).map(c => [
-      c.city_name,
-      c.prices.petrol ? '\u20b9' + c.prices.petrol.toFixed(2) : '\u2014',
-      c.prices.diesel ? '\u20b9' + c.prices.diesel.toFixed(2) : '\u2014',
-      c.prices.cng ? '\u20b9' + c.prices.cng.toFixed(2) : '\u2014'
-    ]);
-    const faqs = [
-      {
-        q: 'What is the petrol price in ' + stateName + ' today?',
-        a: 'The average petrol price in ' + stateName + ' today is <strong>\u20b9' + avgPetrol + '/litre</strong> across ' + valid.length + ' cities, as on ' + dateStr + '.'
-      },
-      {
-        q: 'What is VAT on petrol in ' + stateName + '?',
-        a: stateInfo ? stateName + ' charges ' + stateInfo.vat + ' on petrol and diesel.' : 'Fuel VAT rates vary in ' + stateName + '. Check the state\'s commercial tax department for the latest rates.'
-      },
-      {
-        q: 'Which city has the cheapest petrol in ' + stateName + '?',
-        a: 'Petrol prices across ' + stateName + ' are generally uniform as they depend on the same state VAT rate. Minor differences can occur due to local body taxes.'
-      }
-    ];
+    const avgPetrol = petrolCities.length
+      ? (petrolCities.reduce((s, c) => s + c.prices.petrol, 0) / petrolCities.length).toFixed(2)
+      : null;
+    const vatInfo = stateInfo ? stateInfo.vat : 'varies';
+
     return [
-      breadcrumbs([
-        { name: 'Home', url: nationalUrl.replace(/\/[^/]+\/$/, '/') },
-        { name: 'Fuel Prices', url: nationalUrl },
-        { name: stateName + ' Fuel Prices Today' }
-      ]),
-      priceHero({
-        title: 'Petrol & Diesel Price in ' + stateName + ' Today (' + dateStr + ')',
-        price: avgPetrol ? '\u20b9' + avgPetrol : 'N/A',
-        unit: 'avg petrol per litre',
-        change: null,
-        direction: 'none',
-        subtitle: valid.length + ' cities tracked in ' + stateName + ' \u00b7 Updated 6 AM daily',
-        pills: [
-          { value: avgPetrol ? '\u20b9' + avgPetrol : '\u2014', label: 'Avg Petrol/L' },
-          { value: avgDiesel ? '\u20b9' + avgDiesel : '\u2014', label: 'Avg Diesel/L' },
-          { value: valid.length, label: 'cities' }
-        ]
-      }),
-      articleSchema({
-        headline: 'Petrol Diesel Price in ' + stateName + ' Today \u2013 ' + dateStr,
-        description: 'Today\'s average petrol price in ' + stateName + ' is \u20b9' + avgPetrol + '/litre. Check fuel rates in all ' + valid.length + ' cities in ' + stateName + ' on ' + dateStr + '.',
-        datePublished: today.toISOString(),
-        publisherName: 'HDF News'
-      }),
+      '<nav class="hdf-breadcrumb" aria-label="Breadcrumb">',
+      '  <a href="/">Home</a><span>\u203a</span>',
+      '  <a href="' + nationalUrl + '">Fuel Prices</a><span>\u203a</span>',
+      '  ' + stateName + ' Fuel Prices Today',
+      '</nav>',
+
+      '<div data-hdf="national" data-module="fuel">',
+      '  <p>Average <strong>petrol price in ' + stateName + '</strong> today is ' + (avgPetrol ? '<strong>\u20b9' + avgPetrol + ' per litre</strong>' : 'loading...') + ' as on ' + dateStr + '.</p>',
+      '</div>',
+
       '<article>',
-      '<section>',
-      '<p style="font-size:15px;line-height:1.8;color:#374151;">The average <strong>petrol price in ' + stateName + '</strong> today is <strong>\u20b9' + avgPetrol + ' per litre</strong> and diesel is <strong>\u20b9' + avgDiesel + ' per litre</strong> as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. We track live fuel prices in <strong>' + valid.length + ' cities across ' + stateName + '</strong>.</p>',
-      sourceBadge('IOCL / HPCL / BPCL \u2014 Oil Marketing Companies'),
-      '</section>',
-      readAlsoBox('See Also', 'Petrol & Diesel Price in India Today \u2014 National Rates', nationalUrl),
-      '<section>',
-      styledTable('Petrol & Diesel Price in All Cities of ' + stateName + ' \u2014 ' + dateStr, ['City', 'Petrol (\u20b9/L)', 'Diesel (\u20b9/L)', 'CNG (\u20b9/kg)'], tableRows, ['40%', '20%', '20%', '20%']),
-      '</section>',
-      faqSection(faqs),
+
+      '<p>The average <strong>petrol price in ' + stateName + '</strong> today is ' + (avgPetrol ? '<strong>\u20b9' + avgPetrol + ' per litre</strong>' : 'being updated') + ' as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. We track live fuel prices in <strong>' + valid.length + ' cities across ' + stateName + '</strong>. ' + stateName + ' levies <strong>' + vatInfo + '</strong> on fuel.</p>',
+
+      '<span class="hdf-source">\ud83d\udcca Source: IOCL / HPCL / BPCL \u2014 Oil Marketing Companies</span>',
+
+      '<h2>Petrol & Diesel Price in All Cities of ' + stateName + ' \u2014 ' + dateStr + '</h2>',
+
+      '<div data-hdf="price-table" data-module="fuel" data-state="' + stateName + '">',
+      '  <table class="hdf-table"><caption>Fuel prices in cities of ' + stateName + '</caption>',
+      '  <thead><tr><th>City</th><th>Petrol (\u20b9/L)</th><th>Diesel (\u20b9/L)</th></tr></thead>',
+      '  <tbody>',
+      valid.slice(0, 10).map(c => '    <tr><td>' + c.city_name + '</td><td>' + (c.prices.petrol ? '\u20b9' + c.prices.petrol.toFixed(2) : '\u2014') + '</td><td>' + (c.prices.diesel ? '\u20b9' + c.prices.diesel.toFixed(2) : '\u2014') + '</td></tr>').join('\n'),
+      '  </tbody></table>',
+      '</div>',
+
+      '<div class="hdf-callout">',
+      '  <div class="hdf-callout-label">See Also</div>',
+      '  <a href="' + nationalUrl + '">Petrol & Diesel Price in India Today \u2014 National Rates</a>',
+      '</div>',
+
+      '<h2>VAT & Taxes on Fuel in ' + stateName + '</h2>',
+      '<p>' + stateName + ' levies <strong>' + vatInfo + '</strong> on petrol and diesel. In addition to state VAT, the central government levies excise duty. The final retail price includes dealer commission (~\u20b92\u20134/L) and transportation charges that vary by city.</p>',
+
+      this._buildFuelFaq(stateName, avgPetrol ? '\u20b9' + avgPetrol : 'N/A', null, vatInfo, dateStr),
+
       '</article>'
-    ].join('\n');
+    ].join('\n').trim();
   }
 
   _buildNationalContent(allCitiesWithPrices) {
     const today = new Date();
     const dateStr = today.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
     const valid = allCitiesWithPrices.filter(c => c.prices && c.prices.petrol);
+    const avgPetrol = valid.length
+      ? (valid.reduce((s, c) => s + c.prices.petrol, 0) / valid.length).toFixed(2)
+      : null;
     const validDiesel = allCitiesWithPrices.filter(c => c.prices && c.prices.diesel);
-    const avgPetrol = valid.length ? (valid.reduce((s, c) => s + c.prices.petrol, 0) / valid.length).toFixed(2) : null;
-    const avgDiesel = validDiesel.length ? (validDiesel.reduce((s, c) => s + c.prices.diesel, 0) / validDiesel.length).toFixed(2) : null;
+    const avgDiesel = validDiesel.length
+      ? (validDiesel.reduce((s, c) => s + c.prices.diesel, 0) / validDiesel.length).toFixed(2)
+      : null;
     const stateCount = [...new Set(valid.map(c => c.state_name))].filter(Boolean).length;
-    const byState = {};
-    valid.forEach(c => {
-      if (!byState[c.state_name]) byState[c.state_name] = { petrol: [], diesel: [], cities: 0 };
-      byState[c.state_name].petrol.push(c.prices.petrol);
-      if (c.prices.diesel) byState[c.state_name].diesel.push(c.prices.diesel);
-      byState[c.state_name].cities++;
-    });
-    const stateRows = Object.entries(byState).sort((a, b) => a[0].localeCompare(b[0])).map(([state, data]) => {
-      const avg = (data.petrol.reduce((s, p) => s + p, 0) / data.petrol.length).toFixed(2);
-      const avgD = data.diesel.length ? (data.diesel.reduce((s, p) => s + p, 0) / data.diesel.length).toFixed(2) : '\u2014';
-      return [state, '\u20b9' + avg, '\u20b9' + avgD, data.cities.toString()];
-    });
-    const faqs = [
-      {
-        q: 'What is the petrol price in India today (' + dateStr + ')?',
-        a: 'The national average petrol price in India today is <strong>\u20b9' + avgPetrol + ' per litre</strong> across ' + valid.length + ' cities, as on ' + dateStr + '.'
-      },
-      {
-        q: 'What is the diesel price in India today?',
-        a: 'The national average diesel price in India today is <strong>\u20b9' + avgDiesel + ' per litre</strong> across major cities, as on ' + dateStr + '.'
-      },
-      {
-        q: 'Why do petrol prices differ across Indian states?',
-        a: 'Petrol prices vary across states due to different VAT rates, local body taxes, and freight charges. States like Rajasthan and Maharashtra have higher VAT, leading to higher pump prices.'
-      },
-      {
-        q: 'When are fuel prices updated in India?',
-        a: 'Oil Marketing Companies (IOCL, HPCL, BPCL) revise petrol and diesel prices at 6:00 AM IST every day, based on the 15-day average of international crude oil prices and USD/INR rates.'
-      },
-      {
-        q: 'Which state has the cheapest petrol in India?',
-        a: 'States with lower VAT rates like Goa, Andaman &amp; Nicobar Islands, and some northeastern states tend to have cheaper petrol. The difference can be \u20b95\u2013\u20b915 per litre compared to high-VAT states.'
-      }
-    ];
+
     return [
-      priceHero({
-        title: 'Petrol & Diesel Price in India Today (' + dateStr + ')',
-        price: avgPetrol ? '\u20b9' + avgPetrol : 'N/A',
-        unit: 'avg petrol per litre',
-        change: null,
-        direction: 'none',
-        subtitle: valid.length + ' cities \u00b7 ' + stateCount + ' states tracked \u00b7 Updated 6 AM IST daily',
-        pills: [
-          { value: avgPetrol ? '\u20b9' + avgPetrol : '\u2014', label: 'Avg Petrol/L' },
-          { value: avgDiesel ? '\u20b9' + avgDiesel : '\u2014', label: 'Avg Diesel/L' },
-          { value: valid.length, label: 'cities' },
-          { value: stateCount, label: 'states' }
-        ]
-      }),
-      articleSchema({
-        headline: 'Petrol Diesel Price in India Today \u2013 ' + dateStr,
-        description: 'Today\'s national average petrol price in India is \u20b9' + avgPetrol + '/litre. Check state-wise and city-wise fuel prices across ' + valid.length + ' cities and ' + stateCount + ' states.',
-        datePublished: today.toISOString(),
-        publisherName: 'HDF News'
-      }),
+      '<div data-hdf="national" data-module="fuel">',
+      '  <p><strong>Petrol price in India today</strong> (national average) is ' + (avgPetrol ? '<strong>\u20b9' + avgPetrol + ' per litre</strong>' : 'loading...') + ' and diesel is ' + (avgDiesel ? '<strong>\u20b9' + avgDiesel + ' per litre</strong>' : 'loading...') + ' as on ' + dateStr + '.</p>',
+      '</div>',
+
       '<article>',
-      '<section>',
-      '<p style="font-size:15px;line-height:1.8;color:#374151;">The national average <strong>petrol price in India</strong> today is <strong>\u20b9' + avgPetrol + ' per litre</strong> and <strong>diesel price</strong> is <strong>\u20b9' + avgDiesel + ' per litre</strong> as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. We track live fuel rates across <strong>' + valid.length + ' cities in ' + stateCount + ' states</strong>.</p>',
-      sourceBadge('IOCL / HPCL / BPCL \u2014 Oil Marketing Companies'),
-      '</section>',
-      '<section>',
-      styledTable('State-wise Petrol & Diesel Price in India \u2014 ' + dateStr, ['State', 'Avg Petrol (\u20b9/L)', 'Avg Diesel (\u20b9/L)', 'Cities Tracked'], stateRows, ['40%', '20%', '20%', '20%']),
-      '</section>',
-      faqSection(faqs),
+
+      '<p>The national average <strong>petrol price in India</strong> today is ' + (avgPetrol ? '<strong>\u20b9' + avgPetrol + ' per litre</strong>' : 'being updated') + ' and <strong>diesel price</strong> is ' + (avgDiesel ? '<strong>\u20b9' + avgDiesel + ' per litre</strong>' : 'being updated') + ' as on <time datetime="' + today.toISOString().split('T')[0] + '">' + dateStr + '</time>. Fuel prices are revised at 6:00 AM daily by Oil Marketing Companies based on international crude oil markets. We track live fuel rates across <strong>' + valid.length + ' cities in ' + stateCount + ' states</strong>.</p>',
+
+      '<span class="hdf-source">\ud83d\udcca Source: IOCL / HPCL / BPCL \u2014 Oil Marketing Companies</span>',
+
+      '<h2>State-wise Petrol & Diesel Price in India \u2014 ' + dateStr + '</h2>',
+
+      '<div data-hdf="ranking" data-module="fuel" data-fuel="petrol" data-sort="asc" data-limit="20" data-label="Petrol Price by City in India \u2014 ' + dateStr + '">',
+      '  <p>Live fuel price ranking loading...</p>',
+      '</div>',
+
+      '<h2>Why Do Fuel Prices Differ Across Indian States?</h2>',
+      '<p>Petrol and diesel prices vary across India primarily because of state VAT rates, which range from 6% (Andaman & Nicobar) to 36%+ (Rajasthan). In addition, local body taxes, freight charges from refineries, and dealer commissions add to the final retail price. States with refineries nearby (e.g., Gujarat, Tamil Nadu) generally have lower transport costs.</p>',
+
+      this._buildFuelFaq('India', avgPetrol ? '\u20b9' + avgPetrol : 'N/A', avgDiesel ? '\u20b9' + avgDiesel : 'N/A', 'varies by state', dateStr),
+
       '</article>'
-    ].join('\n');
+    ].join('\n').trim();
   }
 }
 

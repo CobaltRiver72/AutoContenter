@@ -292,6 +292,8 @@ async function boot() {
     db: db,
     logger: logger,
   });
+  var publicRouter = require('./routes/public')(db);
+  app.use('/api/public', publicRouter);
   app.use('/api', checkAuth, apiRouter);
 
   // Static assets — accessible without auth for login page to work
@@ -299,6 +301,7 @@ async function boot() {
   app.use('/js', express.static(path.resolve(__dirname, '..', 'public', 'js')));
   app.use('/img', express.static(path.resolve(__dirname, '..', 'public', 'img')));
   app.use('/fonts', express.static(path.resolve(__dirname, '..', 'public', 'fonts')));
+  app.use('/wp-assets', express.static(path.resolve(__dirname, '..', 'public', 'wp-assets')));
 
   // Global error handler — NEVER expose stack traces.
   //
