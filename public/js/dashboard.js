@@ -6168,13 +6168,15 @@
       return;
     }
     showImportResult('loading', (dryRun ? 'Dry-running' : 'Importing') + ' ' + escapeHtml(file.name) + ' (' + (file.size / 1024).toFixed(0) + ' KB)…');
-    var formData = new FormData();
-    formData.append('file', file);
-    fetch('/api/import/' + type + (dryRun ? '?dry=1' : ''), {
-      method: 'POST',
-      credentials: 'include',
-      body: formData,
-    })
+    var reader = new FileReader();
+    reader.onerror = function () { showImportResult('error', '❌ Could not read file.'); };
+    reader.onload = function (e) {
+      fetch('/api/import/' + type + (dryRun ? '?dry=1' : ''), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv: e.target.result }),
+      })
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (data.ok) {
@@ -6191,6 +6193,8 @@
       .catch(function (e) {
         showImportResult('error', '❌ Network error: ' + escapeHtml(e.message));
       });
+    };
+    reader.readAsText(file);
   }
 
   function showImportResult(type, html) {

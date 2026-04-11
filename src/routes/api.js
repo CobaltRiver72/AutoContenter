@@ -4092,17 +4092,13 @@ function createApiRouter(deps) {
     }
   });
 
-  // ─── CSV upload middleware (memory storage, 50 MB cap) ───────────────────
-  var multer  = require('multer');
-  var _upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-
   // ─── POST /api/import/fuel ────────────────────────────────────────────────
 
-  router.post('/import/fuel', _upload.single('file'), function (req, res) {
-    if (!req.file) return res.status(400).json({ ok: false, error: 'No file uploaded' });
+  router.post('/import/fuel', function (req, res) {
+    var csvText = req.body && req.body.csv;
+    if (!csvText || typeof csvText !== 'string') return res.status(400).json({ ok: false, error: 'No CSV text provided' });
 
     var dryRun  = req.query.dry === '1' || req.query.dry === 'true';
-    var csvText = req.file.buffer.toString('utf8');
 
     var parsed;
     try { parsed = parseCsv(csvText); }
@@ -4160,11 +4156,11 @@ function createApiRouter(deps) {
 
   // ─── POST /api/import/metals ──────────────────────────────────────────────
 
-  router.post('/import/metals', _upload.single('file'), function (req, res) {
-    if (!req.file) return res.status(400).json({ ok: false, error: 'No file uploaded' });
+  router.post('/import/metals', function (req, res) {
+    var csvText = req.body && req.body.csv;
+    if (!csvText || typeof csvText !== 'string') return res.status(400).json({ ok: false, error: 'No CSV text provided' });
 
     var dryRun  = req.query.dry === '1' || req.query.dry === 'true';
-    var csvText = req.file.buffer.toString('utf8');
 
     var parsed;
     try { parsed = parseCsv(csvText); }
