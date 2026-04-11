@@ -16,11 +16,25 @@ const args = process.argv.slice(2);
 const typeArg = (args.find(a => a.startsWith('--type=')) || '--type=all').split('=')[1];
 const dryRun  = args.includes('--dry-run');
 
-// ── Paths ─────────────────────────────────────────────────────────────────────
-const ROOT       = path.join(__dirname, '..');
-const DB_PATH    = path.join(ROOT, 'data', 'autopub.db');
-const FUEL_CSV   = path.join(ROOT, 'data', 'import-fuel.csv');
-const METALS_CSV = path.join(ROOT, 'data', 'import-metals.csv');
+// ── Paths — mirror src/utils/db.js logic so Hostinger env vars are respected ──
+const ROOT = path.join(__dirname, '..');
+
+// Load .env so DATA_DIR / DB_PATH env vars are available
+try {
+  require('dotenv').config({ path: path.join(ROOT, '.env') });
+} catch (_) { /* dotenv optional */ }
+
+const DATA_DIR   = process.env.DATA_DIR  || path.join(ROOT, 'data');
+const DB_PATH    = process.env.DB_PATH   || path.join(DATA_DIR, 'autopub.db');
+const FUEL_CSV   = path.join(DATA_DIR, 'import-fuel.csv');
+const METALS_CSV = path.join(DATA_DIR, 'import-metals.csv');
+
+// Verify DB exists before opening
+if (!fs.existsSync(DB_PATH)) {
+  console.error(`❌  Database not found at: ${DB_PATH}`);
+  console.error(`    Set DATA_DIR or DB_PATH env var if your data folder is elsewhere.`);
+  process.exit(1);
+}
 
 // ── DB ────────────────────────────────────────────────────────────────────────
 const db = new Database(DB_PATH);
