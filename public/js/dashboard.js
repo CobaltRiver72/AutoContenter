@@ -6207,7 +6207,20 @@
         var parsed;
         try { parsed = JSON.parse(e.target.result); }
         catch (err) { showImportResult('error', '❌ Invalid JSON: ' + escapeHtml(err.message)); return; }
-        if (!Array.isArray(parsed)) { showImportResult('error', '❌ JSON must be an array of objects.'); return; }
+        // Unwrap common envelope keys: { data:[...] }, { items:[...] }, { results:[...] }, etc.
+        if (!Array.isArray(parsed) && typeof parsed === 'object' && parsed !== null) {
+          var wrapperKeys = ['data', 'items', 'results', 'records', 'rows', 'prices', 'fuel', 'metals'];
+          var unwrapped = null;
+          for (var wi = 0; wi < wrapperKeys.length; wi++) {
+            if (Array.isArray(parsed[wrapperKeys[wi]])) { unwrapped = parsed[wrapperKeys[wi]]; break; }
+          }
+          // Single object — treat as one-row array
+          parsed = unwrapped || [parsed];
+        }
+        if (!Array.isArray(parsed) || !parsed.length) {
+          showImportResult('error', '❌ Could not find an array of rows in this JSON file.');
+          return;
+        }
         body = JSON.stringify({ rows: parsed });
       }
       fetch(endpoint + (dryRun ? '?dry=1' : ''), {
