@@ -261,29 +261,50 @@
       var mod = el.dataset.module;
       var city = el.dataset.city;
       var metal = el.dataset.metal;
-      var fuel = el.dataset.fuel;
+      var fuel = el.dataset.fuel;   // 'petrol' | 'diesel' | absent = auto-detect both
       var days = el.dataset.days || 30;
       return fetchData('history', { module: mod, city: city, metal: metal || fuel, days: days }).then(function(rows) {
-        if (!rows || !rows.length) return;
+        if (!rows || !rows.length) {
+          el.innerHTML = '<div class="hdf-chart-wrap"><p style="font-size:13px;color:#6b7280;padding:12px 0;">No price history available yet.</p></div>';
+          return;
+        }
         var isMetals = mod === 'metals';
         var labels = rows.map(function(r) { return r.price_date; });
-        var dataPoints = isMetals
-          ? rows.map(function(r) { return metal === 'gold' ? r.price_24k : r.price_1g; })
-          : rows.map(function(r) { return r.petrol; });
+        var datasets;
+
+        if (isMetals) {
+          var ml = (metal || 'Metal') + ' (\u20b9/g)';
+          datasets = [{ label: ml, data: rows.map(function(r) { return metal === 'gold' ? r.price_24k : r.price_1g; }), borderColor: '#1d4ed8', backgroundColor: 'rgba(29,78,216,0.07)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3 }];
+        } else {
+          // Auto-detect which columns have real data
+          var hasPetrol = rows.some(function(r) { return r.petrol != null && r.petrol > 0; });
+          var hasDiesel = rows.some(function(r) { return r.diesel != null && r.diesel > 0; });
+          datasets = [];
+          if (hasPetrol && fuel !== 'diesel') {
+            datasets.push({ label: 'Petrol (\u20b9/L)', data: rows.map(function(r) { return r.petrol; }), borderColor: '#1d4ed8', backgroundColor: 'rgba(29,78,216,0.07)', borderWidth: 2, pointRadius: 2, fill: !hasDiesel, tension: 0.3 });
+          }
+          if (hasDiesel && fuel !== 'petrol') {
+            datasets.push({ label: 'Diesel (\u20b9/L)', data: rows.map(function(r) { return r.diesel; }), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.07)', borderWidth: 2, pointRadius: 2, fill: !hasPetrol, tension: 0.3 });
+          }
+          if (!datasets.length) {
+            el.innerHTML = '<div class="hdf-chart-wrap"><p style="font-size:13px;color:#6b7280;padding:12px 0;">No price history available yet.</p></div>';
+            return;
+          }
+        }
+
+        var chartTitle = isMetals
+          ? ((metal || 'Metal') + ' (\u20b9/g) trend \u2014 ' + city + ' (last ' + days + ' days)')
+          : 'Fuel price trend \u2014 ' + city + ' (last ' + days + ' days)';
         var canvas = document.createElement('canvas');
-        var label = isMetals ? ((metal || 'Metal') + ' (\u20b9/g)') : 'Petrol (\u20b9/L)';
-        el.innerHTML = '<div class="hdf-chart-wrap"><h3>' + label + ' trend \u2014 ' + city + ' (last ' + days + ' days)</h3></div>';
+        el.innerHTML = '<div class="hdf-chart-wrap"><h3>' + chartTitle + '</h3></div>';
         el.querySelector('.hdf-chart-wrap').appendChild(canvas);
         requireChartJs(function () {
           new Chart(canvas, {
             type: 'line',
-            data: {
-              labels: labels,
-              datasets: [{ label: label, data: dataPoints, borderColor: '#1d4ed8', backgroundColor: 'rgba(29,78,216,0.07)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3 }]
-            },
+            data: { labels: labels, datasets: datasets },
             options: {
               responsive: true,
-              plugins: { legend: { display: false } },
+              plugins: { legend: { display: datasets.length > 1 } },
               scales: {
                 x: { ticks: { maxTicksLimit: 7, font: { size: 11 } } },
                 y: { ticks: { font: { size: 11 } } }
