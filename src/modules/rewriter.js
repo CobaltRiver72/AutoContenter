@@ -278,7 +278,7 @@ function buildPrompt(article, cluster, settings) {
     '',
     '1. HEADLINE — 55–70 characters. Sharp, factual, no clickbait. Front-load the primary keyword. Never copy a source headline verbatim. Active voice.',
     '',
-    '2. IN BRIEF — Exactly 4 bullets. Each bullet is ONE fact, max 20 words, written as a complete plain-English sentence. Lead with the most newsworthy bullet. No opinions, no hedging, no transitions. These four bullets must collectively answer who/what/when/where for the entire story.',
+    '2. NEWS SUMMARY — Exactly 4 bullets. Each bullet is ONE fact, max 20 words, written as a complete plain-English sentence. Lead with the most newsworthy bullet. No opinions, no hedging, no transitions. These four bullets must collectively answer who/what/when/where for the entire story.',
     '',
     '3. BODY — 250 to 700 words of plain prose, scaled to how much the story actually contains. Use 1–2 H2 subheadings (## prefix): always at least 1 H2 unless the total body is under 300 words. Add a second H2 only when the story genuinely splits into two separate beats. Under an H2, you may use up to 2 H3 subheadings (### prefix) if the section has distinct sub-points — otherwise skip H3. The ONLY exception to structure: if a Step-1 signal is YES, you MUST include the matching structure inside the body markdown — markdown table for parallel_facts/comparison/conditional_rules, numbered list for steps, date-prefixed list for timeline. Otherwise: no images, no blockquotes, no code. Each paragraph is 2–4 sentences.',
     '',
@@ -546,7 +546,7 @@ function buildRewrittenHtml(inBrief, bodyMarkdown, faqs) {
   // In Brief block
   if (inBrief && inBrief.length > 0) {
     parts.push('<div class="hdf-in-brief">');
-    parts.push('<h2>In Brief</h2>');
+    parts.push('<h2>News Summary</h2>');
     parts.push('<ul>');
     for (var i = 0; i < inBrief.length; i++) {
       parts.push('<li>' + escapeHtmlText(inBrief[i]) + '</li>');
