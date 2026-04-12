@@ -8,6 +8,36 @@ const { getConfig } = require('./config');
 const config = getConfig();
 const logDir = config.DATA_DIR || path.resolve(__dirname, '..', '..', 'data');
 
+// ─── Redaction ──────────────────────────────────────────────────────────────
+// Patterns that should never be persisted to the SQLite logs table.
+// Replacements use a fixed sentinel so it's obvious in logs that redaction happened.
+const REDACT_PATTERNS = [
+  // Authorization headers (Bearer, Basic, Token schemes)
+  { re: /(Authorization[:\s=]+)(Bearer|Basic|Token)\s+[\w.\-+/=]+/gi, replace: '$1$2 [REDACTED]' },
+  { re: /Bearer\s+[\w.\-]+/gi, replace: 'Bearer [REDACTED]' },
+  // API key patterns (OpenAI sk-, OpenRouter sk-or-v1-, Anthropic, RapidAPI, generic)
+  { re: /sk-or-v1-[\w\-]{20,}/gi, replace: 'sk-or-v1-[REDACTED]' },
+  { re: /sk-ant-[\w\-]{20,}/gi, replace: 'sk-ant-[REDACTED]' },
+  { re: /sk-[A-Za-z0-9]{20,}/g, replace: 'sk-[REDACTED]' },
+  // Firehose management keys
+  { re: /fhm_[\w\-]{20,}/gi, replace: 'fhm_[REDACTED]' },
+  // Generic API-key=value and api_key=value patterns in query strings / configs
+  { re: /(api[_-]?key[:=]\s*["']?)[\w\-]{16,}/gi, replace: '$1[REDACTED]' },
+  // Basic auth embedded in URLs
+  { re: /\/\/[^:/\s]+:[^@/\s]+@/g, replace: '//[REDACTED]:[REDACTED]@' },
+  // WordPress application passwords (WP generates 4-char-groups separated by spaces)
+  { re: /([A-Za-z0-9]{4}\s){5}[A-Za-z0-9]{4}/g, replace: '[REDACTED-WP-APP-PASSWORD]' },
+];
+
+function redactSensitive(str) {
+  if (typeof str !== 'string') return str;
+  let out = str;
+  for (let i = 0; i < REDACT_PATTERNS.length; i++) {
+    out = out.replace(REDACT_PATTERNS[i].re, REDACT_PATTERNS[i].replace);
+  }
+  return out;
+}
+
 // Lazy db reference — set after db.js is initialized
 let _db = null;
 
@@ -56,6 +86,42 @@ const winstonLogger = winston.createLogger({
 
 let _insertStmt = null;
 
+// Serialize `details` for DB persistence while stripping stack traces and
+// known sensitive patterns. File/console logging is unaffected — this helper
+// is only used for the SQLite write path.
+function sanitizeDetailsForDb(details) {
+  if (details == null) return null;
+  try {
+    if (typeof details === 'string') {
+      return redactSensitive(details);
+    }
+    if (details instanceof Error) {
+      // Never persist stack traces to the DB.
+      return redactSensitive(JSON.stringify({ name: details.name, message: details.message }));
+    }
+    if (typeof details === 'object') {
+      // Clone and drop any `stack` fields (including nested err/error.stack) before stringifying.
+      const cloned = JSON.parse(JSON.stringify(details, (key, value) => {
+        if (key === 'stack') return undefined;
+        if (value instanceof Error) {
+          return { name: value.name, message: value.message };
+        }
+        return value;
+      }));
+      return redactSensitive(JSON.stringify(cloned));
+    }
+    return redactSensitive(String(details));
+  } catch (err) {
+    // Don't swallow silently — surface to console and fall back to a safe string.
+    console.error('[logger] Failed to sanitize details for DB:', err.message);
+    try {
+      return redactSensitive(String(details));
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 function writeToDb(level, mod, message, details) {
   if (!_db) return;
 
@@ -66,11 +132,12 @@ function writeToDb(level, mod, message, details) {
       );
     }
 
-    const detailsStr = details != null
-      ? (typeof details === 'string' ? details : JSON.stringify(details))
-      : null;
+    const safeMessage = typeof message === 'string'
+      ? redactSensitive(message)
+      : redactSensitive(String(message == null ? '' : message));
+    const detailsStr = sanitizeDetailsForDb(details);
 
-    _insertStmt.run(level, mod || null, message, detailsStr);
+    _insertStmt.run(level, mod || null, safeMessage, detailsStr);
   } catch (err) {
     // Avoid infinite recursion — only console.error
     console.error('[logger] Failed to write log to DB:', err.message);

@@ -212,7 +212,6 @@ module.exports = function(db) {
     var city = req.query.city;
     if (!city) return res.json({ ok: false, error: 'city required' });
     try {
-      var today = "date('now', 'localtime')";
       var result = {};
       var metals = ['gold', 'silver', 'platinum'];
       for (var i = 0; i < metals.length; i++) {

@@ -2,6 +2,7 @@
 
 var EventEmitter = require('events').EventEmitter;
 var axios = require('axios');
+var { sanitizeAxiosError } = require('../utils/safe-http');
 
 var MODULE = 'infranodus';
 
@@ -40,7 +41,7 @@ class InfranodusAnalyzer extends EventEmitter {
     } catch (err) {
       this.status = 'error';
       this.error = err.message;
-      this.logger.warn(MODULE, 'Init failed: ' + err.message);
+      this.logger.warn(MODULE, 'Init failed: ' + sanitizeAxiosError(err).message);
     }
   }
 
@@ -67,7 +68,7 @@ class InfranodusAnalyzer extends EventEmitter {
       this.lastActivity = new Date().toISOString();
       return response.data;
     } catch (err) {
-      this.logger.error(MODULE, 'Analysis failed: ' + err.message);
+      this.logger.error(MODULE, 'Analysis failed: ' + sanitizeAxiosError(err).message);
       return null;
     }
   }
@@ -133,7 +134,7 @@ class InfranodusAnalyzer extends EventEmitter {
       this.lastActivity = new Date().toISOString();
       return enhancement;
     } catch (err) {
-      this.logger.error(MODULE, 'Enhancement failed: ' + err.message);
+      this.logger.error(MODULE, 'Enhancement failed: ' + sanitizeAxiosError(err).message);
       return null;
     }
   }

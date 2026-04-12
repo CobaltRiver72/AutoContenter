@@ -15,13 +15,14 @@ var MODULE = 'pipeline';
  * All run in the same Node.js process. SQLite drafts table is the queue.
  */
 class Pipeline {
-  constructor(config, db, rewriter, publisher, logger, extractor) {
+  constructor(config, db, rewriter, publisher, logger, extractor, infranodus) {
     this.config = config;
     this.db = db;
     this.rewriter = rewriter;
     this.publisher = publisher;
     this.logger = logger;
     this.extractor = extractor;
+    this.infranodus = infranodus || null;
 
     // Worker config
     this.EXTRACTION_POLL_MS = 500;      // Check for work every 500ms
@@ -59,6 +60,10 @@ class Pipeline {
       publishesFailed: 0,
     };
 
+    // Track AbortControllers for in-flight rewrite/publish jobs so
+    // shutdown() can cancel them immediately instead of waiting for
+    // the provider timeout.
+    this._activeControllers = new Set();
   }
 
   // ─── EXTRACTION WORKER LOOP ──────────────────────────────────────────
@@ -223,8 +228,9 @@ class Pipeline {
     }
   }
 
-  async _rewriteCluster(clusterInfo) {
+  async _rewriteCluster(clusterInfo, _opts) {
     var clusterId = clusterInfo.cluster_id;
+    var skipLock = !!(_opts && _opts.alreadyLocked);
 
     // Load all drafts for this cluster
     var clusterDrafts = this.db.prepare(
@@ -250,13 +256,36 @@ class Pipeline {
       return;
     }
 
-    // Lock the primary draft
-    this.db.prepare(
-      "UPDATE drafts SET status = 'rewriting', locked_by = 'rewriter', locked_at = datetime('now'), " +
-      "lease_expires_at = datetime('now', '+5 minutes'), updated_at = datetime('now') WHERE id = ?"
-    ).run(primaryDraft.id);
+    // Atomic CAS lock of the primary draft. If another worker (auto loop,
+    // manual trigger, or batch rewrite) already grabbed this draft between
+    // the caller's SELECT and our UPDATE, changes === 0 and we bail out.
+    // Manual entry points (rewriteClusterManual / rewriteAllExtractedClusters)
+    // acquire the lock themselves and pass { alreadyLocked: true } so we
+    // honour their pre-check without fighting ourselves.
+    if (!skipLock) {
+      var rewriteLockResult = this.db.prepare(
+        "UPDATE drafts SET status = 'rewriting', locked_by = 'rewriter', locked_at = datetime('now'), " +
+        "lease_expires_at = datetime('now', '+' || ? || ' minutes'), updated_at = datetime('now') " +
+        "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
+      ).run(this.LEASE_MINUTES, primaryDraft.id);
+
+      if (rewriteLockResult.changes === 0) {
+        this.logger.debug(MODULE, 'Rewrite lock race lost for draft #' + primaryDraft.id + ' (cluster #' + clusterId + ')');
+        return;
+      }
+    } else {
+      // Manual caller already holds the lock; just mark status transition.
+      this.db.prepare(
+        "UPDATE drafts SET status = 'rewriting', updated_at = datetime('now') WHERE id = ?"
+      ).run(primaryDraft.id);
+    }
 
     this.stats.rewritesStarted++;
+
+    // Per-job AbortController — lets shutdown() cancel in-flight AI calls
+    // immediately, preventing double-billing on crash-restart.
+    var rewriteController = new AbortController();
+    this._activeControllers.add(rewriteController);
 
     // Build cluster object for rewriter (same format as before)
     var clusterForRewrite = {
@@ -297,7 +326,33 @@ class Pipeline {
       this.logger.info(MODULE, 'Rewriting cluster #' + clusterId + ' (' + clusterDrafts.length + ' sources): "' +
         (clusterInfo.topic || '').substring(0, 60) + '"');
 
-      var rewritten = await this.rewriter.rewrite(primaryArticle, clusterForRewrite);
+      // InfraNodus entity analysis — enriches the rewrite prompt with
+      // graph-derived topics, missing entities, and content gaps. Non-fatal:
+      // any failure is logged and the rewrite proceeds without it.
+      var infraData = null;
+      if (this.infranodus && this.infranodus.enabled) {
+        try {
+          var combinedText = clusterDrafts
+            .map(function (d) { return d.extracted_content || ''; })
+            .join('\n\n')
+            .slice(0, 5000);
+          if (combinedText.length > 100) {
+            infraData = await this.infranodus.enhanceArticle(combinedText);
+            if (infraData) {
+              this.db.prepare('UPDATE drafts SET infranodus_data = ? WHERE id = ?')
+                .run(JSON.stringify(infraData), primaryDraft.id);
+            }
+          }
+        } catch (infraErr) {
+          this.logger.warn(MODULE, 'InfraNodus analysis failed, continuing without it: ' + infraErr.message);
+        }
+      }
+
+      var rewritten = await this.rewriter.rewrite(primaryArticle, clusterForRewrite, {
+        infraData: infraData,
+        signal: rewriteController.signal,
+      });
+      this._activeControllers.delete(rewriteController);
 
       // Save rewritten content
       this.db.prepare(
@@ -322,6 +377,7 @@ class Pipeline {
         (rewritten.title || '').substring(0, 60) + '" (' + (rewritten.wordCount || 0) + ' words)');
 
     } catch (err) {
+      this._activeControllers.delete(rewriteController);
       this.logger.error(MODULE, 'Rewrite failed for cluster #' + clusterId + ': ' + err.message);
       this.stats.rewritesFailed++;
 
@@ -375,12 +431,27 @@ class Pipeline {
     // Load cluster info for _rewriteCluster
     var cluster = this.db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
 
+    // Atomic CAS lock acquisition BEFORE calling _rewriteCluster. If the auto
+    // loop, another manual trigger, or a batch rewrite already grabbed this
+    // primary draft, changes === 0 and we surface a clear error to the API
+    // caller rather than silently stepping on the other worker.
+    var manualLockResult = this.db.prepare(
+      "UPDATE drafts SET status = 'rewriting', locked_by = 'rewriter', locked_at = datetime('now'), " +
+      "lease_expires_at = datetime('now', '+' || ? || ' minutes'), updated_at = datetime('now') " +
+      "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
+    ).run(this.LEASE_MINUTES, primary.id);
+
+    if (manualLockResult.changes === 0) {
+      this.logger.debug(MODULE, 'Manual rewrite lock race lost for cluster #' + clusterId + ' (draft #' + primary.id + ')');
+      throw new Error('Cluster is currently being processed, try again in a moment.');
+    }
+
     // Call the existing _rewriteCluster method with proper clusterInfo shape
     await this._rewriteCluster({
       cluster_id: clusterId,
       topic: cluster ? cluster.topic : '',
       trends_boosted: cluster ? cluster.trends_boosted : 0,
-    });
+    }, { alreadyLocked: true });
 
     return { success: true, primaryDraftId: primary.id, clusterId: clusterId };
   }
@@ -417,12 +488,39 @@ class Pipeline {
       try {
         var cluster = this.db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
 
-        // Fire and forget — let them run in the background
+        // Resolve the primary draft for this cluster so we can CAS-lock it.
+        var batchPrimary = this.db.prepare(
+          "SELECT id FROM drafts WHERE cluster_id = ? AND cluster_role = 'primary' LIMIT 1"
+        ).get(clusterId);
+
+        if (!batchPrimary) {
+          results.failed++;
+          results.errors.push('Cluster #' + clusterId + ': no primary draft found');
+          continue;
+        }
+
+        // Atomic CAS lock before kicking off the rewrite. If the auto loop
+        // or another manual trigger already owns this draft, skip it.
+        var batchLockResult = this.db.prepare(
+          "UPDATE drafts SET status = 'rewriting', locked_by = 'rewriter', locked_at = datetime('now'), " +
+          "lease_expires_at = datetime('now', '+' || ? || ' minutes'), updated_at = datetime('now') " +
+          "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
+        ).run(this.LEASE_MINUTES, batchPrimary.id);
+
+        if (batchLockResult.changes === 0) {
+          this.logger.debug(MODULE, 'Batch rewrite lock race lost for cluster #' + clusterId + ' (draft #' + batchPrimary.id + ')');
+          results.failed++;
+          results.errors.push('Cluster #' + clusterId + ': currently being processed, skipped');
+          continue;
+        }
+
+        // Fire and forget — let them run in the background. Pass
+        // alreadyLocked so _rewriteCluster doesn't re-CAS.
         this._rewriteCluster({
           cluster_id: clusterId,
           topic: cluster ? cluster.topic : '',
           trends_boosted: cluster ? cluster.trends_boosted : 0,
-        }).catch(function (err) {
+        }, { alreadyLocked: true }).catch(function (err) {
           self.logger.warn(MODULE, 'Rewrite failed for cluster: ' + err.message);
         });
 
@@ -466,14 +564,29 @@ class Pipeline {
 
       var clusterId = readyPrimary.cluster_id;
 
-      // Lock it (lease window must match this.LEASE_MINUTES)
-      this.db.prepare(
+      // Atomic CAS lock (lease window must match this.LEASE_MINUTES).
+      // The WHERE clause guarantees only one worker wins the race — if another
+      // worker grabbed this draft between our SELECT and UPDATE, changes === 0
+      // and we skip this draft on this tick.
+      var publishLockResult = this.db.prepare(
         "UPDATE drafts SET locked_by = 'publisher', locked_at = datetime('now'), " +
-        "lease_expires_at = datetime('now', '+' || ? || ' minutes') WHERE id = ?"
+        "lease_expires_at = datetime('now', '+' || ? || ' minutes'), " +
+        "updated_at = datetime('now') " +
+        "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
       ).run(this.LEASE_MINUTES, readyPrimary.id);
+
+      if (publishLockResult.changes === 0) {
+        this.logger.debug(MODULE, 'Publish lock race lost for draft #' + readyPrimary.id);
+        return;
+      }
 
       this.logger.info(MODULE, 'Publishing cluster #' + clusterId + ': "' +
         (readyPrimary.rewritten_title || readyPrimary.source_title || '').substring(0, 60) + '"');
+
+      // Per-job AbortController so shutdown() can cancel the WP upload / API
+      // call immediately rather than waiting for the 60-second timeout.
+      var publishController = new AbortController();
+      this._activeControllers.add(publishController);
 
       // Load all cluster drafts for the publisher
       var clusterDrafts = this.db.prepare(
@@ -522,7 +635,8 @@ class Pipeline {
       };
 
       try {
-        var pubResult = await this.publisher.publish(rewrittenArticle, clusterForPublish, this.db);
+        var pubResult = await this.publisher.publish(rewrittenArticle, clusterForPublish, this.db, publishController.signal);
+        this._activeControllers.delete(publishController);
 
         // Record publish for rate limiting
         this.publishHistory.push(Date.now());
@@ -541,6 +655,7 @@ class Pipeline {
         this.logger.info(MODULE, 'Published cluster #' + clusterId + ' -> WP post #' + pubResult.wpPostId);
 
       } catch (pubErr) {
+        this._activeControllers.delete(publishController);
         this.logger.error(MODULE, 'Publish failed for cluster #' + clusterId + ': ' + pubErr.message);
         this.stats.publishesFailed++;
 
@@ -703,6 +818,12 @@ class Pipeline {
 
   async shutdown() {
     this.stop();
+    // Cancel all in-flight rewrite/publish HTTP calls immediately.
+    // Without this, in-flight requests keep running until the provider's
+    // socket timeout (up to 60s), and recovered drafts are re-processed
+    // on restart → double AI billing / duplicate WP posts.
+    this._activeControllers.forEach(function (ctrl) { ctrl.abort(); });
+    this._activeControllers.clear();
     // Release all our locks
     try {
       this.db.prepare("UPDATE drafts SET locked_by = NULL, locked_at = NULL, lease_expires_at = NULL WHERE locked_by IS NOT NULL").run();

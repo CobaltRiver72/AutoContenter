@@ -302,6 +302,8 @@
     // Close sidebar on mobile
     var sidebar = $('sidebar');
     if (sidebar) sidebar.classList.remove('open');
+
+    if (typeof updateBatchActions === 'function') updateBatchActions();
   }
 
   function initRouter() {
@@ -1413,16 +1415,18 @@
   function updateBulkActionBar() {
     var bar = $('bulkActionBar');
     var countEl = $('bulkCount');
-    if (!bar) return;
-    if (selectedCount > 0) {
-      bar.style.display = 'flex';
-      var addedCount = Object.keys(draftStatusCache).length;
-      var label = selectedCount + ' selected';
-      if (addedCount > 0) label += ' | ' + addedCount + ' already in drafts';
-      if (countEl) countEl.textContent = label;
-    } else {
-      bar.style.display = 'none';
+    if (bar) {
+      if (selectedCount > 0) {
+        bar.style.display = 'flex';
+        var addedCount = Object.keys(draftStatusCache).length;
+        var label = selectedCount + ' selected';
+        if (addedCount > 0) label += ' | ' + addedCount + ' already in drafts';
+        if (countEl) countEl.textContent = label;
+      } else {
+        bar.style.display = 'none';
+      }
     }
+    if (typeof updateBatchActions === 'function') updateBatchActions();
   }
 
   function bulkFetchAndAddToDrafts() {
@@ -3381,6 +3385,8 @@
         toggleBtn.innerHTML = '&#9745; Select';
       }
     }
+
+    if (typeof updateBatchActions === 'function') updateBatchActions();
   }
 
   function startPublishedPolling() {
@@ -3569,6 +3575,30 @@
             });
         }
 
+        // ─── InfraNodus Entity Analysis Panel ────────────────────
+        var existingInfraPanel = document.querySelector('.infra-panel');
+        if (existingInfraPanel && existingInfraPanel.parentNode) {
+          existingInfraPanel.parentNode.removeChild(existingInfraPanel);
+        }
+        var infraPanel = document.createElement('div');
+        infraPanel.className = 'infra-panel';
+        infraPanel.id = 'infra-panel-' + draftId;
+        infraPanel.style.display = 'none';
+        infraPanel.innerHTML =
+          '<div class="infra-header" onclick="window.__toggleInfraPanel(' + draftId + ')">' +
+            '<span class="infra-icon">&#128300;</span>' +
+            '<span>InfraNodus Entity Analysis</span>' +
+            '<span class="infra-badge" id="infra-badge-' + draftId + '"></span>' +
+          '</div>' +
+          '<div class="infra-body" id="infra-body-' + draftId + '">' +
+            '<div class="infra-loading">Fetching analysis...</div>' +
+          '</div>';
+        var sourceContentElForInfra = $('source-content');
+        if (sourceContentElForInfra && sourceContentElForInfra.parentElement) {
+          sourceContentElForInfra.parentElement.appendChild(infraPanel);
+        }
+        loadInfraData(draftId);
+
         // Settings tab
         $('setting-keyword').value = draft.target_keyword || '';
         $('setting-domain').value = draft.target_domain || '';
@@ -3625,6 +3655,235 @@
     currentDraft = null;
     loadPublished();
   }
+
+  // ─── InfraNodus Entity Analysis Panel ─────────────────────────────
+  function loadInfraData(draftId) {
+    var panel = document.getElementById('infra-panel-' + draftId);
+    var body = document.getElementById('infra-body-' + draftId);
+    var badge = document.getElementById('infra-badge-' + draftId);
+    if (!panel || !body) return;
+
+    fetchApi('/api/drafts/' + draftId + '/infranodus')
+      .then(function (data) {
+        if (!data.hasInfraData) {
+          if (badge) {
+            badge.textContent = 'No data';
+            badge.className = 'infra-badge infra-badge-empty';
+          }
+          body.innerHTML =
+            '<p class="infra-empty">No InfraNodus analysis available for this draft.</p>' +
+            '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">' +
+            'Run Analysis Now</button>';
+          panel.style.display = 'block';
+          return;
+        }
+
+        var infra = data.infraData || {};
+        if (badge) {
+          badge.textContent = (infra.mainTopics ? infra.mainTopics.length : 0) + ' topics';
+          badge.className = 'infra-badge infra-badge-active';
+        }
+
+        var html = '';
+
+        if (infra.mainTopics && infra.mainTopics.length) {
+          html += '<div class="infra-section"><h4>Main Topics (What InfraNodus Found)</h4><div class="infra-tags">';
+          infra.mainTopics.forEach(function (t) {
+            html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>';
+          });
+          html += '</div></div>';
+        }
+
+        if (infra.missingEntities && infra.missingEntities.length) {
+          html += '<div class="infra-section"><h4>Entities AI Should Cover</h4><div class="infra-tags">';
+          infra.missingEntities.forEach(function (e) {
+            html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>';
+          });
+          html += '</div></div>';
+        }
+
+        if (infra.contentGaps && infra.contentGaps.length) {
+          html += '<div class="infra-section"><h4>Content Gaps (Bridging Opportunities)</h4><ul class="infra-gaps">';
+          infra.contentGaps.forEach(function (g) {
+            html += '<li>' + escapeHtml(g) + '</li>';
+          });
+          html += '</ul></div>';
+        }
+
+        if (infra.researchQuestions && infra.researchQuestions.length) {
+          html += '<div class="infra-section"><h4>Research Questions for Depth</h4><ul class="infra-questions">';
+          infra.researchQuestions.forEach(function (q) {
+            html += '<li>' + escapeHtml(q) + '</li>';
+          });
+          html += '</ul></div>';
+        }
+
+        html += '<div class="infra-section infra-meta">' +
+          '<span>AI Model: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
+          '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">' +
+          'Re-run Analysis</button></div>';
+
+        body.innerHTML = html;
+        panel.style.display = 'block';
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="infra-error">Failed to load: ' + escapeHtml(err.message || String(err)) + '</p>';
+        panel.style.display = 'block';
+      });
+  }
+
+  function toggleInfraPanel(draftId) {
+    var body = document.getElementById('infra-body-' + draftId);
+    if (body) {
+      body.style.display = body.style.display === 'none' ? 'block' : 'none';
+    }
+  }
+
+  function runInfraAnalysis(draftId) {
+    var body = document.getElementById('infra-body-' + draftId);
+    if (!body) return;
+    body.innerHTML = '<div class="infra-loading">Running InfraNodus analysis...</div>';
+
+    fetchApi('/api/drafts/' + draftId + '/analyze', { method: 'POST' })
+      .then(function (data) {
+        if (data && data.success) {
+          loadInfraData(draftId);
+        } else {
+          body.innerHTML = '<p class="infra-error">' + escapeHtml((data && data.error) || 'Analysis failed') + '</p>';
+        }
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="infra-error">' + escapeHtml(err.message || String(err)) + '</p>';
+      });
+  }
+
+  window.__loadInfraData = loadInfraData;
+  window.__toggleInfraPanel = toggleInfraPanel;
+  window.__runInfraAnalysis = runInfraAnalysis;
+
+  // ─── Batch Action Bar (Manual Cluster from Feed / Drafts) ─────────
+  function _getBatchSelectionCount() {
+    if (state.currentPage === 'feed') return selectedCount;
+    if (state.currentPage === 'published') return _selectedDraftCount;
+    return 0;
+  }
+
+  function updateBatchActions() {
+    var count = _getBatchSelectionCount();
+    var bar = document.getElementById('batch-action-bar');
+    var isOnDraftsPage = state.currentPage === 'published';
+    var btnAction = isOnDraftsPage ? 'window.__mergeIntoCluster()' : 'window.__createManualCluster()';
+    var btnLabel = isOnDraftsPage ? 'Merge into Cluster' : 'Create Cluster';
+    var label = isOnDraftsPage ? 'drafts selected' : 'articles selected';
+
+    if (count >= 2 && (state.currentPage === 'feed' || state.currentPage === 'published')) {
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'batch-action-bar';
+        bar.className = 'batch-action-bar';
+        document.body.appendChild(bar);
+      }
+      bar.innerHTML =
+        '<span id="batch-count">' + count + ' ' + label + '</span>' +
+        '<input type="text" id="batch-cluster-topic" placeholder="Cluster topic (optional)" class="batch-input" />' +
+        '<button class="btn btn-primary btn-sm" onclick="' + btnAction + '">' + btnLabel + '</button>' +
+        '<button class="btn btn-outline btn-sm" onclick="window.__clearBatchSelection()">Clear</button>';
+      bar.style.display = 'flex';
+    } else if (bar) {
+      bar.style.display = 'none';
+    }
+  }
+
+  function createManualCluster() {
+    var articleIds = [];
+    for (var k in selectedArticles) {
+      if (Object.prototype.hasOwnProperty.call(selectedArticles, k)) {
+        var a = selectedArticles[k];
+        if (a && a.id != null) {
+          var idNum = parseInt(a.id, 10);
+          if (!isNaN(idNum)) articleIds.push(idNum);
+        }
+      }
+    }
+    var topicEl = document.getElementById('batch-cluster-topic');
+    var topic = topicEl ? topicEl.value : '';
+
+    if (articleIds.length < 2) {
+      showToast('Select at least 2 articles', 'error');
+      return;
+    }
+
+    fetchApi('/api/clusters/manual', {
+      method: 'POST',
+      body: { articleIds: articleIds, topic: topic || undefined }
+    })
+      .then(function (data) {
+        if (data && data.success) {
+          showToast('Cluster created: ' + data.articleCount + ' articles → Cluster #' + data.clusterId, 'success');
+          clearBatchSelection();
+          navigateTo('clusters');
+        } else {
+          showToast((data && data.error) || 'Failed to create cluster', 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Failed: ' + (err.message || String(err)), 'error');
+      });
+  }
+
+  function mergeIntoCluster() {
+    var draftIds = [];
+    for (var k in _selectedDraftIds) {
+      if (_selectedDraftIds[k]) {
+        var idNum = parseInt(k, 10);
+        if (!isNaN(idNum)) draftIds.push(idNum);
+      }
+    }
+    var topicEl = document.getElementById('batch-cluster-topic');
+    var topic = topicEl ? topicEl.value : '';
+
+    if (draftIds.length < 2) {
+      showToast('Select at least 2 drafts', 'error');
+      return;
+    }
+
+    fetchApi('/api/clusters/manual-from-drafts', {
+      method: 'POST',
+      body: { draftIds: draftIds, topic: topic || undefined }
+    })
+      .then(function (data) {
+        if (data && data.success) {
+          showToast('Cluster created from ' + data.draftCount + ' drafts → Cluster #' + data.clusterId, 'success');
+          clearBatchSelection();
+          navigateTo('clusters');
+        } else {
+          showToast((data && data.error) || 'Failed to create cluster', 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Failed: ' + (err.message || String(err)), 'error');
+      });
+  }
+
+  function clearBatchSelection() {
+    if (state.currentPage === 'feed' && typeof clearSelection === 'function') {
+      clearSelection();
+    }
+    if (state.currentPage === 'published') {
+      _selectedDraftIds = {};
+      _selectedDraftCount = 0;
+      var cbs = document.querySelectorAll('.draft-select-checkbox');
+      for (var i = 0; i < cbs.length; i++) { cbs[i].checked = false; }
+      if (typeof _updateSelectUI === 'function') _updateSelectUI();
+    }
+    var bar = document.getElementById('batch-action-bar');
+    if (bar) bar.style.display = 'none';
+  }
+
+  window.__updateBatchActions = updateBatchActions;
+  window.__createManualCluster = createManualCluster;
+  window.__mergeIntoCluster = mergeIntoCluster;
+  window.__clearBatchSelection = clearBatchSelection;
 
   // ─── Draft Versions ────────────────────────────────────────────────
   // Loads version history into the editor's version bar. Shows the bar

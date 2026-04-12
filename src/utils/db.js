@@ -20,8 +20,53 @@ let db;
 try {
   db = new Database(dbPath);
 
+  // ─── Security hardening: tighten permissions on DB files (C3 fix) ──
+  // The DB holds plaintext API keys, WP credentials, FIREHOSE_TOKEN,
+  // SESSION_SECRET, and bcrypt hashes. On multi-tenant hosts, default
+  // umask (0755 dir / 0644 file) lets any local user read the DB and
+  // strings-extract every secret. Chmod parent dir to 0700 and DB to
+  // 0600. Never crash on failure — filesystems without chmod support
+  // (e.g. Windows, some network mounts) should still allow boot.
+  if (process.platform !== 'win32') {
+    var filesToSecurePre = [
+      { path: path.dirname(dbPath), mode: 0o700, label: 'data dir' },
+      { path: dbPath, mode: 0o600, label: 'db file' },
+    ];
+    for (var si = 0; si < filesToSecurePre.length; si++) {
+      var fp = filesToSecurePre[si];
+      try {
+        if (fs.existsSync(fp.path)) {
+          fs.chmodSync(fp.path, fp.mode);
+        }
+      } catch (chmodErr) {
+        console.warn('[db] could not chmod ' + fp.label + ' (' + fp.path + '): ' + chmodErr.message);
+      }
+    }
+  }
+
   // Enable WAL mode for better concurrency
   db.pragma('journal_mode = WAL');
+
+  // ─── Security hardening pass 2: chmod WAL + SHM files (C3 fix) ─────
+  // WAL and SHM sidecars are created when journal_mode=WAL is set, so
+  // they don't exist on first-ever boot until now. Tighten them to 0600
+  // so they can't leak plaintext page data either.
+  if (process.platform !== 'win32') {
+    var walFiles = [
+      { path: dbPath + '-wal', mode: 0o600, label: 'wal file' },
+      { path: dbPath + '-shm', mode: 0o600, label: 'shm file' },
+    ];
+    for (var wi2 = 0; wi2 < walFiles.length; wi2++) {
+      var wf = walFiles[wi2];
+      try {
+        if (fs.existsSync(wf.path)) {
+          fs.chmodSync(wf.path, wf.mode);
+        }
+      } catch (chmodErr2) {
+        console.warn('[db] could not chmod ' + wf.label + ' (' + wf.path + '): ' + chmodErr2.message);
+      }
+    }
+  }
 
   // Enable foreign keys
   db.pragma('foreign_keys = ON');
@@ -368,6 +413,13 @@ function runMigrations() {
 
     try {
       db.exec('ALTER TABLE drafts ADD COLUMN cluster_role TEXT DEFAULT NULL');
+    } catch (e) { /* already exists */ }
+
+    // InfraNodus entity analysis — JSON string (mainTopics, missingEntities,
+    // contentGaps, researchQuestions). Written by pipeline before rewrite and
+    // surfaced in the dashboard draft editor.
+    try {
+      db.exec('ALTER TABLE drafts ADD COLUMN infranodus_data TEXT DEFAULT NULL');
     } catch (e) { /* already exists */ }
 
     // Index for cluster lookups

@@ -45,6 +45,7 @@ var DEFAULTS = {
   FORCE_HTTPS: 'false',
   JINA_API_KEY: '',
   JINA_ENABLED: 'true',
+  MAX_AI_REWRITES_PER_HOUR: '60',
 };
 
 // Numeric keys that should be parsed as numbers

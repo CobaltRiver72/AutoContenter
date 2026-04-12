@@ -64,8 +64,16 @@ function toDec(v) {
 function createApiRouter(deps) {
   var router = express.Router();
   var axios = require('axios');
-  var { assertSafeUrl, safeAxiosOptions } = require('../utils/safe-http');
-  var { parseId, httpError, sanitizeForClient } = require('../utils/api-helpers');
+  var { assertSafeUrl, safeAxiosOptions, sanitizeAxiosError } = require('../utils/safe-http');
+  var { AiCostGuard } = require('../utils/ai-cost-guard');
+  var configUtils = require('../utils/config');
+  var aiGuard = new AiCostGuard({
+    getLimit: function () {
+      var v = parseInt(configUtils.get('MAX_AI_REWRITES_PER_HOUR'), 10);
+      return (isNaN(v) || v <= 0) ? 60 : v;
+    },
+  });
+  var { parseId, sanitizeForClient } = require('../utils/api-helpers');
   var { validateAndNormalizeUrl } = require('../utils/draft-helpers');
   var { firehose, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
 
@@ -424,6 +432,187 @@ function createApiRouter(deps) {
     } catch (err) {
       logger.error('api', 'Re-cluster failed: ' + err.message);
       res.status(500).json({ error: 'Re-cluster failed: ' + err.message });
+    }
+  });
+
+  // ─── Manual cluster creation (batch article clustering) ──────────────────
+
+  router.post('/clusters/manual', (req, res) => {
+    const { articleIds, topic } = req.body;
+
+    if (!articleIds || !Array.isArray(articleIds) || articleIds.length < 2) {
+      return res.status(400).json({ error: 'Select at least 2 articles to create a cluster' });
+    }
+    if (articleIds.length > 10) {
+      return res.status(400).json({ error: 'Maximum 10 articles per manual cluster' });
+    }
+
+    const placeholders = articleIds.map(() => '?').join(',');
+    const articles = db.prepare(
+      `SELECT id, title, url, domain, cluster_id FROM articles WHERE id IN (${placeholders})`
+    ).all(...articleIds);
+
+    if (articles.length < 2) {
+      return res.status(400).json({ error: 'Could not find enough valid articles' });
+    }
+
+    const alreadyClustered = articles.filter(a => a.cluster_id);
+    if (alreadyClustered.length > 0) {
+      return res.status(400).json({
+        error: `${alreadyClustered.length} article(s) already belong to a cluster. Remove them first or pick different articles.`,
+        clusteredIds: alreadyClustered.map(a => a.id)
+      });
+    }
+
+    const safeTopic = (typeof topic === 'string' ? topic.trim().slice(0, 200) : '');
+    const clusterTopic = safeTopic || (articles[0].title || '').slice(0, 120);
+    const primaryArticleId = articleIds[0];
+
+    const createCluster = db.transaction(() => {
+      const clusterResult = db.prepare(`
+        INSERT INTO clusters (topic, article_count, avg_similarity, primary_article_id,
+                              trends_boosted, priority, status, detected_at)
+        VALUES (?, ?, 1.0, ?, 0, 'high', 'queued', datetime('now', 'localtime'))
+      `).run(clusterTopic, articles.length, primaryArticleId);
+
+      const clusterId = clusterResult.lastInsertRowid;
+
+      const updateArticle = db.prepare('UPDATE articles SET cluster_id = ? WHERE id = ?');
+      for (const id of articleIds) {
+        updateArticle.run(clusterId, id);
+      }
+
+      const insertDraft = db.prepare(`
+        INSERT INTO drafts (source_article_id, source_url, source_domain, source_title,
+                            cluster_id, cluster_role, mode, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'manual_import', 'fetching', datetime('now'), datetime('now'))
+      `);
+
+      for (let i = 0; i < articles.length; i++) {
+        const a = articles[i];
+        const role = (a.id === primaryArticleId) ? 'primary' : 'secondary';
+        insertDraft.run(a.id, a.url, a.domain, a.title, clusterId, role);
+      }
+
+      return clusterId;
+    });
+
+    try {
+      const clusterId = createCluster();
+      res.json({
+        success: true,
+        clusterId,
+        topic: clusterTopic,
+        articleCount: articles.length,
+        message: `Manual cluster created with ${articles.length} articles. Extraction will start automatically.`
+      });
+    } catch (err) {
+      logger.error('api', 'POST /clusters/manual failed: ' + err.message);
+      const safe = sanitizeForClient(err);
+      res.status(safe.status).json({ error: safe.message });
+    }
+  });
+
+  router.post('/clusters/manual-from-drafts', (req, res) => {
+    const { draftIds, topic } = req.body;
+
+    if (!draftIds || !Array.isArray(draftIds) || draftIds.length < 2) {
+      return res.status(400).json({ error: 'Select at least 2 drafts' });
+    }
+    if (draftIds.length > 10) {
+      return res.status(400).json({ error: 'Maximum 10 drafts per manual cluster' });
+    }
+
+    const placeholders = draftIds.map(() => '?').join(',');
+    const drafts = db.prepare(
+      `SELECT id, source_url, source_domain, source_title, cluster_id, cluster_role,
+              status, mode, extracted_content,
+              (CASE WHEN locked_by IS NOT NULL AND lease_expires_at > datetime('now')
+                    THEN 1 ELSE 0 END) AS is_locked
+       FROM drafts WHERE id IN (${placeholders})`
+    ).all(...draftIds);
+
+    if (drafts.length < 2) {
+      return res.status(400).json({ error: 'Not enough valid drafts found' });
+    }
+
+    const alreadyClustered = drafts.filter(d => d.cluster_id);
+    if (alreadyClustered.length > 0) {
+      return res.status(400).json({
+        error: `${alreadyClustered.length} draft(s) already belong to a cluster. Remove them first.`,
+        clusteredIds: alreadyClustered.map(d => d.id)
+      });
+    }
+
+    // Refuse to merge drafts that are actively locked by a worker — the worker
+    // would otherwise complete its rewrite against a draft that has moved into
+    // a new cluster, wasting an AI call and producing stale data.
+    const activelyLocked = drafts.filter(d => d.is_locked === 1);
+    if (activelyLocked.length > 0) {
+      return res.status(409).json({
+        error: `${activelyLocked.length} draft(s) are currently being processed by a worker. Try again in a few minutes.`,
+        lockedIds: activelyLocked.map(d => d.id)
+      });
+    }
+
+    const safeTopic = (typeof topic === 'string' ? topic.trim().slice(0, 200) : '');
+    const clusterTopic = safeTopic || 'Manual Cluster — ' + new Date().toISOString().slice(0, 10);
+
+    const createCluster = db.transaction(() => {
+      const result = db.prepare(`
+        INSERT INTO clusters (topic, article_count, avg_similarity, primary_article_id,
+                              trends_boosted, priority, status, detected_at)
+        VALUES (?, ?, 1.0, NULL, 0, 'high', 'queued', datetime('now', 'localtime'))
+      `).run(clusterTopic, drafts.length);
+
+      const clusterId = result.lastInsertRowid;
+
+      const updateDraft = db.prepare(`
+        UPDATE drafts SET
+          cluster_id = ?,
+          cluster_role = ?,
+          mode = 'manual_import',
+          status = CASE
+            WHEN extracted_content IS NOT NULL AND length(extracted_content) > 50
+              THEN 'draft'
+            ELSE 'fetching'
+          END,
+          rewritten_html = NULL,
+          rewritten_title = NULL,
+          rewritten_word_count = NULL,
+          infranodus_data = NULL,
+          error_message = NULL,
+          locked_by = NULL,
+          locked_at = NULL,
+          lease_expires_at = NULL,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `);
+
+      updateDraft.run(clusterId, 'primary', draftIds[0]);
+      for (let i = 1; i < draftIds.length; i++) {
+        updateDraft.run(clusterId, 'secondary', draftIds[i]);
+      }
+
+      return clusterId;
+    });
+
+    try {
+      const clusterId = createCluster();
+      res.json({
+        success: true,
+        clusterId,
+        topic: clusterTopic,
+        draftCount: drafts.length,
+        primaryDraftId: draftIds[0],
+        message: `Manual cluster created from ${drafts.length} drafts. ` +
+          `Drafts with content reset to 'draft' status; drafts without content reset to 'fetching'. ` +
+          `Pipeline will rewrite with multi-source context.`
+      });
+    } catch (err) {
+      logger.error('api', 'POST /clusters/manual-from-drafts failed: ' + err.message);
+      const safe = sanitizeForClient(err);
+      res.status(safe.status).json({ error: safe.message });
     }
   });
 
@@ -1746,6 +1935,13 @@ function createApiRouter(deps) {
     }
 
     var wpUrl = config.WP_URL.replace(/\/$/, '');
+
+    try {
+      assertSafeUrl(wpUrl);
+    } catch (safeErr) {
+      return res.status(400).json({ success: false, error: 'WordPress URL rejected: ' + safeErr.message });
+    }
+
     var authHeader = 'Basic ' + Buffer.from(
       config.WP_USERNAME + ':' + config.WP_APP_PASSWORD
     ).toString('base64');
@@ -1755,10 +1951,10 @@ function createApiRouter(deps) {
 
     logger.info('api', 'Testing WP connection: ' + restRouteUrl);
 
-    axios.get(restRouteUrl, {
+    axios.get(restRouteUrl, safeAxiosOptions({
       headers: { 'Authorization': authHeader },
       timeout: 15000,
-    })
+    }))
       .then(function (userRes) {
         if (userRes.data && userRes.data.id) {
           res.json({
@@ -1773,8 +1969,9 @@ function createApiRouter(deps) {
         }
       })
       .catch(function (err) {
-        var statusCode = err.response ? err.response.status : null;
-        var wpMsg = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : err.message;
+        var safeWp = sanitizeAxiosError(err);
+        var statusCode = safeWp.status;
+        var wpMsg = safeWp.data || safeWp.message;
         var fullMsg = '';
 
         if (statusCode === 401) {
@@ -1840,6 +2037,13 @@ function createApiRouter(deps) {
 
     // Test actual connection
     var wpUrl = config.WP_URL.replace(/\/$/, '');
+
+    try {
+      assertSafeUrl(wpUrl);
+    } catch (safeErr) {
+      return res.status(400).json({ success: false, error: 'WordPress URL rejected: ' + safeErr.message });
+    }
+
     var authHeader = 'Basic ' + Buffer.from(
       config.WP_USERNAME + ':' + config.WP_APP_PASSWORD
     ).toString('base64');
@@ -1849,17 +2053,17 @@ function createApiRouter(deps) {
     // Test REST API discovery using ?rest_route= (works on Cloudways)
     var restRouteBase = wpUrl + '/?rest_route=';
 
-    axios.get(restRouteBase + encodeURIComponent('/'), {
+    axios.get(restRouteBase + encodeURIComponent('/'), safeAxiosOptions({
       headers: { 'Authorization': authHeader },
       timeout: 15000,
-    }).then(function (apiRes) {
+    })).then(function (apiRes) {
       result.checks.restApi = { ok: true, message: 'REST API reachable via ?rest_route=', siteName: apiRes.data.name || '' };
 
       // Test auth by fetching current user
-      return axios.get(restRouteBase + encodeURIComponent('/wp/v2/users/me'), {
+      return axios.get(restRouteBase + encodeURIComponent('/wp/v2/users/me'), safeAxiosOptions({
         headers: { 'Authorization': authHeader },
         timeout: 10000,
-      });
+      }));
     }).then(function (userRes) {
       result.checks.auth = {
         ok: true,
@@ -1874,8 +2078,9 @@ function createApiRouter(deps) {
       };
       res.json(result);
     }).catch(function (err) {
-      var statusCode = err.response ? err.response.status : null;
-      var wpMsg = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : '';
+      var safeWp2 = sanitizeAxiosError(err);
+      var statusCode = safeWp2.status;
+      var wpMsg = safeWp2.data || safeWp2.message || '';
       if (statusCode === 401 || statusCode === 403) {
         result.checks.auth = {
           ok: false,
@@ -1907,9 +2112,10 @@ function createApiRouter(deps) {
       res.json(response.data);
     })
     .catch(function (err) {
-      var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
+      var safe = sanitizeAxiosError(err);
+      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
       logger.error('api', 'Failed to fetch firehose rules', msg);
-      res.status(err.response ? err.response.status : 500).json({ error: msg });
+      res.status(safe.status || 500).json({ error: msg });
     });
   });
 
@@ -1936,9 +2142,10 @@ function createApiRouter(deps) {
       res.json(response.data);
     })
     .catch(function (err) {
-      var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
+      var safe = sanitizeAxiosError(err);
+      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
       logger.error('api', 'Failed to create firehose rule', msg);
-      res.status(err.response ? err.response.status : 500).json({ error: msg });
+      res.status(safe.status || 500).json({ error: msg });
     });
   });
 
@@ -1962,9 +2169,10 @@ function createApiRouter(deps) {
       res.json(response.data);
     })
     .catch(function (err) {
-      var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
+      var safe = sanitizeAxiosError(err);
+      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
       logger.error('api', 'Failed to update firehose rule', msg);
-      res.status(err.response ? err.response.status : 500).json({ error: msg });
+      res.status(safe.status || 500).json({ error: msg });
     });
   });
 
@@ -1987,9 +2195,10 @@ function createApiRouter(deps) {
       res.json({ success: true });
     })
     .catch(function (err) {
-      var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
+      var safe = sanitizeAxiosError(err);
+      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
       logger.error('api', 'Failed to delete firehose rule', msg);
-      res.status(err.response ? err.response.status : 500).json({ error: msg });
+      res.status(safe.status || 500).json({ error: msg });
     });
   });
 
@@ -2062,14 +2271,16 @@ function createApiRouter(deps) {
               saveTapTokenAndConnect(tapToken, res);
             })
             .catch(function (err) {
-              var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
+              var safe = sanitizeAxiosError(err);
+              var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
               logger.error('api', 'Failed to create tap', msg);
               res.status(500).json({ error: 'Failed to create tap: ' + msg });
             });
           }
         })
         .catch(function (err) {
-          var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
+          var safe = sanitizeAxiosError(err);
+          var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
           logger.error('api', 'Failed to list taps', msg);
           res.status(500).json({ error: 'Failed to list taps with management key: ' + msg });
         });
@@ -2492,12 +2703,17 @@ function createApiRouter(deps) {
   // Publish every ready primary draft to WordPress in a background loop with
   // 3-second spacing. MUST be registered before /drafts/:id parametric routes.
   router.post('/drafts/publish-all-ready', function (req, res) {
+    var slot = aiGuard.acquire('publish-all-ready', 0); // cost: 0 — not an AI spend
+    if (!slot.ok) {
+      return res.status(429).json({ success: false, error: slot.detail, reason: slot.reason });
+    }
     try {
       var publisherMod = deps.publisher || (deps.scheduler && deps.scheduler.publisher);
       if (publisherMod && !publisherMod.enabled && typeof publisherMod.reinit === 'function') {
         publisherMod.reinit();
       }
       if (!publisherMod || !publisherMod.enabled) {
+        aiGuard.release('publish-all-ready');
         return res.status(400).json({ success: false, error: 'WordPress publisher not configured. Set WP credentials in Settings.' });
       }
 
@@ -2507,8 +2723,12 @@ function createApiRouter(deps) {
       ).all();
 
       if (readyDrafts.length === 0) {
+        aiGuard.release('publish-all-ready');
         return res.json({ success: true, queued: 0, message: 'No ready articles found' });
       }
+
+      // Respond immediately; the background loop owns the lock until it finishes.
+      res.json({ success: true, queued: readyDrafts.length, message: 'Publishing ' + readyDrafts.length + ' drafts' });
 
       // Fire and forget — publish each one with a 3-second delay between them
       (async function () {
@@ -2600,16 +2820,15 @@ function createApiRouter(deps) {
           }
         }
         logger.info('api', 'Batch publish complete: ' + readyDrafts.length + ' drafts processed');
-      })();
-
-      res.json({
-        success: true,
-        queued: readyDrafts.length,
-        message: 'Publishing ' + readyDrafts.length + ' articles in the background',
+      })().catch(function (bgErr) {
+        logger.error('api', 'publish-all-ready background loop failed: ' + bgErr.message);
+      }).finally(function () {
+        aiGuard.release('publish-all-ready');
       });
     } catch (err) {
-      logger.error('api', 'publish-all-ready failed: ' + err.message);
-      res.status(500).json({ success: false, error: err.message });
+      aiGuard.release('publish-all-ready');
+      logger.error('api', 'publish-all-ready failed: ' + sanitizeAxiosError(err).message);
+      res.status(500).json({ success: false, error: sanitizeForClient(err, 'publish-all-ready failed') });
     }
   });
 
@@ -2665,12 +2884,62 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── InfraNodus entity analysis (per draft) ──────────────────────────────
+
+  router.get('/drafts/:id/infranodus', (req, res) => {
+    const draft = db.prepare('SELECT id, infranodus_data, ai_model_used FROM drafts WHERE id = ?')
+      .get(req.params.id);
+    if (!draft) return res.status(404).json({ error: 'Draft not found' });
+
+    let infraData = null;
+    try {
+      infraData = draft.infranodus_data ? JSON.parse(draft.infranodus_data) : null;
+    } catch (e) {
+      infraData = null;
+    }
+
+    res.json({
+      draftId: draft.id,
+      aiModel: draft.ai_model_used,
+      infraData,
+      hasInfraData: !!infraData
+    });
+  });
+
+  router.post('/drafts/:id/analyze', async (req, res) => {
+    const draft = db.prepare('SELECT id, extracted_content, rewritten_html FROM drafts WHERE id = ?')
+      .get(req.params.id);
+    if (!draft) return res.status(404).json({ error: 'Draft not found' });
+
+    const text = draft.extracted_content || draft.rewritten_html || '';
+    if (!text) return res.status(400).json({ error: 'No content to analyze' });
+
+    if (!infranodus || !infranodus.enabled) {
+      return res.status(400).json({ error: 'InfraNodus is not enabled. Set INFRANODUS_ENABLED=true in settings.' });
+    }
+
+    try {
+      const infraData = await infranodus.enhanceArticle(text.slice(0, 5000));
+      db.prepare('UPDATE drafts SET infranodus_data = ? WHERE id = ?')
+        .run(JSON.stringify(infraData), draft.id);
+      res.json({ success: true, infraData });
+    } catch (err) {
+      logger.error('api', 'POST /drafts/:id/analyze failed: ' + err.message);
+      const safe = sanitizeForClient(err);
+      res.status(safe.status).json({ error: safe.message });
+    }
+  });
+
   // ─── POST /api/drafts/batch-fetch-images ──────────────────────────────
   //
   // Fetches featured images for all extracted articles that are missing images.
   // Runs async — returns immediately, processes in background.
   //
   router.post('/drafts/batch-fetch-images', function (req, res) {
+    var slot = aiGuard.acquire('batch-fetch-images', 0); // cost: 0 — not an AI spend
+    if (!slot.ok) {
+      return res.status(429).json({ success: false, error: slot.detail, reason: slot.reason });
+    }
     try {
       var missingImages = db.prepare(
         "SELECT id, source_url, source_domain FROM drafts " +
@@ -2682,10 +2951,17 @@ function createApiRouter(deps) {
       ).all();
 
       if (missingImages.length === 0) {
+        aiGuard.release('batch-fetch-images');
         return res.json({ success: true, message: 'All articles already have images', count: 0 });
       }
 
       logger.info('api', 'Batch image fetch: starting for ' + missingImages.length + ' articles');
+
+      res.json({
+        success: true,
+        message: 'Image fetch started for ' + missingImages.length + ' articles (processing in background)',
+        count: missingImages.length
+      });
 
       (async function () {
         var found = 0;
@@ -2732,18 +3008,15 @@ function createApiRouter(deps) {
         }
 
         logger.info('api', 'Batch image fetch complete: ' + found + ' found, ' + failed + ' failed, ' + missingImages.length + ' total');
-      })().catch(function (err) {
-        logger.error('api', 'Batch image fetch error: ' + err.message);
-      });
-
-      res.json({
-        success: true,
-        message: 'Image fetch started for ' + missingImages.length + ' articles (processing in background)',
-        count: missingImages.length
+      })().catch(function (bgErr) {
+        logger.error('api', 'Batch image fetch error: ' + bgErr.message);
+      }).finally(function () {
+        aiGuard.release('batch-fetch-images');
       });
     } catch (err) {
-      logger.error('api', 'Batch image fetch start error: ' + err.message);
-      res.status(500).json({ success: false, error: err.message });
+      aiGuard.release('batch-fetch-images');
+      logger.error('api', 'Batch image fetch start error: ' + sanitizeAxiosError(err).message);
+      res.status(500).json({ success: false, error: sanitizeForClient(err, 'batch-fetch-images failed') });
     }
   });
 
@@ -3100,6 +3373,10 @@ function createApiRouter(deps) {
   // Does NOT auto-run — only triggered when admin clicks the button.
   //
   router.post('/drafts/batch-rewrite', async function (req, res) {
+    var slot = aiGuard.acquire('batch-rewrite');
+    if (!slot.ok) {
+      return res.status(429).json({ success: false, error: slot.detail, reason: slot.reason });
+    }
     try {
       if (!scheduler || typeof scheduler.rewriteAllExtractedClusters !== 'function') {
         return res.status(500).json({ success: false, error: 'Pipeline not available or missing rewriteAllExtractedClusters method' });
@@ -3119,8 +3396,10 @@ function createApiRouter(deps) {
         }
       });
     } catch (err) {
-      logger.error('api', 'Batch rewrite failed: ' + err.message);
-      res.status(500).json({ success: false, error: 'Batch rewrite failed: ' + err.message });
+      logger.error('api', 'Batch rewrite failed: ' + sanitizeAxiosError(err).message);
+      res.status(500).json({ success: false, error: sanitizeForClient(err, 'Batch rewrite failed') });
+    } finally {
+      aiGuard.release('batch-rewrite');
     }
   });
 
@@ -3129,10 +3408,15 @@ function createApiRouter(deps) {
   // Triggers AI rewrite for a SINGLE cluster.
   //
   router.post('/clusters/:clusterId/rewrite', async function (req, res) {
-    try {
-      var clusterId = parseId(req.params.clusterId);
-      if (!clusterId) return res.status(400).json({ success: false, error: 'Invalid cluster id' });
+    var clusterId = parseId(req.params.clusterId);
+    if (!clusterId) return res.status(400).json({ success: false, error: 'Invalid cluster id' });
 
+    var lockName = 'cluster-rewrite:' + clusterId;
+    var slot = aiGuard.acquire(lockName);
+    if (!slot.ok) {
+      return res.status(429).json({ success: false, error: slot.detail, reason: slot.reason });
+    }
+    try {
       if (!scheduler || typeof scheduler.rewriteClusterManual !== 'function') {
         return res.status(500).json({ success: false, error: 'Pipeline not available' });
       }
@@ -3145,8 +3429,10 @@ function createApiRouter(deps) {
         primaryDraftId: result.primaryDraftId
       });
     } catch (err) {
-      logger.error('api', 'Cluster rewrite failed: ' + err.message);
-      res.status(500).json({ success: false, error: 'Cluster rewrite failed' });
+      logger.error('api', 'Cluster rewrite failed: ' + sanitizeAxiosError(err).message);
+      res.status(500).json({ success: false, error: sanitizeForClient(err, 'Cluster rewrite failed') });
+    } finally {
+      aiGuard.release(lockName);
     }
   });
 
@@ -3512,9 +3798,10 @@ function createApiRouter(deps) {
             logger.info('api', 'Draft ' + id + ' ' + action + ' to WordPress: ' + publishUrl + (result.wpImageId ? ' (image: ' + result.wpImageId + ')' : ''));
             res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null, isUpdate: result.isUpdate });
           }).catch(function (err) {
-            var detail = err.message || 'Unknown error';
-            var statusCode = err.response ? err.response.status : null;
-            var wpError = err.response && err.response.data ? (err.response.data.message || err.response.data.code || '') : '';
+            var safeWp3 = sanitizeAxiosError(err);
+            var statusCode = safeWp3.status;
+            var wpError = safeWp3.data || '';
+            var detail = safeWp3.message || 'Unknown error';
             var fullMsg = 'WP publish failed' + (statusCode ? ' (HTTP ' + statusCode + ')' : '') + ': ' + detail + (wpError ? ' — ' + wpError : '');
             logger.error('api', fullMsg);
             try {
@@ -3558,8 +3845,9 @@ function createApiRouter(deps) {
       res.json({ taps: taps });
     })
     .catch(function (err) {
-      var msg = err.response ? 'API error ' + err.response.status + ': ' + JSON.stringify(err.response.data) : err.message;
-      res.status(err.response ? err.response.status : 500).json({ error: msg });
+      var safe = sanitizeAxiosError(err);
+      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
+      res.status(safe.status || 500).json({ error: msg });
     });
   });
 

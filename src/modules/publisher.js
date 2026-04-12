@@ -2,6 +2,7 @@
 
 var axios = require('axios');
 var path = require('path');
+var { assertSafeUrl, safeAxiosOptions, sanitizeAxiosError } = require('../utils/safe-http');
 
 // Timeout for WordPress API calls
 var WP_TIMEOUT_MS = 60000;
@@ -32,10 +33,55 @@ function guessMimeType(url) {
   return mimeMap[ext] || 'image/jpeg';
 }
 
-function generateFilename(slug, imageUrl) {
-  var ext = path.extname(imageUrl).toLowerCase().split('?')[0] || '.jpg';
-  var safeName = (slug || 'featured').replace(/[^a-z0-9-]/g, '').slice(0, 50);
-  return safeName + ext;
+/**
+ * Detect the actual image type by inspecting the first bytes of the buffer.
+ * Returns one of 'image/png', 'image/jpeg', 'image/gif', 'image/webp', or
+ * null if the bytes don't match any supported raster format. This is the
+ * defense against URL-extension spoofing (e.g. `.jpg` URL returning SVG).
+ */
+function sniffImageType(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return null;
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47 &&
+    buffer[4] === 0x0D && buffer[5] === 0x0A && buffer[6] === 0x1A && buffer[7] === 0x0A
+  ) {
+    return 'image/png';
+  }
+
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    return 'image/jpeg';
+  }
+
+  // GIF87a / GIF89a: 47 49 46 38 (37|39) 61
+  if (
+    buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38 &&
+    (buffer[4] === 0x37 || buffer[4] === 0x39) && buffer[5] === 0x61
+  ) {
+    return 'image/gif';
+  }
+
+  // WebP: "RIFF" (52 49 46 46) at 0-3, "WEBP" (57 45 42 50) at 8-11
+  if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+
+  return null;
+}
+
+// Map sniffed mime type to a filesystem extension (used to align the
+// Content-Disposition filename with the real bytes).
+function extForMime(mime) {
+  if (mime === 'image/png') return '.png';
+  if (mime === 'image/jpeg') return '.jpg';
+  if (mime === 'image/gif') return '.gif';
+  if (mime === 'image/webp') return '.webp';
+  return '.jpg';
 }
 
 /**
@@ -318,8 +364,9 @@ class WordPressPublisher {
       self.logger.info('publisher', 'Method 1 succeeded (' + res1.status + ')');
       return res1;
     } catch (err1) {
-      var status1 = err1.response ? err1.response.status : null;
-      var msg1 = err1.response && err1.response.data ? (err1.response.data.message || err1.response.data.code || '') : err1.message;
+      var safe1 = sanitizeAxiosError(err1);
+      var status1 = safe1.status;
+      var msg1 = safe1.data || safe1.message;
       self.logger.warn('publisher', 'Method 1 failed: ' + (status1 || '') + ' ' + msg1);
       errors.push({ method: '?rest_route= + header', status: status1, message: msg1 });
 
@@ -336,8 +383,9 @@ class WordPressPublisher {
           self.logger.info('publisher', 'Method 2 succeeded (' + res2.status + ')');
           return res2;
         } catch (err2) {
-          var status2 = err2.response ? err2.response.status : null;
-          var msg2 = err2.response && err2.response.data ? (err2.response.data.message || err2.response.data.code || '') : err2.message;
+          var safe2 = sanitizeAxiosError(err2);
+          var status2 = safe2.status;
+          var msg2 = safe2.data || safe2.message;
           self.logger.warn('publisher', 'Method 2 failed: ' + (status2 || '') + ' ' + msg2);
           errors.push({ method: 'URL-encoded auth', status: status2, message: msg2 });
         }
@@ -352,8 +400,9 @@ class WordPressPublisher {
       self.logger.info('publisher', 'Method 3 succeeded (' + res3.status + ')');
       return res3;
     } catch (err3) {
-      var status3 = err3.response ? err3.response.status : null;
-      var msg3 = err3.response && err3.response.data ? (err3.response.data.message || err3.response.data.code || '') : err3.message;
+      var safe3 = sanitizeAxiosError(err3);
+      var status3 = safe3.status;
+      var msg3 = safe3.data || safe3.message;
       self.logger.warn('publisher', 'Method 3 failed: ' + (status3 || '') + ' ' + msg3);
       errors.push({ method: '/wp-json/ + header', status: status3, message: msg3 });
     }
@@ -377,8 +426,12 @@ class WordPressPublisher {
 
   /**
    * Full publish pipeline.
+   * @param {object} rewrittenArticle
+   * @param {object} cluster
+   * @param {object} db
+   * @param {AbortSignal} [signal] - optional AbortSignal from pipeline shutdown
    */
-  async publish(rewrittenArticle, cluster, db) {
+  async publish(rewrittenArticle, cluster, db, signal) {
     var wpImageId = null;
 
     // Step 1: Upload featured image (if available)
@@ -402,7 +455,7 @@ class WordPressPublisher {
           title: rewrittenArticle.title || '',
           excerpt: rewrittenArticle.excerpt || '',
           slug: rewrittenArticle.slug || '',
-        });
+        }, signal);
         wpImageId = imageResult.mediaId;
         this.logger.info('publisher', 'Featured image uploaded: mediaId=' + wpImageId);
       } catch (imgErr) {
@@ -499,24 +552,76 @@ class WordPressPublisher {
 
   /**
    * Upload an image to WP media library with SEO-optimized filename, alt text, title, caption, description.
+   * @param {string} imageUrl
+   * @param {object} [seoData]
+   * @param {AbortSignal} [signal] - optional AbortSignal from pipeline shutdown
    */
-  async uploadImage(imageUrl, seoData) {
+  async uploadImage(imageUrl, seoData, signal) {
     seoData = seoData || {};
 
-    var imageResponse = await axios.get(imageUrl, {
-      responseType: 'arraybuffer',
-      timeout: WP_TIMEOUT_MS,
-      headers: { 'User-Agent': 'HDF-News-AutoPub/1.0' },
-    });
+    // SSRF pre-flight: block private-range IPs, bad schemes, metadata
+    // endpoints, etc. before touching the network.
+    try {
+      assertSafeUrl(imageUrl);
+    } catch (ssrfErr) {
+      this.logger.warn('publisher', 'Image upload blocked by SSRF guard: ' + ssrfErr.message);
+      throw new Error('Image upload blocked: ' + ssrfErr.message);
+    }
+
+    var imageResponse;
+    try {
+      var fetchOpts = safeAxiosOptions({
+        responseType: 'arraybuffer',
+        maxContentLength: 10 * 1024 * 1024,
+        maxRedirects: 3,
+        timeout: 15000,
+        headers: { 'User-Agent': 'HDF-News-AutoPub/1.0' },
+      });
+      if (signal) fetchOpts.signal = signal;
+      imageResponse = await axios.get(imageUrl, fetchOpts);
+    } catch (fetchErr) {
+      this.logger.warn('publisher', 'Image fetch failed: ' + fetchErr.message);
+      throw new Error('Image fetch failed: ' + fetchErr.message);
+    }
 
     var imageBuffer = Buffer.from(imageResponse.data);
-    var mimeType = guessMimeType(imageUrl);
+
+    // Secondary sanity check on the upstream content-type header. If the
+    // server admits it's HTML/XML/SVG, bail out immediately — these can be
+    // used to mount stored XSS against WordPress admins.
+    var upstreamCt = '';
+    if (imageResponse.headers && imageResponse.headers['content-type']) {
+      upstreamCt = String(imageResponse.headers['content-type']).toLowerCase();
+    }
+    if (
+      upstreamCt.indexOf('text/html') === 0 ||
+      upstreamCt.indexOf('application/xml') === 0 ||
+      upstreamCt.indexOf('image/svg+xml') === 0
+    ) {
+      this.logger.warn('publisher', 'Image upload rejected: disallowed content-type "' + upstreamCt + '" for ' + imageUrl);
+      throw new Error('Image upload rejected: disallowed content-type ' + upstreamCt);
+    }
+
+    // Authoritative check: inspect the actual bytes. If they don't match
+    // a known raster format, reject — NEVER fall back to URL extension.
+    var mimeType = sniffImageType(imageBuffer);
+    if (!mimeType) {
+      this.logger.warn('publisher', 'Image upload rejected: bytes do not match PNG/JPEG/GIF/WebP signature (' + imageUrl + ')');
+      throw new Error('Image upload rejected: unrecognized image format');
+    }
 
     var filename = generateSeoFilename(
       seoData.targetKeyword || '',
       seoData.title || '',
       imageUrl
     );
+    // Align filename extension with the sniffed type — if the URL said
+    // `.jpg` but the bytes are PNG, WordPress must see `.png`.
+    var desiredExt = extForMime(mimeType);
+    var currentExt = path.extname(filename).toLowerCase();
+    if (currentExt !== desiredExt) {
+      filename = filename.slice(0, filename.length - currentExt.length) + desiredExt;
+    }
 
     var altText = generateSeoAltText(
       seoData.targetKeyword || '',

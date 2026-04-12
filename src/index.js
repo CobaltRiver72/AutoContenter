@@ -48,8 +48,8 @@ var similarity = new SimilarityEngine(config, db, logger);
 var rewriter = new ArticleRewriter(config, logger);
 var publisher = new WordPressPublisher(config, logger);
 var extractor = new ContentExtractor(config, db, logger);
-var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
+var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus);
 var fuel = new FuelModule(config, db, logger);
 var metals = new MetalsModule(config, db, logger);
 
