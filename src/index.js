@@ -242,6 +242,12 @@ async function boot() {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
+        // script-src-attr governs inline event handlers (onclick=, onchange=, …).
+        // Helmet's default is 'none', which silently breaks every onclick="..."
+        // button in the dashboard. dashboard.js wires card-level actions through
+        // onclick attributes, so without this the Publish / Edit / Delete /
+        // Retry / Preview buttons on the Published and Ready pages are dead.
+        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
         connectSrc: ["'self'"]

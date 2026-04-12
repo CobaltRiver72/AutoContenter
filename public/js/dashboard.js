@@ -246,6 +246,16 @@
     // Clear timers from the previous page before switching
     clearPageTimers();
 
+    // Close editor overlay if it's open. Without this, sidebar nav clicks
+    // while the editor is visible leave the fixed-position #editor-overlay
+    // on top of every subsequent page, blocking all clicks underneath.
+    var editorOverlay = document.getElementById('editor-overlay');
+    if (editorOverlay && editorOverlay.style.display !== 'none') {
+      editorOverlay.style.display = 'none';
+      currentDraftId = null;
+      currentDraft = null;
+    }
+
     // Close SSE connection when leaving feed page
     if (state.currentPage === 'feed' && state.sseConnection) {
       state.sseConnection.close();
@@ -2124,9 +2134,8 @@
         updateReadyBadge(data.total || 0);
 
         if (pagination && typeof renderPagination === 'function') {
-          renderPagination(pagination, data.total || 0, data.page || 1, data.perPage || 20, function (p) {
-            loadReady(p);
-          });
+          var totalPages = Math.ceil((data.total || 0) / (data.perPage || 20));
+          renderPagination('readyPagination', data.page || 1, totalPages, loadReady);
         }
       })
       .catch(function (err) {
@@ -2366,6 +2375,7 @@
   // ─── Published Page (Drafts + Auto-Published) ──────────────────────────
 
   var publishedPollInterval = null;
+  var _lastPublishedHash = null;
 
   function loadPublished() {
     // Guard: never run two loadPublished() calls in parallel.
@@ -2377,6 +2387,9 @@
     _selectedDraftIds = {};
     _selectedDraftCount = 0;
     _selectModeActive = false;
+    // Force a full re-render on explicit loads — polling uses this hash to
+    // skip re-renders when data hasn't changed.
+    _lastPublishedHash = null;
 
     var container = $('publishedList');
     var pagination = $('publishedPagination');
@@ -3371,7 +3384,10 @@
   }
 
   function startPublishedPolling() {
-    if (publishedPollInterval) clearInterval(publishedPollInterval);
+    if (publishedPollInterval) {
+      clearInterval(publishedPollInterval);
+      publishedPollInterval = null;
+    }
     publishedPollInterval = setInterval(function () {
       if (state.currentPage !== 'published') {
         clearInterval(publishedPollInterval);
@@ -3386,9 +3402,16 @@
             return d.status === 'fetching' || d.status === 'rewriting' || d.status === 'ready';
           });
 
-          // Full re-render to correctly update cluster groups and progress bars
-          var pollContainer = $('publishedList');
-          renderDraftsView(pollContainer, drafts);
+          // Skip re-render if nothing changed — prevents destroying buttons
+          // mid-click and avoids needless DOM churn every 5 seconds.
+          var hash = drafts.length + ':' + drafts.map(function (d) {
+            return d.id + ':' + d.status + ':' + (d.updated_at || '');
+          }).join('|');
+          if (hash !== _lastPublishedHash) {
+            _lastPublishedHash = hash;
+            var pollContainer = $('publishedList');
+            renderDraftsView(pollContainer, drafts);
+          }
 
           if (!hasActive) {
             clearInterval(publishedPollInterval);
@@ -3397,6 +3420,7 @@
         })
         .catch(function () { /* silent */ });
     }, 5000);
+    state.refreshTimers.push(publishedPollInterval);
   }
 
   // ─── Content Editor ─────────────────────────────────────────────────────
