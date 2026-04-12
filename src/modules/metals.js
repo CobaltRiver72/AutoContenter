@@ -262,7 +262,6 @@ class MetalsModule extends EventEmitter {
       }
     }
 
-    this.stats.totalFetched += count;
     return count;
   }
 

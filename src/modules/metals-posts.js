@@ -2,11 +2,6 @@
 
 const MODULE = 'metals-posts';
 const crypto = require('crypto');
-const {
-  liveBadge, priceChangeBadge, statPills, sourceBadge,
-  readAlsoBox, infoBox, styledTable, faqSection,
-  articleSchema, breadcrumbs, priceHero
-} = require('../utils/post-html');
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 
@@ -197,9 +192,9 @@ class MetalsPostCreator {
     // Log to metals_log
     try {
       this.db.prepare(`
-        INSERT INTO metals_log (metal_type, action, detail, created_at)
-        VALUES (?, 'post_generation', ?, datetime('now'))
-      `).run(metalType, JSON.stringify({ created, updated, cities: cities.length, states: states.length }));
+        INSERT INTO metals_log (message, created_at)
+        VALUES (?, datetime('now'))
+      `).run(JSON.stringify({ metalType, action: 'post_generation', created, updated, cities: cities.length, states: states.length }));
     } catch (err) {
       this.logger.warn(MODULE, 'Failed to write metals_log: ' + err.message);
     }

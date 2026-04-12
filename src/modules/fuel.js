@@ -441,7 +441,7 @@ class FuelModule extends EventEmitter {
     return this.db.prepare(`
       SELECT fc.city_name, fp.petrol, fp.diesel
       FROM fuel_cities fc
-      LEFT JOIN fuel_prices fp ON fc.city_name = fp.city AND fp.price_date = date('now')
+      LEFT JOIN fuel_prices fp ON fc.city_name = fp.city AND fp.price_date = date('now', 'localtime')
       WHERE fc.state = ? AND fc.is_enabled = 1
       ORDER BY fc.city_name
     `).all(state);

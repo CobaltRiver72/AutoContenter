@@ -36,7 +36,7 @@
     _chartJsQueue.push(cb);
     if (_chartJsQueue.length > 1) return; // already loading
     var s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
     s.onload = function () {
       _chartJsReady = true;
       _chartJsQueue.forEach(function (fn) { fn(); });

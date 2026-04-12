@@ -816,7 +816,7 @@ function createApiRouter(deps) {
       var params = [metal];
       if (state) { sql += ' AND mc.state = ?'; params.push(state); }
       sql += ' ORDER BY mc.state, mc.city_name';
-      res.json({ data: db.prepare(sql).all.apply(db.prepare(sql), params) });
+      var stmt = db.prepare(sql); res.json({ data: stmt.all.apply(stmt, params) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1133,7 +1133,7 @@ function createApiRouter(deps) {
         logger.error('api', 'Fuel post generation failed: ' + err.message);
       });
 
-      res.json({ ok: true, message: 'Post generation started in background', results: results });
+      res.json({ ok: true, message: 'Post generation started in background' });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1160,7 +1160,7 @@ function createApiRouter(deps) {
         logger.error('api', 'Metals post generation failed: ' + err.message);
       });
 
-      res.json({ ok: true, message: 'Post generation started in background', results: results });
+      res.json({ ok: true, message: 'Post generation started in background' });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

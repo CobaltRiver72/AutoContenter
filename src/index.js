@@ -252,7 +252,14 @@ async function boot() {
   // CORS — same origin only
   app.use(cors({ origin: false }));
 
-  // Rate limiting — general API
+  // Rate limiting — public API (widget embeds; higher limit)
+  app.use('/api/public/', rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 3000,
+    message: { error: 'Too many requests' }
+  }));
+
+  // Rate limiting — authenticated API
   app.use('/api/', rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 200,

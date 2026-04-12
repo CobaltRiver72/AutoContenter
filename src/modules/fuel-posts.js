@@ -2,11 +2,6 @@
 
 const MODULE = 'fuel-posts';
 const crypto = require('crypto');
-const {
-  liveBadge, priceChangeBadge, statPills, sourceBadge,
-  readAlsoBox, infoBox, styledTable, faqSection,
-  articleSchema, breadcrumbs, priceHero
-} = require('../utils/post-html');
 
 // ---------------------------------------------------------------------------
 // Formatting helpers

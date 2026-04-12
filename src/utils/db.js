@@ -712,39 +712,9 @@ function recoverStuckDrafts(logger) {
   }
 }
 
-function recoverStaleLocks() {
-  try {
-    var stale = db.prepare(
-      "UPDATE drafts SET locked_by = NULL, locked_at = NULL, lease_expires_at = NULL " +
-      "WHERE locked_by IS NOT NULL AND lease_expires_at < datetime('now')"
-    ).run();
-    if (stale.changes > 0) {
-      console.log('[db] Released ' + stale.changes + ' stale job locks');
-    }
-
-    // Also reset any extraction_status stuck in 'extracting' with no active lease
-    var staleExtraction = db.prepare(
-      "UPDATE drafts SET extraction_status = 'pending', " +
-      "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
-      "updated_at = datetime('now') " +
-      "WHERE extraction_status = 'extracting'"
-    ).run();
-
-    if (staleExtraction.changes > 0) {
-      console.log('[db] Recovered ' + staleExtraction.changes + ' stale extracting locks on startup');
-    }
-
-    return stale.changes;
-  } catch (e) {
-    console.warn('[db] recoverStaleLocks failed:', e.message);
-    return 0;
-  }
-}
-
 module.exports = {
   db,
   closeDb,
   runMigrations,
   recoverStuckDrafts,
-  recoverStaleLocks,
 };
