@@ -3657,6 +3657,8 @@
 
   var currentDraftId = null;
   var currentDraft = null;
+  // Last entity search results keyed by draftId — used by "Apply to Rewrite"
+  var _entitySearchResults = {};
 
   window.__openEditor = function (draftId) {
     openEditor(draftId);
@@ -4221,7 +4223,19 @@
           html += '<p class="infra-empty">No meaningful data returned. Try a broader or different search term.</p>';
         }
 
-        html += '<div class="infra-entity-meta">&#9203; ' + escapeHtml(d.analyzedAt || '') + ' &nbsp;&#183;&nbsp; 7 API calls in parallel</div>';
+        // ── Apply to Rewrite button ───────────────────────────────────
+        // Stores result so applyEntityToDraft() can read it without
+        // re-fetching or encoding the whole object into a data attribute.
+        _entitySearchResults[draftId] = d;
+        html +=
+          '<div class="infra-apply-bar">' +
+            '<div class="infra-apply-bar-info">' +
+              '<span class="infra-apply-bar-icon">&#128300;</span>' +
+              '<span>This data is <strong>not yet used by AI</strong>. Click Apply to wire it into the next rewrite.</span>' +
+            '</div>' +
+            '<button class="btn btn-infra-apply" data-click="applyEntityToDraft" data-draft-id="' + draftId + '">&#9989; Apply to Rewrite</button>' +
+          '</div>' +
+          '<div class="infra-entity-meta">&#9203; ' + escapeHtml(d.analyzedAt || '') + ' &nbsp;&#183;&nbsp; 7 API calls in parallel</div>';
         results.innerHTML = html;
       })
       .catch(function (err) {
@@ -4229,6 +4243,44 @@
       })
       .finally(function () {
         if (btn) { btn.disabled = false; btn.textContent = 'Fetch'; }
+      });
+  }
+
+  function applyEntityToDraft(draftId) {
+    var entityData = _entitySearchResults[draftId];
+    if (!entityData) {
+      showToast('No entity search result to apply. Run a search first.', 'error');
+      return;
+    }
+
+    var btn = document.querySelector('[data-click="applyEntityToDraft"][data-draft-id="' + draftId + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
+
+    fetchApi('/api/drafts/' + draftId + '/infranodus-merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entityData: entityData }),
+    })
+      .then(function (resp) {
+        if (resp.success) {
+          showToast('&#128300; Entity data applied — AI will use it on next rewrite', 'success');
+          // Update the apply bar to reflect applied state
+          if (btn) {
+            btn.textContent = '&#9989; Applied';
+            btn.classList.add('btn-infra-applied');
+            btn.closest('.infra-apply-bar').querySelector('.infra-apply-bar-info span:last-child').innerHTML =
+              'Entity data <strong>merged into this draft</strong>. AI will use it when you click Rewrite.';
+          }
+          // Refresh the analysis panel so it shows the merged data
+          loadInfraData(draftId);
+        } else {
+          showToast((resp && resp.error) || 'Apply failed', 'error');
+          if (btn) { btn.disabled = false; btn.textContent = '&#9989; Apply to Rewrite'; }
+        }
+      })
+      .catch(function (err) {
+        showToast('Apply failed: ' + (err.message || String(err)), 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '&#9989; Apply to Rewrite'; }
       });
   }
 
@@ -4250,6 +4302,7 @@
   window.__toggleInfraPanel = toggleInfraPanel;
   window.__runInfraAnalysis = runInfraAnalysis;
   window.__searchEntityInfra = searchEntityInfra;
+  window.__applyEntityToDraft = applyEntityToDraft;
 
   // ─── Batch Action Bar (Manual Cluster from Feed / Drafts) ─────────
   function _getBatchSelectionCount() {
@@ -6287,6 +6340,7 @@
     'toggleDraftSelect':       function (el, e) { __toggleDraftSelect(Number(el.dataset.draftId), e); },
     'runInfraAnalysis':        function (el) { __runInfraAnalysis(Number(el.dataset.draftId)); },
     'searchEntityInfra':       function (el) { __searchEntityInfra(String(el.dataset.draftId)); },
+    'applyEntityToDraft':      function (el) { __applyEntityToDraft(String(el.dataset.draftId)); },
     'switchToInfraTab':        function () { __switchToInfraTab(); },
     'toggleSelectMode':        function () { __toggleSelectMode(); },
     'batchDeleteFailed':       function () { __batchDeleteFailed(); },

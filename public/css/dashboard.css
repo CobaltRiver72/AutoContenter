@@ -3192,6 +3192,46 @@ select:focus {
 }
 .infra-entity-error { color: var(--red); font-size: 13px; padding: 8px 0; }
 
+/* Apply to Rewrite bar */
+.infra-apply-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #0f1a2e;
+  border: 1px solid #1e3a5f;
+  border-left: 3px solid #3b82f6;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 14px;
+}
+.infra-apply-bar-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  flex: 1;
+}
+.infra-apply-bar-icon { font-size: 15px; flex-shrink: 0; }
+.infra-apply-bar-info strong { color: #fbbf24; }
+.btn-infra-apply {
+  background: #1d4ed8;
+  color: #e0e7ff;
+  border: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.btn-infra-apply:hover { background: #2563eb; }
+.btn-infra-apply:disabled { background: #1e3a5f; color: #4b5563; cursor: not-allowed; }
+.btn-infra-applied { background: #14532d !important; color: #86efac !important; cursor: default; }
+
 /* Loading spinner */
 .infra-entity-loading {
   display: flex;

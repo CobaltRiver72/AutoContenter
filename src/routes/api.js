@@ -3040,6 +3040,70 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/drafts/:id/infranodus-merge ────────────────────────────────
+  // Merges Entity Deep Search results into the draft's infranodus_data so the
+  // next AI rewrite uses the entity search data alongside article analysis.
+  // Keeps existing article-analysis fields; overlays SEO/keyword fields from
+  // the entity search result.
+
+  router.post('/drafts/:id/infranodus-merge', function (req, res) {
+    var id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid draft id' });
+
+    var entityData = req.body && req.body.entityData;
+    if (!entityData || typeof entityData !== 'object') {
+      return res.status(400).json({ error: 'entityData object required' });
+    }
+
+    var draft = db.prepare('SELECT id, infranodus_data FROM drafts WHERE id = ?').get(id);
+    if (!draft) return res.status(404).json({ error: 'Draft not found' });
+
+    // Parse existing stored analysis (may be null / empty)
+    var existing = {};
+    try { existing = JSON.parse(draft.infranodus_data || '{}') || {}; } catch (e) {}
+
+    // Deduplicate-merge two string arrays
+    function mergeUniq(a, b) {
+      var out = (a || []).slice();
+      (b || []).forEach(function (v) { if (v && out.indexOf(v) === -1) out.push(v); });
+      return out.slice(0, 15);
+    }
+
+    var merged = {
+      // ── Article text fields — keep existing, entity fills gaps ────────
+      mainTopics:          mergeUniq(existing.mainTopics,        entityData.mainTopics),
+      missingEntities:     mergeUniq(existing.missingEntities,   entityData.missingEntities),
+      contentGaps:         mergeUniq(existing.contentGaps,       entityData.contentGaps),
+      researchQuestions:   mergeUniq(existing.researchQuestions, entityData.researchQuestions),
+      advice:              existing.advice        || null,
+      graphSummary:        entityData.graphSummary || existing.graphSummary || null,
+      bigrams:             (entityData.bigrams && entityData.bigrams.length)
+                             ? entityData.bigrams
+                             : (existing.bigrams || []),
+      clusterDescriptions: (entityData.clusterDescriptions && entityData.clusterDescriptions.length)
+                             ? entityData.clusterDescriptions
+                             : (existing.clusterDescriptions || []),
+      // ── SEO / keyword fields — entity search always wins ─────────────
+      targetKeyword:       entityData.entity       || existing.targetKeyword || null,
+      rankingAdvice:       entityData.rankingAdvice || existing.rankingAdvice || null,
+      intentAdvice:        entityData.intentAdvice  || existing.intentAdvice  || null,
+      gapAdvice:           entityData.gapAdvice     || existing.gapAdvice     || null,
+      relatedQueries:      mergeUniq(existing.relatedQueries, entityData.relatedQueries),
+      demandTopics:        mergeUniq(existing.demandTopics,   entityData.demandTopics),
+      demandGaps:          mergeUniq(existing.demandGaps,     entityData.demandGaps),
+      // ── Meta ─────────────────────────────────────────────────────────
+      charsSent:           existing.charsSent || 0,
+      analyzedAt:          existing.analyzedAt || entityData.analyzedAt || new Date().toISOString(),
+      entityAppliedAt:     new Date().toISOString(),
+    };
+
+    db.prepare("UPDATE drafts SET infranodus_data = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(JSON.stringify(merged), id);
+    logger.info('api', 'InfraNodus entity merge applied to draft #' + id +
+      ' — entity:"' + (entityData.entity || '') + '"');
+    res.json({ success: true });
+  });
+
   // ─── POST /api/drafts/batch-fetch-images ──────────────────────────────
   //
   // Fetches featured images for all extracted articles that are missing images.
