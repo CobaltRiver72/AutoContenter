@@ -5164,7 +5164,9 @@
     })
       .then(function (data) {
         if (data && data.success) {
-          showToast('Cluster created from ' + data.draftCount + ' drafts → Cluster #' + data.clusterId, 'success');
+          var msg = 'Cluster #' + data.clusterId + ' created from ' + data.draftCount + ' drafts';
+          if (data.movedFromClusters) msg += ' (' + data.movedFromClusters + ' moved from existing clusters)';
+          showToast(msg, 'success');
           clearBatchSelection();
           navigateTo('clusters');
         } else {
