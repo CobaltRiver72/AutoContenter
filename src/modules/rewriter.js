@@ -1,6 +1,7 @@
 'use strict';
 
 var { convertMarkdownToHtml } = require('../utils/markdown-to-html');
+var { sanitizeAxiosError } = require('../utils/safe-http');
 
 // Model definitions — used by both backend and sent to frontend
 var AI_MODELS = {
@@ -47,7 +48,7 @@ function validateKeyFormat(provider, key) {
   if (!key || typeof key !== 'string') return { ok: false, reason: 'missing' };
   var k = key.trim();
   if (provider === 'openrouter') {
-    if (!k.indexOf || k.indexOf('sk-or-v1-') !== 0) {
+    if (k.indexOf('sk-or-v1-') !== 0) {
       return { ok: false, reason: 'OpenRouter keys must start with "sk-or-v1-"' };
     }
   } else if (provider === 'anthropic') {
@@ -190,6 +191,28 @@ function buildPrompt(article, cluster, settings) {
       'Use this trending momentum — weave the trend topic into the headline and opening paragraph.\n\n';
   }
 
+  // InfraNodus entity analysis — graph-derived topics, missing entities, gaps
+  // to fill, and research questions. Populated when the pipeline runs the
+  // cluster through the InfraNodus module before calling the rewriter.
+  var entityContext = '';
+  if (s.infraData) {
+    var infra = s.infraData;
+    entityContext = '--- ENTITY ANALYSIS (from InfraNodus) ---\n';
+    if (infra.mainTopics && infra.mainTopics.length) {
+      entityContext += 'Main Topics: ' + infra.mainTopics.join(', ') + '\n';
+    }
+    if (infra.missingEntities && infra.missingEntities.length) {
+      entityContext += 'Entities to cover: ' + infra.missingEntities.join(', ') + '\n';
+    }
+    if (infra.contentGaps && infra.contentGaps.length) {
+      entityContext += 'Content gaps to fill: ' + infra.contentGaps.join('; ') + '\n';
+    }
+    if (infra.researchQuestions && infra.researchQuestions.length) {
+      entityContext += 'Questions readers may have: ' + infra.researchQuestions.slice(0, 3).join('; ') + '\n';
+    }
+    entityContext += '--- END ENTITY ANALYSIS ---';
+  }
+
   var sourceArticles = '';
   var allArticles = (cluster && cluster.articles && Array.isArray(cluster.articles)) ? cluster.articles : [article];
 
@@ -252,6 +275,7 @@ function buildPrompt(article, cluster, settings) {
     '- Boilerplate intros ("In today\'s fast-paced world…", "In a major development…").',
     '',
     trendingContext.replace(/\n+$/, ''),
+    entityContext,
     '',
     '# STEP 1 — STRUCTURE SIGNALS (MANDATORY, COMES BEFORE THE JSON)',
     '',
@@ -671,7 +695,7 @@ class ArticleRewriter {
         ', OpenAI key: ' + (hasOpenAI ? 'SET' : 'NOT SET') +
         ', OpenRouter key: ' + (hasOpenRouter ? 'SET' : 'NOT SET'));
     } catch (err) {
-      this.logger.error('rewriter', 'Init failed: ' + err.message);
+      this.logger.error('rewriter', 'Init failed: ' + sanitizeAxiosError(err).message);
       this.status = 'error';
       this.error = err.message;
     }
@@ -797,8 +821,7 @@ class ArticleRewriter {
       var jsKey = keys[i];
       var dbKey = mapping[jsKey];
       if (settings[jsKey] !== undefined && settings[jsKey] !== '') {
-        var val = typeof settings[jsKey] === 'boolean' ? String(settings[jsKey]) : String(settings[jsKey]);
-        this._setSetting(dbKey, val);
+        this._setSetting(dbKey, String(settings[jsKey]));
       }
     }
 
@@ -894,15 +917,18 @@ class ArticleRewriter {
       customPrompt: opts.customPrompt || '',
       publicationName: publicationName,
       publicationUrl: publicationUrl,
+      infraData: opts.infraData || null,
     };
     var prompt = buildPrompt(article, cluster || { articles: [article] }, promptSettings);
     var self = this;
+
+    var jobSignal = opts.signal || null;
 
     // Wraps a provider call with structure validation. If signals say a
     // structure is required but the body markdown is missing it, retries
     // the same provider once with a stronger nudge appended to the prompt.
     async function callWithValidation(provName, key, model) {
-      var r = await self._callProviderStructured(provName, key, model, prompt);
+      var r = await self._callProviderStructured(provName, key, model, prompt, jobSignal);
       if (r && r.signals) {
         self.logger.info('rewriter', 'Signals: ' + JSON.stringify(r.signals));
       }
@@ -914,7 +940,7 @@ class ArticleRewriter {
         'Your previous response set these signals to YES but the body markdown did not include the required structure(s):\n' +
         v.errors.map(function (e) { return '- ' + e; }).join('\n') +
         '\nFix this. Either change the relevant signal to "no" if the story does not actually warrant it, OR include the required structure (markdown table / numbered list / date-prefixed list) inside body_markdown. Respond with valid JSON in the same schema, with a fresh <signals> block.';
-      var retry = await self._callProviderStructured(provName, key, model, nudge);
+      var retry = await self._callProviderStructured(provName, key, model, nudge, jobSignal);
       if (retry && retry.signals) {
         self.logger.info('rewriter', 'Signals (retry): ' + JSON.stringify(retry.signals));
       }
@@ -938,7 +964,7 @@ class ArticleRewriter {
       this.logger.info('rewriter', 'SUCCESS: ' + provider + ' / ' + primaryModel + ' — ' + result.tokensUsed + ' tokens');
       return result;
     } catch (primaryErr) {
-      this.logger.error('rewriter', 'PRIMARY FAILED (' + provider + '): ' + primaryErr.message);
+      this.logger.error('rewriter', 'PRIMARY FAILED (' + provider + '): ' + sanitizeAxiosError(primaryErr).message);
 
       if (!enableFallback) throw primaryErr;
 
@@ -983,7 +1009,7 @@ class ArticleRewriter {
           self.logger.info('rewriter', 'FALLBACK SUCCESS: ' + fbProvider + ' / ' + fb.model);
           return fbResult;
         } catch (fbErr) {
-          self.logger.error('rewriter', 'FALLBACK FAILED (' + fbProvider + '): ' + fbErr.message);
+          self.logger.error('rewriter', 'FALLBACK FAILED (' + fbProvider + '): ' + sanitizeAxiosError(fbErr).message);
           lastError = fbErr;
         }
       }
@@ -994,10 +1020,10 @@ class ArticleRewriter {
 
   // ─── Provider calls (structured JSON output for pipeline) ───────────────
 
-  async _callProviderStructured(provider, apiKey, model, prompt) {
-    if (provider === 'anthropic') return this._callAnthropicStructured(apiKey, model, prompt);
-    if (provider === 'openrouter') return this._callOpenRouterStructured(apiKey, model, prompt);
-    return this._callOpenAIStructured(apiKey, model, prompt);
+  async _callProviderStructured(provider, apiKey, model, prompt, signal) {
+    if (provider === 'anthropic') return this._callAnthropicStructured(apiKey, model, prompt, signal);
+    if (provider === 'openrouter') return this._callOpenRouterStructured(apiKey, model, prompt, signal);
+    return this._callOpenAIStructured(apiKey, model, prompt, signal);
   }
 
   _acquireProviderLock(provider) {
@@ -1009,7 +1035,7 @@ class ArticleRewriter {
     return prev.then(function () { return release; });
   }
 
-  async _callAnthropicStructured(apiKey, model, prompt) {
+  async _callAnthropicStructured(apiKey, model, prompt, signal) {
     var release = await this._acquireProviderLock('anthropic');
     try {
       var Anthropic;
@@ -1022,12 +1048,13 @@ class ArticleRewriter {
 
       var client = new Anthropic({ apiKey: apiKey.trim() });
 
+      var requestOpts = signal ? { signal: signal } : {};
       var response = await client.messages.create({
         model: model,
         max_tokens: maxTokens,
         temperature: temperature,
         messages: [{ role: 'user', content: prompt }],
-      });
+      }, requestOpts);
 
       var rawText = response.content && response.content[0] ? response.content[0].text : '';
       if (!rawText || rawText.length < 50) {
@@ -1042,7 +1069,7 @@ class ArticleRewriter {
     }
   }
 
-  async _callOpenAIStructured(apiKey, model, prompt) {
+  async _callOpenAIStructured(apiKey, model, prompt, signal) {
     var release = await this._acquireProviderLock('openai');
     try {
       var OpenAI;
@@ -1055,6 +1082,7 @@ class ArticleRewriter {
 
       var isOModel = model.startsWith('o3') || model.startsWith('o4');
       var client = new OpenAI({ apiKey: apiKey.trim() });
+      var requestOpts = signal ? { signal: signal } : {};
 
       var response;
       if (isOModel) {
@@ -1065,7 +1093,7 @@ class ArticleRewriter {
             { role: 'developer', content: 'You are a professional news journalist. Always respond in valid JSON.' },
             { role: 'user', content: prompt },
           ],
-        });
+        }, requestOpts);
       } else {
         response = await client.chat.completions.create({
           model: model,
@@ -1076,7 +1104,7 @@ class ArticleRewriter {
             { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON.' },
             { role: 'user', content: prompt },
           ],
-        });
+        }, requestOpts);
       }
 
       var rawText = response.choices && response.choices[0] ? response.choices[0].message.content : '';
@@ -1106,7 +1134,7 @@ class ArticleRewriter {
     });
   }
 
-  async _callOpenRouterStructured(apiKey, model, prompt) {
+  async _callOpenRouterStructured(apiKey, model, prompt, signal) {
     var release = await this._acquireProviderLock('openrouter');
     try {
       // OpenRouter reasoning models (DeepSeek-R1, Nemotron, Minimax M2, Qwen QwQ)
@@ -1118,6 +1146,7 @@ class ArticleRewriter {
       if (temperature === undefined || temperature === null) temperature = 0.7;
 
       var client = this._openRouterClient(apiKey);
+      var requestOpts = signal ? { signal: signal } : {};
 
       // Build request with JSON mode (matches _callOpenAIStructured behaviour)
       var requestBody = {
@@ -1132,16 +1161,19 @@ class ArticleRewriter {
       };
 
       // Retry wrapper for 429 / 5xx with exponential backoff (2s, 4s, 8s)
+      // Note: abort signal errors are NOT retried — they propagate immediately.
       var response = null;
       var lastErr = null;
       var maxAttempts = 3;
       for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          response = await client.chat.completions.create(requestBody);
+          response = await client.chat.completions.create(requestBody, requestOpts);
           lastErr = null;
           break;
         } catch (err) {
           lastErr = err;
+          // Abort errors must not be retried
+          if (err && err.name === 'AbortError') throw err;
           var status = (err && (err.status || err.statusCode)) || 0;
           var isRateLimited = status === 429;
           var isServerError = status >= 500 && status < 600;

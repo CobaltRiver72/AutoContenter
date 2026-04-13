@@ -40,6 +40,78 @@ var http = require('http');
 var https = require('https');
 
 /**
+ * Allowed destination ports. Empty string means "default port for scheme"
+ * (http→80, https→443) — URL.port is '' when the URL omits an explicit port.
+ * Blocks common internal-service ports like 6379 (Redis), 25 (SMTP),
+ * 11211 (memcached), 9200 (Elasticsearch), etc.
+ */
+var ALLOWED_PORTS = new Set(['', '80', '443', '8080', '8443']);
+
+/**
+ * Detect IPv4 addresses in non-canonical forms that `net.isIP` misses:
+ *   octal:   0177.0.0.1
+ *   hex:     0x7f.0.0.1
+ *   decimal: 2130706433
+ *   short:   127.1
+ * Returns the normalized dotted-quad form (e.g. '127.0.0.1') if the input
+ * looks like ANY IPv4 encoding, or null if not. Used by assertSafeUrl to
+ * reject bypass attempts before DNS is ever consulted.
+ */
+function normalizeIPv4(host) {
+  if (typeof host !== 'string' || host.length === 0) return null;
+
+  // Single number → 32-bit integer form (e.g. "2130706433")
+  if (/^\d+$/.test(host)) {
+    var n = parseInt(host, 10);
+    if (!isFinite(n) || n < 0 || n > 0xFFFFFFFF) return null;
+    return [(n >>> 24) & 0xFF, (n >>> 16) & 0xFF, (n >>> 8) & 0xFF, n & 0xFF].join('.');
+  }
+
+  // Dotted forms — 2, 3, or 4 parts, each possibly decimal/octal/hex
+  var parts = host.split('.');
+  if (parts.length < 2 || parts.length > 4) return null;
+
+  function parsePart(s) {
+    if (s.length === 0) return null;
+    if (/^0x[0-9a-f]+$/i.test(s)) {
+      var h = parseInt(s.slice(2), 16);
+      return isFinite(h) ? h : null;
+    }
+    if (/^0[0-7]+$/.test(s)) {
+      var o = parseInt(s, 8);
+      return isFinite(o) ? o : null;
+    }
+    if (/^\d+$/.test(s)) {
+      var d = parseInt(s, 10);
+      return isFinite(d) ? d : null;
+    }
+    return null;
+  }
+
+  var nums = parts.map(parsePart);
+  if (nums.indexOf(null) !== -1) return null;
+
+  // Expand short-form
+  // 4 parts: a.b.c.d — each 0-255
+  // 3 parts: a.b.c → a.b.0..255 where c is 16-bit (0-65535)
+  // 2 parts: a.b   → a.0.0..255 where b is 24-bit (0-16777215)
+  var a, b, c;
+  if (nums.length === 4) {
+    if (nums.some(function (x) { return x < 0 || x > 255; })) return null;
+    return nums.join('.');
+  } else if (nums.length === 3) {
+    a = nums[0]; b = nums[1]; c = nums[2];
+    if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 0xFFFF) return null;
+    return [a, b, (c >>> 8) & 0xFF, c & 0xFF].join('.');
+  } else if (nums.length === 2) {
+    a = nums[0]; b = nums[1];
+    if (a < 0 || a > 255 || b < 0 || b > 0xFFFFFF) return null;
+    return [a, (b >>> 16) & 0xFF, (b >>> 8) & 0xFF, b & 0xFF].join('.');
+  }
+  return null;
+}
+
+/**
  * IPv4 ranges that must never be reachable from a fetched URL.
  * Each entry is `[firstOctet, secondOctetMin?, secondOctetMax?]`.
  *
@@ -183,11 +255,38 @@ function assertSafeUrl(rawUrl) {
     throw schemeErr;
   }
 
+  if (!ALLOWED_PORTS.has(parsed.port)) {
+    var errPort = new Error('URL rejected: port ' + parsed.port + ' not in allowlist');
+    errPort.code = 'BLOCKED_PORT';
+    throw errPort;
+  }
+
   var host = parsed.hostname;
   if (!host) {
     var hostErr = new Error('URL has no hostname: ' + rawUrl);
     hostErr.code = 'ESSRF';
     throw hostErr;
+  }
+
+  // Catch IPv4 literals in non-canonical encodings (octal, hex, decimal,
+  // short-form) that `net.isIP` returns 0 for. glibc's resolver happily
+  // normalizes these to the real IP at connect time, so without this
+  // pre-flight they'd bypass the isBlockedIp check below.
+  var normalized = normalizeIPv4(host);
+  if (normalized !== null) {
+    if (isBlockedIp(normalized)) {
+      var errNorm = new Error('URL rejected: IPv4 literal ' + host + ' normalizes to blocked IP ' + normalized);
+      errNorm.code = 'BLOCKED_IP';
+      throw errNorm;
+    }
+    // Even if the normalized IP isn't blocked, reject any non-canonical
+    // encoding. Keeps outbound traffic predictable and closes off future
+    // bypasses against new resolver quirks.
+    if (host !== normalized) {
+      var errNC = new Error('URL rejected: non-canonical IPv4 encoding ' + host + ' (use ' + normalized + ' instead)');
+      errNC.code = 'NON_CANONICAL_IP';
+      throw errNC;
+    }
   }
 
   if (net.isIP(host) && isBlockedIp(host)) {
@@ -221,6 +320,8 @@ function safeAxiosOptions(extra) {
   return opts;
 }
 
+var { sanitizeAxiosError } = require('./sanitize-axios-error');
+
 module.exports = {
   isBlockedIp: isBlockedIp,
   safeLookup: safeLookup,
@@ -228,4 +329,5 @@ module.exports = {
   safeHttpsAgent: safeHttpsAgent,
   assertSafeUrl: assertSafeUrl,
   safeAxiosOptions: safeAxiosOptions,
+  sanitizeAxiosError: sanitizeAxiosError,
 };

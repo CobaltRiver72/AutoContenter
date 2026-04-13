@@ -227,6 +227,56 @@ class WPPublisher {
   }
 
   /**
+   * Upload a media file to the WordPress Media Library.
+   * Returns the attachment object { id, source_url, ... } on success.
+   */
+  async uploadMedia(buffer, filename, mimeType) {
+    if (!this.ready) throw new Error('WP Publisher not ready');
+
+    const url = this.siteUrl + '/wp-json/wp/v2/media';
+    const authStr = Buffer.from(this.username + ':' + this.appPassword).toString('base64');
+
+    const maxRetries = 3;
+    const baseDelay = 2000;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + authStr,
+            'Content-Disposition': 'attachment; filename="' + filename + '"',
+            'Content-Type': mimeType || 'image/webp',
+          },
+          body: buffer,
+        });
+
+        if (res.status === 429 && attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          this.logger.warn(MODULE, 'Media upload rate limited. Retrying in ' + delay + 'ms');
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          throw new Error('WP media upload ' + res.status + ': ' + errText.substring(0, 200));
+        }
+
+        return await res.json();
+      } catch (err) {
+        if (attempt < maxRetries && err.message && err.message.includes('429')) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error('WP media upload: max retries exhausted');
+  }
+
+  /**
    * Test WordPress connection.
    */
   async testConnection() {

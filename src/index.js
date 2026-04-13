@@ -34,10 +34,12 @@ var { ContentExtractor } = require('./modules/extractor');
 var { InfranodusAnalyzer } = require('./modules/infranodus');
 var { FuelModule } = require('./modules/fuel');
 var { MetalsModule } = require('./modules/metals');
+var { LotteryModule } = require('./modules/lottery');
 var { WPPublisher } = require('./modules/wp-publisher');
 var { FuelPostCreator } = require('./modules/fuel-posts');
 var { MetalsPostCreator } = require('./modules/metals-posts');
-var { setupSession, checkAuth } = require('./routes/auth');
+var { LotteryPostCreator } = require('./modules/lottery-posts');
+var { setupSession, checkAuth, verifyCsrf } = require('./routes/auth');
 var createApiRouter = require('./routes/api');
 var createDashboardRouter = require('./routes/dashboard');
 
@@ -48,10 +50,11 @@ var similarity = new SimilarityEngine(config, db, logger);
 var rewriter = new ArticleRewriter(config, logger);
 var publisher = new WordPressPublisher(config, logger);
 var extractor = new ContentExtractor(config, db, logger);
-var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
+var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus);
 var fuel = new FuelModule(config, db, logger);
 var metals = new MetalsModule(config, db, logger);
+var lottery = new LotteryModule(config, db, logger);
 
 // ─── 6. Clustering queue (debounce rapid SSE events) ──────────────────────
 var _clusteringQueue = [];
@@ -60,6 +63,7 @@ var _clusteringProcessing = false;
 var CLUSTERING_DEBOUNCE_MS = 3000;
 var CLUSTERING_MAX_WAIT_MS = 10000;
 var _clusteringFirstEventAt = null;
+var CLUSTER_QUEUE_MAX = 500;
 
 async function boot() {
   // ─── Wire up event listeners BEFORE any module init ──────────────────────
@@ -79,6 +83,10 @@ async function boot() {
       }
 
       // Queue article for batch similarity processing instead of immediate
+      if (_clusteringQueue.length >= CLUSTER_QUEUE_MAX) {
+        logger.warn('index', 'Clustering queue full, dropping article', { url: article.url });
+        return;
+      }
       _clusteringQueue.push({ article: article, trendsMatch: trendsMatch });
 
       if (!_clusteringFirstEventAt) {
@@ -195,14 +203,17 @@ async function boot() {
   await infranodus.init();
   await fuel.init();
   await metals.init();
+  await lottery.init();
 
   // ─── WP Publisher + Post Creators ───────────────────────────────────────
   var wpPub = new WPPublisher(config, db, logger);
   await wpPub.init();
   var fuelPosts = new FuelPostCreator(fuel, wpPub, db, logger);
   var metalsPosts = new MetalsPostCreator(metals, wpPub, db, logger);
+  var lotteryPosts = new LotteryPostCreator(lottery, wpPub, db, logger);
   fuel.setPostCreator(fuelPosts);
   metals.setPostCreator(metalsPosts);
+  lottery.setPostCreator(lotteryPosts);
 
   logger.info('index', 'All downstream modules ready. Starting firehose...');
   // Firehose opens SSE — replay articles flow into listeners above
@@ -219,8 +230,8 @@ async function boot() {
     firehose: firehose, trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
     scheduler: scheduler, infranodus: infranodus,
-    fuel: fuel, metals: metals,
-    wpPublisher: wpPub, fuelPosts: fuelPosts, metalsPosts: metalsPosts,
+    fuel: fuel, metals: metals, lottery: lottery,
+    wpPublisher: wpPub, fuelPosts: fuelPosts, metalsPosts: metalsPosts, lotteryPosts: lotteryPosts,
   };
 
   // Trust Hostinger reverse proxy
@@ -241,16 +252,11 @@ async function boot() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        // script-src-attr governs inline event handlers (onclick=, onchange=, …).
-        // Helmet's default is 'none', which silently breaks every onclick="..."
-        // button in the dashboard. dashboard.js wires card-level actions through
-        // onclick attributes, so without this the Publish / Edit / Delete /
-        // Retry / Preview buttons on the Published and Ready pages are dead.
-        scriptSrcAttr: ["'unsafe-inline'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'"]
+        connectSrc: ["'self'"],
+        frameAncestors: ["'none'"]
       }
     }
   }));
@@ -307,7 +313,7 @@ async function boot() {
   });
   var publicRouter = require('./routes/public')(db);
   app.use('/api/public', publicRouter);
-  app.use('/api', checkAuth, apiRouter);
+  app.use('/api', checkAuth, verifyCsrf, apiRouter);
 
   // Static assets — accessible without auth for login page to work
   app.use('/css', express.static(path.resolve(__dirname, '..', 'public', 'css')));
@@ -341,7 +347,7 @@ async function boot() {
     logger.info('index', 'Express server listening on port ' + PORT);
 
     // Log module health summary
-    var modules = [firehose, trends, buffer, similarity, extractor, rewriter, publisher, infranodus, fuel, metals];
+    var modules = [firehose, trends, buffer, similarity, extractor, rewriter, publisher, infranodus, fuel, metals, lottery];
     for (var i = 0; i < modules.length; i++) {
       var h = modules[i].getHealth();
       logger.info('index', h.module + ': ' + h.status);
@@ -410,7 +416,7 @@ async function boot() {
     clearInterval(memoryWatchdog);
 
     // Shutdown modules
-    var shutdownList = [firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals];
+    var shutdownList = [firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
     for (var i = 0; i < shutdownList.length; i++) {
       try {
         if (shutdownList[i].shutdown) shutdownList[i].shutdown();

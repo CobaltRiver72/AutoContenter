@@ -11,3 +11,14 @@ data/import-*.csv
 *.db-wal
 *.db-shm
 .DS_Store
+
+# Obsidian vault config + personal notes (not project state)
+.obsidian/
+.trash/
+notes/
+Untitled.md
+Untitled.canvas
+**/Untitled.canvas
+
+# Claude Code per-user state
+.claude/

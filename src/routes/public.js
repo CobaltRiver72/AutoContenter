@@ -4,6 +4,8 @@ var express = require('express');
 var cors = require('cors');
 var router = express.Router();
 
+var logger = require('../utils/logger');
+
 var publicCors = cors({ origin: '*', methods: ['GET'] });
 router.use(publicCors);
 
@@ -60,7 +62,8 @@ module.exports = function(db) {
       if (!row) return res.json({ ok: false, data: null });
       res.json({ ok: true, data: Object.assign({}, row, { delta: delta, delta_pct: delta_pct }), ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -91,7 +94,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: rows || [], ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -128,7 +132,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: rows || [], ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -172,7 +177,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: summary || {}, ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -203,7 +209,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: rows || [], ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -212,7 +219,6 @@ module.exports = function(db) {
     var city = req.query.city;
     if (!city) return res.json({ ok: false, error: 'city required' });
     try {
-      var today = "date('now', 'localtime')";
       var result = {};
       var metals = ['gold', 'silver', 'platinum'];
       for (var i = 0; i < metals.length; i++) {
@@ -225,7 +231,29 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: result, ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
+    }
+  });
+
+  // GET /api/public/lottery/today — today's draw status for the live results widget
+  router.get('/lottery/today', function(req, res) {
+    try {
+      var today = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      var rows = db.prepare(
+        'SELECT draw_time, draw_name, status, image_url, wp_post_id, wp_post_url ' +
+        'FROM lottery_results WHERE draw_date = ? ORDER BY draw_time ASC'
+      ).all(today);
+
+      var draws = { '1pm': null, '6pm': null, '8pm': null };
+      for (var i = 0; i < rows.length; i++) {
+        draws[rows[i].draw_time] = rows[i];
+      }
+
+      res.json({ ok: true, date: today, draws: draws, ts: Date.now() });
+    } catch (e) {
+      logger.error('public', 'lottery/today error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -249,7 +277,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: (rows || []).map(function(r) { return r.city_name; }), ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 

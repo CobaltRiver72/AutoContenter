@@ -2,7 +2,6 @@
 
 var express = require('express');
 var path = require('path');
-var { getConfig } = require('../utils/config');
 
 /**
  * Create the dashboard router for login/logout and SPA serving.
@@ -148,12 +147,13 @@ function createDashboardRouter() {
 
     if (password && verifyPassword(password)) {
       // Regenerate session to prevent session fixation
-      var oldSession = req.session;
       req.session.regenerate(function (err) {
         if (err) {
           return res.redirect('/login?error=1');
         }
         req.session.authenticated = true;
+        var { setCsrfCookie } = require('./auth');
+        setCsrfCookie(req, res); // sets session.csrfToken + readable _csrf cookie (H1)
         return res.redirect('/');
       });
       return;

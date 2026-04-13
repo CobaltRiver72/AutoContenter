@@ -1094,6 +1094,7 @@
                   <textarea id="setting-custom-prompt" rows="3" placeholder="e.g., Write in Hindi, add FAQ section, focus on SEO for 'keyword'..."></textarea>
                 </label>
               </div>
+              <div id="infra-status-bar" class="infra-status-bar" style="display:none;"></div>
               <button type="button" class="btn btn-purple btn-full" id="editorRewriteBtn">&#129302; Rewrite with AI</button>
             </form>
           </div>
@@ -1109,6 +1110,7 @@
             <button class="editor-tab active" data-panel="right" data-tab="ai-output">AI Output</button>
             <button class="editor-tab" data-panel="right" data-tab="html-editor">HTML Editor</button>
             <button class="editor-tab" data-panel="right" data-tab="preview">Preview</button>
+            <button class="editor-tab" data-panel="right" data-tab="infranodus">&#128300; InfraNodus</button>
           </div>
           <div class="editor-tab-content" id="tab-ai-output">
             <div id="ai-output-content" class="ai-output-content">
@@ -1121,6 +1123,7 @@
           <div class="editor-tab-content" id="tab-preview" style="display:none;">
             <iframe id="preview-iframe" class="preview-iframe"></iframe>
           </div>
+          <div class="editor-tab-content" id="tab-infranodus" style="display:none;"></div>
         </div>
       </div>
       <!-- Editor WP Error Log Drawer (above bottom bar) -->

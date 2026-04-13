@@ -2940,3 +2940,135 @@ select:focus {
 .mini-panel { background: #1f2937; border: 1px solid #374151; border-radius: 6px; padding: 10px 14px; margin-top: 8px; font-size: 12px; color: #d1d5db; line-height: 1.6; }
 .mt-1 { margin-top: 4px; }
 .mt-2 { margin-top: 8px; }
+
+/* ─── InfraNodus panel ─────────────────────────────────────────────────── */
+.infra-panel {
+  margin-top: 12px;
+  border: 1px solid #2a2a3e;
+  border-radius: 8px;
+  background: #1a1a2e;
+  overflow: hidden;
+}
+.infra-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: #1e1e32;
+  font-weight: 600;
+  font-size: 13px;
+}
+.infra-header:hover { background: #252540; }
+.infra-badge {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.infra-badge-active { background: #1a6b3c; color: #7dffb3; }
+.infra-badge-empty { background: #333; color: #888; }
+.infra-body { padding: 14px; }
+.infra-section { margin-bottom: 14px; }
+.infra-section h4 {
+  font-size: 12px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.infra-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.infra-tag {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+.infra-tag-topic { background: #1a3a5c; color: #7db8ff; }
+.infra-tag-entity { background: #5c3a1a; color: #ffb87d; }
+.infra-gaps li, .infra-questions li {
+  font-size: 13px;
+  color: #ccc;
+  margin-bottom: 4px;
+  padding-left: 12px;
+  position: relative;
+}
+.infra-gaps li::before { content: '→'; position: absolute; left: 0; color: #e8943a; }
+.infra-questions li::before { content: '?'; position: absolute; left: 0; color: #7db8ff; }
+.infra-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid #2a2a3e;
+  font-size: 12px;
+  color: #888;
+}
+.infra-loading { color: #888; font-size: 13px; }
+.infra-error { color: var(--red); font-size: 13px; }
+.infra-empty { color: #666; font-size: 13px; margin-bottom: 8px; }
+
+/* InfraNodus status bar — shown in Settings tab above Rewrite button */
+.infra-status-bar { margin-bottom: 10px; }
+.infra-status-bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.infra-status-ready { background: #0d2b1a; border: 1px solid #1a5c38; color: #7dffb3; }
+.infra-status-empty { background: #1e1e1e; border: 1px solid #333; color: #888; }
+.infra-status-bar-inner .btn { flex-shrink: 0; }
+
+/* ─── Batch action bar ─────────────────────────────────────────────────── */
+.batch-action-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1e1e32;
+  border: 1px solid #3a3a5c;
+  border-radius: 12px;
+  padding: 10px 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  animation: slideUp 0.2s ease;
+}
+@keyframes slideUp {
+  from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+  to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+@keyframes slideUpMobile {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.batch-action-bar span {
+  color: #7dffb3;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.batch-input {
+  background: #0d0d1a;
+  border: 1px solid #3a3a5c;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #eee;
+  font-size: 13px;
+  width: 200px;
+}
+@media (max-width: 600px) {
+  .batch-action-bar {
+    left: 10px;
+    right: 10px;
+    transform: none;
+    animation: slideUpMobile 0.2s ease;
+  }
+  .batch-input { width: auto; flex: 1; }
+}

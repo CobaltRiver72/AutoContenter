@@ -5,6 +5,26 @@
   //  HDF AutoPub Dashboard — Client-Side SPA
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ─── CSRF auto-inject (H1) ──────────────────────────────────────────────
+  // Patch window.fetch so every mutating call to /api/* automatically carries
+  // the X-CSRF-Token header read from the _csrf readable cookie set at login.
+  (function () {
+    var _origFetch = window.fetch;
+    window.fetch = function (url, options) {
+      options = options || {};
+      var method = (options.method || 'GET').toUpperCase();
+      var urlStr = typeof url === 'string' ? url : (url && url.url) || '';
+      if (urlStr.indexOf('/api/') === 0 && ['POST', 'PUT', 'DELETE', 'PATCH'].indexOf(method) !== -1) {
+        var csrfMatch = document.cookie.match(/(?:^|;\s*)_csrf=([^;]+)/);
+        if (csrfMatch) {
+          options.headers = options.headers || {};
+          options.headers['X-CSRF-Token'] = decodeURIComponent(csrfMatch[1]);
+        }
+      }
+      return _origFetch.apply(this, arguments);
+    };
+  }());
+
   // ─── State ──────────────────────────────────────────────────────────────
 
   var state = {
@@ -302,6 +322,8 @@
     // Close sidebar on mobile
     var sidebar = $('sidebar');
     if (sidebar) sidebar.classList.remove('open');
+
+    if (typeof updateBatchActions === 'function') updateBatchActions();
   }
 
   function initRouter() {
@@ -1413,16 +1435,18 @@
   function updateBulkActionBar() {
     var bar = $('bulkActionBar');
     var countEl = $('bulkCount');
-    if (!bar) return;
-    if (selectedCount > 0) {
-      bar.style.display = 'flex';
-      var addedCount = Object.keys(draftStatusCache).length;
-      var label = selectedCount + ' selected';
-      if (addedCount > 0) label += ' | ' + addedCount + ' already in drafts';
-      if (countEl) countEl.textContent = label;
-    } else {
-      bar.style.display = 'none';
+    if (bar) {
+      if (selectedCount > 0) {
+        bar.style.display = 'flex';
+        var addedCount = Object.keys(draftStatusCache).length;
+        var label = selectedCount + ' selected';
+        if (addedCount > 0) label += ' | ' + addedCount + ' already in drafts';
+        if (countEl) countEl.textContent = label;
+      } else {
+        bar.style.display = 'none';
+      }
     }
+    if (typeof updateBatchActions === 'function') updateBatchActions();
   }
 
   function bulkFetchAndAddToDrafts() {
@@ -3381,6 +3405,8 @@
         toggleBtn.innerHTML = '&#9745; Select';
       }
     }
+
+    if (typeof updateBatchActions === 'function') updateBatchActions();
   }
 
   function startPublishedPolling() {
@@ -3569,6 +3595,23 @@
             });
         }
 
+        // ─── InfraNodus Entity Analysis Tab ─────────────────────
+        var infraTab = $('tab-infranodus');
+        if (infraTab) {
+          infraTab.innerHTML =
+            '<div class="infra-panel" id="infra-panel-' + draftId + '">' +
+              '<div class="infra-header">' +
+                '<span class="infra-icon">&#128300;</span>' +
+                '<span>InfraNodus Entity Analysis</span>' +
+                '<span class="infra-badge" id="infra-badge-' + draftId + '"></span>' +
+              '</div>' +
+              '<div class="infra-body" id="infra-body-' + draftId + '">' +
+                '<div class="infra-loading">Fetching analysis...</div>' +
+              '</div>' +
+            '</div>';
+        }
+        loadInfraData(draftId);
+
         // Settings tab
         $('setting-keyword').value = draft.target_keyword || '';
         $('setting-domain').value = draft.target_domain || '';
@@ -3625,6 +3668,250 @@
     currentDraft = null;
     loadPublished();
   }
+
+  // ─── InfraNodus Entity Analysis Panel ─────────────────────────────
+  function loadInfraData(draftId) {
+    var body = document.getElementById('infra-body-' + draftId);
+    var badge = document.getElementById('infra-badge-' + draftId);
+    if (!body) return;
+
+    fetchApi('/api/drafts/' + draftId + '/infranodus')
+      .then(function (data) {
+        if (!data.hasInfraData) {
+          if (badge) { badge.textContent = 'No data'; badge.className = 'infra-badge infra-badge-empty'; }
+          body.innerHTML =
+            '<p class="infra-empty">No InfraNodus analysis for this draft yet.</p>' +
+            '<p class="infra-empty" style="font-size:12px;color:#555;">The pipeline runs analysis automatically when InfraNodus is enabled. You can also trigger it manually.</p>' +
+            '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">&#128300; Run Analysis Now</button>';
+          _updateInfraStatusBar(null);
+          return;
+        }
+
+        var infra = data.infraData || {};
+        var topicCount = (infra.mainTopics || []).length;
+        var entityCount = (infra.missingEntities || []).length;
+
+        if (badge) {
+          badge.textContent = topicCount + ' topics · ' + entityCount + ' entities';
+          badge.className = 'infra-badge infra-badge-active';
+        }
+
+        var html = '';
+        if (infra.mainTopics && infra.mainTopics.length) {
+          html += '<div class="infra-section"><h4>Main Topics Identified</h4><div class="infra-tags">';
+          infra.mainTopics.forEach(function (t) {
+            html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>';
+          });
+          html += '</div></div>';
+        }
+        if (infra.missingEntities && infra.missingEntities.length) {
+          html += '<div class="infra-section"><h4>Entities the AI Was Told to Cover</h4><div class="infra-tags">';
+          infra.missingEntities.forEach(function (e) {
+            html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>';
+          });
+          html += '</div></div>';
+        }
+        if (infra.contentGaps && infra.contentGaps.length) {
+          html += '<div class="infra-section"><h4>Content Gaps (Bridging Opportunities)</h4><ul class="infra-gaps">';
+          infra.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+          html += '</ul></div>';
+        }
+        if (infra.researchQuestions && infra.researchQuestions.length) {
+          html += '<div class="infra-section"><h4>Research Questions Passed to AI</h4><ul class="infra-questions">';
+          infra.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
+          html += '</ul></div>';
+        }
+        html += '<div class="infra-section infra-meta">' +
+          '<span>Used in rewrite: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
+          '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">&#128300; Re-run</button>' +
+          '</div>';
+
+        body.innerHTML = html;
+        _updateInfraStatusBar(infra);
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="infra-error">Failed to load: ' + escapeHtml(err.message || String(err)) + '</p>';
+        _updateInfraStatusBar(null);
+      });
+  }
+
+  function _updateInfraStatusBar(infra) {
+    var bar = $('infra-status-bar');
+    if (!bar) return;
+    if (!infra || !(infra.mainTopics || []).length) {
+      bar.style.display = 'block';
+      bar.innerHTML =
+        '<div class="infra-status-bar-inner infra-status-empty">' +
+          '<span>&#128300; No InfraNodus analysis — AI will rewrite without entity context.</span>' +
+          '<button class="btn btn-xs btn-outline" onclick="window.__switchToInfraTab()">Run Analysis</button>' +
+        '</div>';
+    } else {
+      var t = (infra.mainTopics || []).length;
+      var e = (infra.missingEntities || []).length;
+      bar.style.display = 'block';
+      bar.innerHTML =
+        '<div class="infra-status-bar-inner infra-status-ready">' +
+          '<span>&#128300; InfraNodus ready — <strong>' + t + ' topics</strong>, <strong>' + e + ' entities</strong> will enrich this rewrite.</span>' +
+          '<button class="btn btn-xs btn-outline" onclick="window.__switchToInfraTab()">View</button>' +
+        '</div>';
+    }
+  }
+
+  function toggleInfraPanel(draftId) {
+    // No-op: InfraNodus is now a full tab, nothing to toggle.
+    // Kept for backward-compat with any lingering onclick references.
+  }
+
+  function runInfraAnalysis(draftId) {
+    var body = document.getElementById('infra-body-' + draftId);
+    if (!body) return;
+    body.innerHTML = '<div class="infra-loading">&#128300; Running InfraNodus analysis...</div>';
+
+    fetchApi('/api/drafts/' + draftId + '/analyze', { method: 'POST' })
+      .then(function (data) {
+        if (data && data.success) {
+          loadInfraData(draftId);
+        } else {
+          body.innerHTML = '<p class="infra-error">' + escapeHtml((data && data.error) || 'Analysis failed') + '</p>';
+        }
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="infra-error">' + escapeHtml(err.message || String(err)) + '</p>';
+      });
+  }
+
+  window.__switchToInfraTab = function () {
+    var btn = document.querySelector('.editor-tab[data-panel="right"][data-tab="infranodus"]');
+    if (btn) btn.click();
+  };
+
+  window.__loadInfraData = loadInfraData;
+  window.__toggleInfraPanel = toggleInfraPanel;
+  window.__runInfraAnalysis = runInfraAnalysis;
+
+  // ─── Batch Action Bar (Manual Cluster from Feed / Drafts) ─────────
+  function _getBatchSelectionCount() {
+    if (state.currentPage === 'feed') return selectedCount;
+    if (state.currentPage === 'published') return _selectedDraftCount;
+    return 0;
+  }
+
+  function updateBatchActions() {
+    var count = _getBatchSelectionCount();
+    var bar = document.getElementById('batch-action-bar');
+    var isOnDraftsPage = state.currentPage === 'published';
+    var btnAction = isOnDraftsPage ? 'window.__mergeIntoCluster()' : 'window.__createManualCluster()';
+    var btnLabel = isOnDraftsPage ? 'Merge into Cluster' : 'Create Cluster';
+    var label = isOnDraftsPage ? 'drafts selected' : 'articles selected';
+
+    if (count >= 2 && (state.currentPage === 'feed' || state.currentPage === 'published')) {
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'batch-action-bar';
+        bar.className = 'batch-action-bar';
+        document.body.appendChild(bar);
+      }
+      bar.innerHTML =
+        '<span id="batch-count">' + count + ' ' + label + '</span>' +
+        '<input type="text" id="batch-cluster-topic" placeholder="Cluster topic (optional)" class="batch-input" />' +
+        '<button class="btn btn-primary btn-sm" onclick="' + btnAction + '">' + btnLabel + '</button>' +
+        '<button class="btn btn-outline btn-sm" onclick="window.__clearBatchSelection()">Clear</button>';
+      bar.style.display = 'flex';
+    } else if (bar) {
+      bar.style.display = 'none';
+    }
+  }
+
+  function createManualCluster() {
+    var articleIds = [];
+    for (var k in selectedArticles) {
+      if (Object.prototype.hasOwnProperty.call(selectedArticles, k)) {
+        var a = selectedArticles[k];
+        if (a && a.id != null) {
+          var idNum = parseInt(a.id, 10);
+          if (!isNaN(idNum)) articleIds.push(idNum);
+        }
+      }
+    }
+    var topicEl = document.getElementById('batch-cluster-topic');
+    var topic = topicEl ? topicEl.value : '';
+
+    if (articleIds.length < 2) {
+      showToast('Select at least 2 articles', 'error');
+      return;
+    }
+
+    fetchApi('/api/clusters/manual', {
+      method: 'POST',
+      body: { articleIds: articleIds, topic: topic || undefined }
+    })
+      .then(function (data) {
+        if (data && data.success) {
+          showToast('Cluster created: ' + data.articleCount + ' articles → Cluster #' + data.clusterId, 'success');
+          clearBatchSelection();
+          navigateTo('clusters');
+        } else {
+          showToast((data && data.error) || 'Failed to create cluster', 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Failed: ' + (err.message || String(err)), 'error');
+      });
+  }
+
+  function mergeIntoCluster() {
+    var draftIds = [];
+    for (var k in _selectedDraftIds) {
+      if (_selectedDraftIds[k]) {
+        var idNum = parseInt(k, 10);
+        if (!isNaN(idNum)) draftIds.push(idNum);
+      }
+    }
+    var topicEl = document.getElementById('batch-cluster-topic');
+    var topic = topicEl ? topicEl.value : '';
+
+    if (draftIds.length < 2) {
+      showToast('Select at least 2 drafts', 'error');
+      return;
+    }
+
+    fetchApi('/api/clusters/manual-from-drafts', {
+      method: 'POST',
+      body: { draftIds: draftIds, topic: topic || undefined }
+    })
+      .then(function (data) {
+        if (data && data.success) {
+          showToast('Cluster created from ' + data.draftCount + ' drafts → Cluster #' + data.clusterId, 'success');
+          clearBatchSelection();
+          navigateTo('clusters');
+        } else {
+          showToast((data && data.error) || 'Failed to create cluster', 'error');
+        }
+      })
+      .catch(function (err) {
+        showToast('Failed: ' + (err.message || String(err)), 'error');
+      });
+  }
+
+  function clearBatchSelection() {
+    if (state.currentPage === 'feed' && typeof clearSelection === 'function') {
+      clearSelection();
+    }
+    if (state.currentPage === 'published') {
+      _selectedDraftIds = {};
+      _selectedDraftCount = 0;
+      var cbs = document.querySelectorAll('.draft-select-checkbox');
+      for (var i = 0; i < cbs.length; i++) { cbs[i].checked = false; }
+      if (typeof _updateSelectUI === 'function') _updateSelectUI();
+    }
+    var bar = document.getElementById('batch-action-bar');
+    if (bar) bar.style.display = 'none';
+  }
+
+  window.__updateBatchActions = updateBatchActions;
+  window.__createManualCluster = createManualCluster;
+  window.__mergeIntoCluster = mergeIntoCluster;
+  window.__clearBatchSelection = clearBatchSelection;
 
   // ─── Draft Versions ────────────────────────────────────────────────
   // Loads version history into the editor's version bar. Shows the bar
