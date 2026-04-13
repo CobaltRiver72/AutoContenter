@@ -3700,39 +3700,15 @@
         $('editor-status').textContent = draft.status.toUpperCase();
         $('editor-status').style.background = getStatusColor(draft.status);
 
-        // Source tab — featured image + meta
-        var featImgHTML = '';
-        if (draft.featured_image) {
-          featImgHTML = '<div class="editor-featured-image">' +
-            '<img src="' + escapeHtml(draft.featured_image) + '" alt="Featured image" data-error="hideSelf">' +
-            '</div>';
-        }
-        featImgHTML += '<div class="editor-featured-url">' +
-          '<label><strong>Featured Image URL:</strong>' +
-          '<input type="text" id="editor-featured-input" value="' + escapeHtml(draft.featured_image || '') + '" placeholder="https://..." style="width:100%;margin-top:4px;padding:6px 10px;background:var(--bg-main);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:0.8rem">' +
-          '</label></div>';
-
-        $('source-meta').innerHTML = featImgHTML +
-          '<div style="margin-top:10px">' +
-          '<strong>Source:</strong> <a href="' + escapeHtml(draft.source_url) + '" target="_blank" style="color:var(--accent)">' + escapeHtml(draft.source_domain || draft.source_url) + '</a>' +
-          ' | <strong>Language:</strong> ' + escapeHtml(draft.source_language || '--') +
-          ' | <strong>Category:</strong> ' + escapeHtml(draft.source_category || '--') +
-          ' | <strong>Extraction:</strong> ' + escapeHtml(draft.extraction_status || '--') +
-          (draft.extracted_content ? ' | <strong>Length:</strong> ' + draft.extracted_content.length + ' chars' : '') +
+        // Source tab — featured image picker + meta
+        $('source-meta').innerHTML = buildImagePickerHTML(draft) +
+          '<div style="margin-top:10px;font-size:12px;color:var(--text-muted)">' +
+          '<strong style="color:var(--text-secondary)">Source:</strong> <a href="' + escapeHtml(draft.source_url) + '" target="_blank" style="color:var(--accent)">' + escapeHtml(draft.source_domain || draft.source_url) + '</a>' +
+          ' &nbsp;|&nbsp; <strong style="color:var(--text-secondary)">Lang:</strong> ' + escapeHtml(draft.source_language || '--') +
+          ' &nbsp;|&nbsp; <strong style="color:var(--text-secondary)">Extraction:</strong> ' + escapeHtml(draft.extraction_status || '--') +
+          (draft.extracted_content ? ' &nbsp;|&nbsp; ' + draft.extracted_content.length + ' chars' : '') +
           '</div>';
-
-        // Save featured image on blur
-        var featInput = $('editor-featured-input');
-        if (featInput) {
-          featInput.addEventListener('change', function () {
-            fetchApi('/api/drafts/' + draftId, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ featured_image: featInput.value })
-            }).then(function () { showToast('Featured image updated', 'info'); })
-              .catch(function () { showToast('Failed to save image URL', 'error'); });
-          });
-        }
+        initImagePicker(draftId, draft);
 
         $('source-content').textContent = draft.extracted_content || draft.source_content_markdown || 'No content extracted.';
 
@@ -3902,6 +3878,193 @@
         showToast('Failed to load draft: ' + err.message, 'error');
       });
   }
+
+  // ─── Image Picker (Source Tab) ────────────────────────────────────────
+
+  // Extract all unique <img src="..."> URLs from draft's HTML fields
+  function extractImagesFromDraft(draft) {
+    var seen = {};
+    var imgs = [];
+    function scanHtml(html) {
+      if (!html) return;
+      var re = /<img[^>]+src=["']([^"']+)["']/gi;
+      var m;
+      while ((m = re.exec(html)) !== null) {
+        var url = m[1];
+        if (url && url.startsWith('http') && !seen[url]) {
+          seen[url] = true;
+          imgs.push(url);
+        }
+      }
+    }
+    // Check featured_image first (ensure it appears first in grid)
+    if (draft.featured_image && draft.featured_image.startsWith('http')) {
+      seen[draft.featured_image] = true;
+      imgs.push(draft.featured_image);
+    }
+    scanHtml(draft.extracted_content);
+    scanHtml(draft.rewritten_html);
+    return imgs;
+  }
+
+  function buildImagePickerHTML(draft) {
+    var currentImg = draft.featured_image || '';
+    var isPublished = !!(draft.wp_post_id);
+    var html = '<div class="imgpicker-wrap">' +
+      '<div class="imgpicker-header">' +
+        '<span class="imgpicker-label">&#128444;&#65039; Featured Image</span>' +
+        (isPublished
+          ? '<span class="imgpicker-wp-badge">&#10003; On WordPress #' + draft.wp_post_id + '</span>'
+          : '') +
+      '</div>' +
+      // Current image preview
+      '<div class="imgpicker-current" id="imgpicker-current">' +
+        (currentImg
+          ? '<img src="' + escapeHtml(currentImg) + '" class="imgpicker-preview" id="imgpicker-preview" alt="Featured image">'
+          : '<div class="imgpicker-no-image">No image selected</div>') +
+      '</div>' +
+      // URL input row
+      '<div class="imgpicker-url-row">' +
+        '<input type="text" id="editor-featured-input" class="imgpicker-url-input" value="' + escapeHtml(currentImg) + '" placeholder="https://... image URL" />' +
+        '<button class="btn btn-xs btn-secondary" id="imgpicker-set-url-btn">Set</button>' +
+      '</div>' +
+      // Action row
+      '<div class="imgpicker-actions">' +
+        '<button class="btn btn-xs btn-secondary" id="imgpicker-browse-btn">&#128247; Pick from Article</button>' +
+        (isPublished
+          ? '<button class="btn btn-xs btn-primary" id="imgpicker-wp-btn">&#9650; Upload &amp; Set on WordPress</button>'
+          : '<button class="btn btn-xs btn-secondary" id="imgpicker-wp-btn">&#9650; Upload to WordPress</button>') +
+      '</div>' +
+      // Grid (hidden until browse is clicked)
+      '<div class="imgpicker-grid-wrap" id="imgpicker-grid-wrap" style="display:none;">' +
+        '<div class="imgpicker-grid-label">Images found in article — click to select</div>' +
+        '<div class="imgpicker-grid" id="imgpicker-grid"></div>' +
+      '</div>' +
+      // WP upload status
+      '<div class="imgpicker-wp-status" id="imgpicker-wp-status" style="display:none;"></div>' +
+    '</div>';
+    return html;
+  }
+
+  function initImagePicker(draftId, draft) {
+    var browseBtn  = document.getElementById('imgpicker-browse-btn');
+    var wpBtn      = document.getElementById('imgpicker-wp-btn');
+    var setUrlBtn  = document.getElementById('imgpicker-set-url-btn');
+    var urlInput   = document.getElementById('editor-featured-input');
+    var gridWrap   = document.getElementById('imgpicker-grid-wrap');
+    var grid       = document.getElementById('imgpicker-grid');
+    var status     = document.getElementById('imgpicker-wp-status');
+
+    // Set URL button — save to DB + update preview
+    if (setUrlBtn && urlInput) {
+      setUrlBtn.addEventListener('click', function () {
+        var url = urlInput.value.trim();
+        if (!url) return;
+        setSelectedImage(draftId, url);
+      });
+      urlInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') setSelectedImage(draftId, urlInput.value.trim());
+      });
+    }
+
+    // Browse article images
+    if (browseBtn && grid && gridWrap) {
+      browseBtn.addEventListener('click', function () {
+        var isOpen = gridWrap.style.display !== 'none';
+        if (isOpen) { gridWrap.style.display = 'none'; browseBtn.textContent = '🖼 Pick from Article'; return; }
+        // Populate grid
+        var images = extractImagesFromDraft(draft);
+        if (!images.length) {
+          grid.innerHTML = '<p style="color:var(--text-muted);font-size:12px;padding:8px;">No images found in article content.</p>';
+        } else {
+          var currentUrl = (urlInput && urlInput.value.trim()) || draft.featured_image || '';
+          grid.innerHTML = images.map(function (src) {
+            var active = src === currentUrl ? ' active' : '';
+            return '<div class="imgpicker-thumb' + active + '" data-src="' + escapeHtml(src) + '">' +
+              '<img src="' + escapeHtml(src) + '" loading="lazy" alt="" />' +
+            '</div>';
+          }).join('');
+          // Click on thumb selects it
+          grid.addEventListener('click', function (e) {
+            var thumb = e.target.closest('.imgpicker-thumb');
+            if (!thumb) return;
+            var src = thumb.dataset.src;
+            if (!src) return;
+            // Update active state
+            grid.querySelectorAll('.imgpicker-thumb').forEach(function (t) { t.classList.remove('active'); });
+            thumb.classList.add('active');
+            // Update URL input + preview + save
+            if (urlInput) urlInput.value = src;
+            updateImagePreview(src);
+            setSelectedImage(draftId, src);
+          });
+        }
+        gridWrap.style.display = '';
+        browseBtn.textContent = '✕ Close';
+      });
+    }
+
+    // Upload to WP button
+    if (wpBtn) {
+      wpBtn.addEventListener('click', function () {
+        var url = (urlInput && urlInput.value.trim()) || draft.featured_image || '';
+        if (!url) { showToast('No image URL selected', 'warn'); return; }
+        updateWpImage(draftId, url, wpBtn, status);
+      });
+    }
+  }
+
+  function updateImagePreview(src) {
+    var preview = document.getElementById('imgpicker-preview');
+    var currentDiv = document.getElementById('imgpicker-current');
+    if (!currentDiv) return;
+    if (!preview) {
+      currentDiv.innerHTML = '<img src="' + escapeHtml(src) + '" class="imgpicker-preview" id="imgpicker-preview" alt="Featured image">';
+    } else {
+      preview.src = src;
+    }
+  }
+
+  function setSelectedImage(draftId, url) {
+    if (!url) return;
+    fetchApi('/api/drafts/' + draftId, {
+      method: 'PUT',
+      body: { featured_image: url },
+    }).then(function () {
+      updateImagePreview(url);
+      showToast('Image saved', 'success');
+    }).catch(function () { showToast('Failed to save image', 'error'); });
+  }
+
+  function updateWpImage(draftId, imageUrl, btn, statusEl) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Uploading…'; }
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Uploading image to WordPress…'; statusEl.className = 'imgpicker-wp-status'; }
+
+    fetchApi('/api/drafts/' + draftId + '/update-wp-image', {
+      method: 'POST',
+      body: { imageUrl: imageUrl },
+    }).then(function (resp) {
+      if (resp && resp.success) {
+        var msg = resp.wpUpdated
+          ? '✓ Image uploaded and set as featured image on WordPress (media #' + resp.wpMediaId + ')'
+          : '✓ Image uploaded to WordPress media library (media #' + resp.wpMediaId + '). Will be used on next publish.';
+        if (statusEl) { statusEl.textContent = msg; statusEl.className = 'imgpicker-wp-status success'; }
+        if (btn) { btn.disabled = false; btn.textContent = resp.wpUpdated ? '✓ Updated on WordPress' : '⬆ Upload to WordPress'; }
+        showToast(resp.wpUpdated ? 'WP featured image updated' : 'Image uploaded to WP media', 'success');
+      } else {
+        var err = (resp && resp.error) || 'Upload failed';
+        if (statusEl) { statusEl.textContent = '✗ ' + err; statusEl.className = 'imgpicker-wp-status error'; }
+        if (btn) { btn.disabled = false; btn.textContent = '⬆ Upload to WordPress'; }
+        showToast(err, 'error');
+      }
+    }).catch(function (err) {
+      if (statusEl) { statusEl.textContent = '✗ ' + (err.message || String(err)); statusEl.className = 'imgpicker-wp-status error'; }
+      if (btn) { btn.disabled = false; btn.textContent = '⬆ Upload to WordPress'; }
+      showToast('Upload error: ' + (err.message || ''), 'error');
+    });
+  }
+
+  window.__updateWpImage = updateWpImage;
 
   function closeEditor() {
     // Exit full view mode before closing

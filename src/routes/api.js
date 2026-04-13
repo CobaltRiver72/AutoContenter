@@ -3197,6 +3197,60 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/drafts/:id/update-wp-image ────────────────────────────────
+  // Upload a new featured image to WordPress and update featured_media on the
+  // existing post. Works whether the post is already published or not.
+  // Body: { imageUrl }
+  // Returns: { success, wpMediaId, mediaUrl }
+
+  router.post('/drafts/:id/update-wp-image', async function (req, res) {
+    var id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid draft id' });
+
+    var imageUrl = req.body && req.body.imageUrl;
+    if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {
+      return res.status(400).json({ error: 'imageUrl is required and must start with http' });
+    }
+
+    var draft = db.prepare('SELECT id, wp_post_id, target_keyword, extracted_title, rewritten_title FROM drafts WHERE id = ?').get(id);
+    if (!draft) return res.status(404).json({ error: 'Draft not found' });
+
+    var publisherMod = deps.publisher;
+    if (!publisherMod || !publisherMod.ready) {
+      return res.status(503).json({ error: 'WordPress publisher not configured. Set WP credentials in Settings.' });
+    }
+
+    try {
+      // Upload image to WP media library
+      var seoData = {
+        targetKeyword: draft.target_keyword || '',
+        title: draft.rewritten_title || draft.extracted_title || '',
+        excerpt: '',
+        slug: '',
+      };
+      var imageResult = await publisherMod.uploadImage(imageUrl, seoData);
+      var newMediaId = imageResult.mediaId;
+      var mediaUrl = imageResult.mediaUrl || imageUrl;
+
+      // Save to DB
+      db.prepare("UPDATE drafts SET featured_image = ?, wp_media_id = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(imageUrl, newMediaId, id);
+
+      // If post already published, also update featured_media on WP
+      if (draft.wp_post_id) {
+        await publisherMod.updatePost(draft.wp_post_id, { featured_media: newMediaId });
+        logger.info('api', 'WP featured image updated: draft #' + id + ' post #' + draft.wp_post_id + ' media #' + newMediaId);
+        return res.json({ success: true, wpMediaId: newMediaId, mediaUrl: mediaUrl, wpUpdated: true });
+      }
+
+      logger.info('api', 'WP image uploaded for draft #' + id + ': media #' + newMediaId + ' (post not yet published)');
+      res.json({ success: true, wpMediaId: newMediaId, mediaUrl: mediaUrl, wpUpdated: false });
+    } catch (err) {
+      logger.error('api', 'update-wp-image failed: ' + err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ─── POST /api/drafts/batch-fetch-images ──────────────────────────────
   //
   // Fetches featured images for all extracted articles that are missing images.
