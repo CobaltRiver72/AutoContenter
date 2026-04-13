@@ -4637,7 +4637,12 @@
       testInfra.onclick = function () {
         testInfra.disabled = true;
         testInfra.textContent = 'Testing...';
-        fetchApi('/api/test/infranodus', { method: 'POST' })
+        // Pass the key currently in the form field so the user can test before saving.
+        // If the field is empty or shows a masked placeholder, fall back to the saved key.
+        var keyInput = document.querySelector('[data-setting-key="INFRANODUS_API_KEY"]');
+        var rawVal = keyInput ? keyInput.value.trim() : '';
+        var body = (rawVal && rawVal.indexOf('\u2022') === -1 && rawVal.indexOf('••••') === -1) ? { apiKey: rawVal } : {};
+        fetchApi('/api/test/infranodus', { method: 'POST', body: body })
           .then(function (data) {
             showToast(data.message || (data.success ? 'InfraNodus OK' : 'InfraNodus disabled'), data.success ? 'success' : 'warning');
             testInfra.disabled = false;

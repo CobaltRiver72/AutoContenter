@@ -155,8 +155,35 @@ function createApiRouter(deps) {
   });
 
   // ─── POST /api/test/infranodus ────────────────────────────────────────────
+  // Accepts an optional `apiKey` in body so users can validate a fresh key
+  // before saving it. Falls back to the currently loaded infranodus module.
 
-  router.post('/test/infranodus', function (req, res) {
+  router.post('/test/infranodus', async function (req, res) {
+    var providedKey = (req.body && req.body.apiKey) ? String(req.body.apiKey).trim() : null;
+
+    // If a key was supplied directly, test it without requiring the module to be enabled
+    if (providedKey) {
+      try {
+        var testResponse = await axios.post(
+          'https://infranodus.com/api/v1/graphAndStatements',
+          { text: 'Test connection from HDF AutoPub', aiTopics: false },
+          {
+            headers: { 'Authorization': 'Bearer ' + providedKey, 'Content-Type': 'application/json' },
+            params: { doNotSave: true, addStats: false, compactGraph: true },
+            timeout: 15000,
+          }
+        );
+        return res.json({ success: true, message: 'Connection successful — key is valid' });
+      } catch (err) {
+        var httpStatus = err.response ? err.response.status : 0;
+        var msg = httpStatus === 401 ? 'Invalid API key (401 Unauthorized)' :
+                  httpStatus === 403 ? 'Key has no access (403 Forbidden)' :
+                  'Connection failed: ' + (err.message || String(err));
+        return res.json({ success: false, message: msg });
+      }
+    }
+
+    // No key supplied — use the in-memory module
     if (!infranodus || typeof infranodus.analyzeText !== 'function') {
       return res.status(503).json({ error: 'InfraNodus module not available' });
     }
@@ -1525,6 +1552,17 @@ function createApiRouter(deps) {
         if (wpPub && typeof wpPub.init === 'function') {
           wpPub.init().catch(function(e) { logger.warn('api', 'wpPublisher re-init failed: ' + e.message); });
         }
+      }
+
+      // Re-initialize InfraNodus if its API key or enabled flag changed.
+      // infranodus.config is a frozen snapshot from boot; we must replace it
+      // with the fresh config BEFORE calling init() so it reads the new key.
+      var infraSettingKeys = ['INFRANODUS_API_KEY', 'INFRANODUS_ENABLED'];
+      var hasInfraChange = validEntries.some(function (e) { return infraSettingKeys.indexOf(e[0]) !== -1; });
+      if (hasInfraChange && infranodus && typeof infranodus.init === 'function') {
+        infranodus.config = configUtils.getConfig();
+        infranodus.init().catch(function (e) { logger.warn('api', 'InfraNodus re-init failed: ' + e.message); });
+        logger.info('api', 'InfraNodus re-initialized after settings change');
       }
 
       logger.info('api', 'Settings updated', { keys: validEntries.map(function (e) { return e[0]; }) });
@@ -2933,26 +2971,33 @@ function createApiRouter(deps) {
     });
   });
 
-  router.post('/drafts/:id/analyze', async (req, res) => {
-    const draft = db.prepare('SELECT id, extracted_content, rewritten_html FROM drafts WHERE id = ?')
-      .get(req.params.id);
+  router.post('/drafts/:id/analyze', async function (req, res) {
+    var id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid draft id' });
+
+    var draft = db.prepare('SELECT id, extracted_content, rewritten_html FROM drafts WHERE id = ?')
+      .get(id);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
-    const text = draft.extracted_content || draft.rewritten_html || '';
+    var text = draft.extracted_content || draft.rewritten_html || '';
     if (!text) return res.status(400).json({ error: 'No content to analyze' });
 
     if (!infranodus || !infranodus.enabled) {
-      return res.status(400).json({ error: 'InfraNodus is not enabled. Set INFRANODUS_ENABLED=true in settings.' });
+      return res.status(400).json({ error: 'InfraNodus is not enabled. Set INFRANODUS_ENABLED=true and add your API key in Settings.' });
     }
 
     try {
-      const infraData = await infranodus.enhanceArticle(text.slice(0, 5000));
-      db.prepare('UPDATE drafts SET infranodus_data = ? WHERE id = ?')
-        .run(JSON.stringify(infraData), draft.id);
+      // Pass full text — enhanceArticle internally truncates to TEXT_LIMIT (12 000 chars)
+      var infraData = await infranodus.enhanceArticle(text);
+      if (!infraData) {
+        return res.status(502).json({ error: 'InfraNodus returned no data. Check your API key and that the article has enough content (200+ chars).' });
+      }
+      db.prepare('UPDATE drafts SET infranodus_data = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run(JSON.stringify(infraData), id);
       res.json({ success: true, infraData });
     } catch (err) {
       logger.error('api', 'POST /drafts/:id/analyze failed: ' + err.message);
-      const safe = sanitizeForClient(err);
+      var safe = sanitizeForClient(err);
       res.status(safe.status).json({ error: safe.message });
     }
   });
@@ -3381,7 +3426,8 @@ function createApiRouter(deps) {
     try {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
-      db.prepare("UPDATE drafts SET extraction_status = 'pending', status = 'fetching', updated_at = datetime('now') WHERE id = ?").run(id);
+      // Clear infranodus_data so the panel doesn't show stale analysis for new content
+      db.prepare("UPDATE drafts SET extraction_status = 'pending', status = 'fetching', infranodus_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
 
       extractDraftContent(id, draftDeps).catch(function (err) {
         logger.warn('api', 'Re-extraction failed for draft ' + id + ': ' + err.message);
