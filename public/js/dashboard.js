@@ -4203,6 +4203,12 @@
     if (!_wpTaxonomy) return;
     var wrap = document.getElementById('wpTaxTableWrap');
     if (!wrap) return;
+    // Update active state on tab buttons
+    document.querySelectorAll('[data-tax-tab]').forEach(function (btn) {
+      var isActive = btn.getAttribute('data-tax-tab') === taxType;
+      btn.classList.toggle('btn-primary', isActive);
+      btn.classList.toggle('btn-secondary', !isActive);
+    });
     var items = _wpTaxonomy[taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors'] || [];
     if (!items.length) { wrap.innerHTML = '<p style="color:#666;font-size:12px;padding:4px;">None synced yet.</p>'; return; }
     wrap.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
