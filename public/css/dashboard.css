@@ -1639,6 +1639,8 @@ select:focus {
 }
 .btn-purple { background: #8b5cf6; color: #fff; }
 .btn-purple:hover { background: #7c3aed; }
+.btn-warning { background: #a16207; color: #fff; }
+.btn-warning:hover { background: #92400e; }
 .btn-green { background: var(--green); color: #fff; }
 .btn-green:hover { background: #16a34a; }
 .btn-primary { background: var(--accent); color: #fff; }

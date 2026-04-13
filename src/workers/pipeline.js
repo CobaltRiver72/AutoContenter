@@ -144,15 +144,17 @@ class Pipeline {
                 "trends_boosted, priority, status, detected_at) " +
                 "VALUES (?, 1, 1.0, ?, 0, 'normal', 'queued', datetime('now'))"
               );
-              var clusterResult = clusterInsert.run(clusterTitle, draft.id);
-              var newClusterId = typeof clusterResult.lastInsertRowid === 'bigint'
-                ? Number(clusterResult.lastInsertRowid)
-                : clusterResult.lastInsertRowid;
-
-              // Assign cluster to the draft and mark it as primary
-              this.db.prepare(
+              var updateDraft = this.db.prepare(
                 "UPDATE drafts SET cluster_id = ?, cluster_role = 'primary', updated_at = datetime('now') WHERE id = ?"
-              ).run(newClusterId, draft.id);
+              );
+              var newClusterId;
+              this.db.transaction(function () {
+                var clusterResult = clusterInsert.run(clusterTitle, draft.id);
+                newClusterId = typeof clusterResult.lastInsertRowid === 'bigint'
+                  ? Number(clusterResult.lastInsertRowid)
+                  : clusterResult.lastInsertRowid;
+                updateDraft.run(newClusterId, draft.id);
+              })();
 
               this.logger.info(MODULE,
                 'Manual import #' + draft.id + ' -> synthetic cluster #' + newClusterId + ' created. Queued for AI rewrite.');

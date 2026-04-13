@@ -1,6 +1,7 @@
 'use strict';
 
 var axios = require('axios');
+var { assertSafeUrl, safeAxiosOptions } = require('../utils/safe-http');
 
 /** Decode HTML entities that WP REST API returns in name fields (e.g. "Gold &amp; Silver" → "Gold & Silver"). */
 function _decodeHtml(str) {
@@ -28,13 +29,14 @@ async function _wpFetchAll(wpBaseUrl, authHeader, restPath, extraParams) {
       '&per_page=' + params.per_page + '&page=' + page +
       (params.context ? '&context=' + params.context : '');
 
-    var resp = await axios.get(url, {
+    assertSafeUrl(url);
+    var resp = await axios.get(url, safeAxiosOptions({
       headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
       timeout: 20000,
-    });
+    }));
 
     if (page === 1) {
-      totalPages = parseInt(resp.headers['x-wp-totalpages'] || '1', 10) || 1;
+      totalPages = Math.min(parseInt(resp.headers['x-wp-totalpages'] || '1', 10) || 1, 100);
     }
 
     var items = Array.isArray(resp.data) ? resp.data : [];
@@ -56,6 +58,7 @@ async function syncTaxonomyFromWP(db, config) {
   if (!wpUrl || !username || !password) {
     throw new Error('WP credentials not configured (WP_URL, WP_USERNAME, WP_APP_PASSWORD required)');
   }
+  assertSafeUrl(wpUrl);
 
   var authHeader = 'Basic ' + Buffer.from(username + ':' + password).toString('base64');
   var errors = [];

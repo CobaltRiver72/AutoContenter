@@ -154,11 +154,13 @@ function verifyPassword(password) {
     return bcrypt.compareSync(password, storedHash);
   }
 
-  // No hash stored yet — compare against plain config password
+  // No hash stored yet — compare against plain config password (constant-time)
   var configPassword = config.DASHBOARD_PASSWORD;
   if (!configPassword) return false;
 
-  var matches = password === configPassword;
+  var a = Buffer.from(password);
+  var b = Buffer.from(configPassword);
+  var matches = a.length === b.length && require('crypto').timingSafeEqual(a, b);
 
   // If match, hash and store for future use
   if (matches && _db) {

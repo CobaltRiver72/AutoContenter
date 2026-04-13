@@ -383,7 +383,7 @@ function createApiRouter(deps) {
 
       var limit = Math.min(parseInt(req.query.limit) || 100, 500);
 
-      var keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+      var keywords = query.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 10);
       var whereClauses = [];
       var params = [];
 
@@ -1579,7 +1579,8 @@ function createApiRouter(deps) {
         'WP_APP_PASSWORD', 'WP_USERNAME',
         'DASHBOARD_PASSWORD', 'DASHBOARD_PASSWORD_HASH',
         'INFRANODUS_API_KEY', 'SESSION_SECRET',
-        'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY'
+        'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY',
+        'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
       ];
 
       var safeSettings = {};
@@ -3108,8 +3109,10 @@ function createApiRouter(deps) {
   // ─── InfraNodus entity analysis (per draft) ──────────────────────────────
 
   router.get('/drafts/:id/infranodus', (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid draft id' });
     const draft = db.prepare('SELECT id, infranodus_data, ai_model_used FROM drafts WHERE id = ?')
-      .get(req.params.id);
+      .get(id);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
     let infraData = null;
@@ -3397,8 +3400,11 @@ function createApiRouter(deps) {
     if (!id) return res.status(400).json({ error: 'Invalid draft id' });
 
     var imageUrl = req.body && req.body.imageUrl;
-    if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {
-      return res.status(400).json({ error: 'imageUrl is required and must start with http' });
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      return res.status(400).json({ error: 'imageUrl is required' });
+    }
+    try { assertSafeUrl(imageUrl); } catch (e) {
+      return res.status(400).json({ error: 'imageUrl blocked: ' + e.message });
     }
 
     var draft = db.prepare('SELECT id, wp_post_id, target_keyword, extracted_title, rewritten_title FROM drafts WHERE id = ?').get(id);
