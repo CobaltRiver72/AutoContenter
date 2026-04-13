@@ -132,7 +132,7 @@ class Pipeline {
               || updated.extraction_status === 'fallback';
             if (inoExtractOk && updated.extracted_content && updated.extracted_content.length >= 200) {
               try {
-                var infraData = await this.infranodus.enhanceArticle(updated.extracted_content.slice(0, 12000));
+                var infraData = await this.infranodus.enhanceArticle(updated.extracted_content.slice(0, 12000), { targetKeyword: updated.target_keyword || '' });
                 if (infraData) {
                   this.db.prepare('UPDATE drafts SET infranodus_data = ?, updated_at = datetime(\'now\') WHERE id = ?')
                     .run(JSON.stringify(infraData), draft.id);
@@ -364,7 +364,7 @@ class Pipeline {
             .join('\n\n')
             .slice(0, 12000);
           if (combinedText.length >= 200) {
-            infraData = await this.infranodus.enhanceArticle(combinedText, null, rewriteController.signal);
+            infraData = await this.infranodus.enhanceArticle(combinedText, { targetKeyword: primaryDraft.target_keyword || '' }, rewriteController.signal);
             if (infraData) {
               this.db.prepare("UPDATE drafts SET infranodus_data = ?, updated_at = datetime('now') WHERE id = ?")
                 .run(JSON.stringify(infraData), primaryDraft.id);

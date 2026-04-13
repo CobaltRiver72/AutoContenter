@@ -3013,7 +3013,7 @@ function createApiRouter(deps) {
     var id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: 'Invalid draft id' });
 
-    var draft = db.prepare('SELECT id, extracted_content, rewritten_html FROM drafts WHERE id = ?')
+    var draft = db.prepare('SELECT id, extracted_content, rewritten_html, target_keyword FROM drafts WHERE id = ?')
       .get(id);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
@@ -3025,8 +3025,8 @@ function createApiRouter(deps) {
     }
 
     try {
-      // Pass full text — enhanceArticle internally truncates to TEXT_LIMIT (12 000 chars)
-      var infraData = await infranodus.enhanceArticle(text);
+      // Pass targetKeyword so Google search endpoints (#10-#14) also fire
+      var infraData = await infranodus.enhanceArticle(text, { targetKeyword: draft.target_keyword || '' });
       if (!infraData) {
         return res.status(502).json({ error: 'InfraNodus returned no data. Check your API key and that the article has enough content (200+ chars).' });
       }

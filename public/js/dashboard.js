@@ -3904,47 +3904,128 @@
           return;
         }
 
-        var infra = data.infraData || {};
-        var topicCount = (infra.mainTopics || []).length;
-        var entityCount = (infra.missingEntities || []).length;
+        var d = data.infraData || {};
+        var topicCount  = (d.mainTopics  || []).length;
+        var entityCount = (d.missingEntities || []).length;
+        var hasKeyword  = !!d.targetKeyword;
 
         if (badge) {
-          badge.textContent = topicCount + ' topics · ' + entityCount + ' entities';
+          badge.textContent = topicCount + ' topics · ' + entityCount + ' entities' + (hasKeyword ? ' · SEO' : '');
           badge.className = 'infra-badge infra-badge-active';
         }
 
         var html = '';
-        if (infra.mainTopics && infra.mainTopics.length) {
-          html += '<div class="infra-section"><h4>Main Topics Identified</h4><div class="infra-tags">';
-          infra.mainTopics.forEach(function (t) {
-            html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>';
-          });
+
+        // ── Keyword banner ────────────────────────────────────────────
+        if (hasKeyword) {
+          html += '<div class="infra-kw-banner">&#127919; Target keyword: <strong>' + escapeHtml(d.targetKeyword) + '</strong></div>';
+        }
+
+        // ── Three AI advice cards (article + keyword SEO) ─────────────
+        var hasAdvice = d.advice || d.rankingAdvice || d.intentAdvice || d.gapAdvice;
+        if (hasAdvice) {
+          html += '<div class="infra-advice-grid">';
+          if (d.advice) {
+            html += '<div class="infra-advice-card infra-advice-article">' +
+              '<div class="infra-advice-card-title">&#128203; Article Analysis</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.advice) + '</div>' +
+            '</div>';
+          }
+          if (d.rankingAdvice) {
+            html += '<div class="infra-advice-card infra-advice-ranking">' +
+              '<div class="infra-advice-card-title">&#128200; What Currently Ranks</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.rankingAdvice) + '</div>' +
+            '</div>';
+          }
+          if (d.intentAdvice) {
+            html += '<div class="infra-advice-card infra-advice-intent">' +
+              '<div class="infra-advice-card-title">&#128269; What Readers Want</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.intentAdvice) + '</div>' +
+            '</div>';
+          }
+          if (d.gapAdvice) {
+            html += '<div class="infra-advice-card infra-advice-gap">' +
+              '<div class="infra-advice-card-title">&#127919; Content Opportunity</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.gapAdvice) + '</div>' +
+            '</div>';
+          }
+          html += '</div>';
+        }
+
+        // ── Graph Summary (parsed) ────────────────────────────────────
+        if (d.graphSummary) {
+          html += '<div class="infra-section"><h4>Knowledge Graph Summary</h4>' + renderGraphSummary(d.graphSummary) + '</div>';
+        }
+
+        // ── Tag sections ──────────────────────────────────────────────
+        if (d.mainTopics && d.mainTopics.length) {
+          html += '<div class="infra-section"><h4>Main Topics</h4><div class="infra-tags">';
+          d.mainTopics.forEach(function (t) { html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>'; });
           html += '</div></div>';
         }
-        if (infra.missingEntities && infra.missingEntities.length) {
-          html += '<div class="infra-section"><h4>Entities the AI Was Told to Cover</h4><div class="infra-tags">';
-          infra.missingEntities.forEach(function (e) {
-            html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>';
-          });
+        if (d.relatedQueries && d.relatedQueries.length) {
+          html += '<div class="infra-section"><h4>Related Search Queries</h4><div class="infra-tags">';
+          d.relatedQueries.forEach(function (q) { html += '<span class="infra-tag infra-tag-query">' + escapeHtml(q) + '</span>'; });
           html += '</div></div>';
         }
-        if (infra.contentGaps && infra.contentGaps.length) {
-          html += '<div class="infra-section"><h4>Content Gaps (Bridging Opportunities)</h4><ul class="infra-gaps">';
-          infra.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
-          html += '</ul></div>';
+        if (d.demandTopics && d.demandTopics.length) {
+          html += '<div class="infra-section"><h4>High-Demand Topics (underserved)</h4><div class="infra-tags">';
+          d.demandTopics.forEach(function (t) { html += '<span class="infra-tag infra-tag-demand">' + escapeHtml(t) + '</span>'; });
+          html += '</div></div>';
         }
-        if (infra.researchQuestions && infra.researchQuestions.length) {
-          html += '<div class="infra-section"><h4>Research Questions Passed to AI</h4><ul class="infra-questions">';
-          infra.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
-          html += '</ul></div>';
+        if (d.missingEntities && d.missingEntities.length) {
+          html += '<div class="infra-section"><h4>Bridge Concepts (entities in gaps)</h4><div class="infra-tags">';
+          d.missingEntities.forEach(function (e) { html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>'; });
+          html += '</div></div>';
         }
+
+        // ── Lists ──────────────────────────────────────────────────────
+        var hasLists = (d.contentGaps && d.contentGaps.length) ||
+                       (d.demandGaps && d.demandGaps.length) ||
+                       (d.researchQuestions && d.researchQuestions.length);
+        if (hasLists) {
+          html += '<div class="infra-entity-lists">';
+          if (d.contentGaps && d.contentGaps.length) {
+            html += '<div class="infra-list-block"><h4>Content Gaps</h4><ul class="infra-gaps">';
+            d.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+            html += '</ul></div>';
+          }
+          if (d.demandGaps && d.demandGaps.length) {
+            html += '<div class="infra-list-block"><h4>Demand Gaps</h4><ul class="infra-gaps infra-gaps-demand">';
+            d.demandGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+            html += '</ul></div>';
+          }
+          if (d.researchQuestions && d.researchQuestions.length) {
+            html += '<div class="infra-list-block"><h4>Research Questions</h4><ul class="infra-questions">';
+            d.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
+            html += '</ul></div>';
+          }
+          html += '</div>';
+        }
+
+        // ── Bigrams + Clusters ─────────────────────────────────────────
+        if (d.bigrams && d.bigrams.length) {
+          html += '<div class="infra-section"><h4>Top Co-occurring Concepts</h4><div class="infra-bigrams">';
+          d.bigrams.forEach(function (b) { html += '<span class="infra-bigram">' + escapeHtml(b) + '</span>'; });
+          html += '</div></div>';
+        }
+        if (d.clusterDescriptions && d.clusterDescriptions.length) {
+          html += '<div class="infra-section"><h4>Topic Cluster Descriptions</h4>';
+          d.clusterDescriptions.forEach(function (c, i) {
+            html += '<div class="infra-cluster-desc"><span class="infra-cluster-num">C' + (i + 1) + '</span>' + escapeHtml(c) + '</div>';
+          });
+          html += '</div>';
+        }
+
+        // ── Meta row ──────────────────────────────────────────────────
         html += '<div class="infra-section infra-meta">' +
-          '<span>Used in rewrite: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
+          '<span>Rewrite model: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
+          '<span style="color:#374151;font-size:11px;">' + escapeHtml(d.analyzedAt || '') + '</span>' +
           '<button class="btn btn-sm btn-outline" data-click="runInfraAnalysis" data-draft-id="' + draftId + '">&#128300; Re-run</button>' +
           '</div>';
 
         body.innerHTML = html;
-        _updateInfraStatusBar(infra);
+        _updateInfraStatusBar(d);
       })
       .catch(function (err) {
         body.innerHTML = '<p class="infra-error">Failed to load: ' + escapeHtml(err.message || String(err)) + '</p>';
