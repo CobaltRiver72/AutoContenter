@@ -154,6 +154,20 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── POST /api/infranodus/cache-clear ────────────────────────────────────
+  // Clears the in-memory 30-min analysis cache so the next enhanceArticle()
+  // call makes a fresh API request instead of returning a stale cached result.
+
+  router.post('/infranodus/cache-clear', function (req, res) {
+    if (!infranodus || typeof infranodus._cache === 'undefined') {
+      return res.status(503).json({ error: 'InfraNodus module not available' });
+    }
+    var size = infranodus._cache.size;
+    infranodus._cache.clear();
+    logger.info('api', 'InfraNodus analysis cache cleared (' + size + ' entries)');
+    res.json({ success: true, clearedEntries: size });
+  });
+
   // ─── POST /api/test/infranodus ────────────────────────────────────────────
   // Accepts an optional `apiKey` in body so users can validate a fresh key
   // before saving it. Falls back to the currently loaded infranodus module.
