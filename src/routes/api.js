@@ -168,6 +168,30 @@ function createApiRouter(deps) {
     res.json({ success: true, clearedEntries: size });
   });
 
+  // ─── POST /api/infranodus/entity-search ──────────────────────────────────
+  // Fetch all InfraNodus data for a single entity keyword.
+  // Runs Google search endpoints #10 + #11 and text analysis #1 in parallel.
+
+  router.post('/infranodus/entity-search', async function (req, res) {
+    if (!infranodus || !infranodus.enabled || !infranodus.ready) {
+      return res.status(503).json({ error: 'InfraNodus module not available or disabled' });
+    }
+    var entity = (req.body && req.body.entity) ? String(req.body.entity).trim() : '';
+    if (!entity) {
+      return res.status(400).json({ error: 'entity is required' });
+    }
+    try {
+      var result = await infranodus.searchEntity(entity);
+      if (!result) {
+        return res.status(502).json({ error: 'InfraNodus returned no data for this entity' });
+      }
+      res.json({ success: true, data: result });
+    } catch (err) {
+      logger.error('api', 'entity-search failed: ' + err.message);
+      res.status(500).json({ error: 'Entity search failed: ' + err.message });
+    }
+  });
+
   // ─── POST /api/test/infranodus ────────────────────────────────────────────
   // Accepts an optional `apiKey` in body so users can validate a fresh key
   // before saving it. Falls back to the currently loaded infranodus module.

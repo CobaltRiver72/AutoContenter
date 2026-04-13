@@ -3099,6 +3099,99 @@ select:focus {
 .infra-error { color: var(--red); font-size: 13px; }
 .infra-empty { color: #666; font-size: 13px; margin-bottom: 8px; }
 
+/* ─── InfraNodus Entity Search Box ──────────────────────────────────────── */
+.infra-entity-search-box {
+  margin-top: 10px;
+  background: #12122a;
+  border: 1px solid #2d2d5e;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.infra-entity-search-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #1a1a3e;
+  border-bottom: 1px solid #2d2d5e;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c7d2fe;
+}
+.infra-entity-search-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: #4b5563;
+}
+.infra-entity-search-row {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  align-items: center;
+}
+.infra-entity-input {
+  flex: 1;
+  background: #0e0e26;
+  border: 1px solid #3b3b6e;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: #e2e8f0;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.infra-entity-input:focus { border-color: #6366f1; }
+.infra-entity-input::placeholder { color: #4b5563; }
+.btn-infra-fetch {
+  background: #4338ca;
+  color: #e0e7ff;
+  border: none;
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.btn-infra-fetch:hover { background: #4f46e5; }
+.btn-infra-fetch:disabled { background: #2d2d5e; color: #6b7280; cursor: not-allowed; }
+.infra-entity-results { padding: 0 14px 14px; }
+.infra-entity-result-header {
+  font-size: 11px;
+  color: #6b7280;
+  margin-bottom: 10px;
+  padding-top: 4px;
+}
+.infra-entity-result-header strong { color: #a5b4fc; }
+.infra-entity-advice {
+  font-size: 12.5px;
+  color: #cbd5e1;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  background: #0e0e26;
+  border-left: 3px solid #6366f1;
+  padding: 10px 12px;
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.infra-entity-summary {
+  font-size: 12.5px;
+  color: #94a3b8;
+  line-height: 1.55;
+  font-style: italic;
+}
+.infra-tag-query { background: #1a3a1a; color: #7dff9d; }
+.infra-entity-meta {
+  font-size: 10.5px;
+  color: #374151;
+  margin-top: 10px;
+  text-align: right;
+}
+.infra-entity-error { color: var(--red); font-size: 13px; padding: 8px 0; }
+
 /* InfraNodus status bar — shown in Settings tab above Rewrite button */
 .infra-status-bar { margin-bottom: 10px; }
 .infra-status-bar-inner {

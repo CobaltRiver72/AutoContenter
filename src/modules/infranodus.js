@@ -374,6 +374,189 @@ class InfranodusAnalyzer extends EventEmitter {
     }
   }
 
+  /**
+   * Entity-level deep search: fetch AI advice, related search queries, and
+   * topical analysis for a single entity word or phrase.
+   *
+   * Runs three calls in parallel:
+   *   #10 googleSearchResultsAiAdvice → AI advice on what Google ranks for this entity
+   *   #11 googleSearchIntentGraph     → related search queries / search intent
+   *   #1  graphAndStatements(entity)  → topics/entities/gaps from the entity term itself
+   *
+   * IMPORTANT: Google search endpoints (#10, #11) default doNotSave to FALSE.
+   * Always pass doNotSave: true in queryParams for these endpoints.
+   *
+   * @param {string} entity  - single word or short phrase
+   * @param {object} [opts]
+   * @param {AbortSignal} [signal]
+   */
+  async searchEntity(entity, opts, signal) {
+    if (!this.enabled || !this.ready) return null;
+    if (!entity || !entity.trim()) return null;
+
+    var q = entity.trim().slice(0, 200);
+    opts = opts || {};
+    var self = this;
+
+    try {
+      var results = await Promise.all([
+        // #10 — AI advice on what Google currently ranks for this entity
+        this._callAPI(
+          '/api/v1/import/googleSearchResultsAiAdvice',
+          {
+            searchQuery: q,
+            aiTopics: true,
+            requestMode: 'summary',
+            importCountry: opts.importCountry || 'US',
+            importLanguage: opts.importLanguage || 'EN',
+          },
+          {
+            doNotSave: true,
+            addStats: true,
+            optimize: 'gaps',
+            includeGraphSummary: true,
+            extendedGraphSummary: true,
+          },
+          signal
+        ).catch(function (e) {
+          self.logger.warn(MODULE, 'googleSearchResultsAiAdvice failed: ' + e.message);
+          return null;
+        }),
+
+        // #11 — related search queries / reader search intent graph
+        this._callAPI(
+          '/api/v1/import/googleSearchIntentGraph',
+          {
+            searchQuery: q,
+            aiTopics: true,
+            keywordsSource: 'related',
+            importCountry: opts.importCountry || 'US',
+            importLanguage: opts.importLanguage || 'EN',
+          },
+          {
+            doNotSave: true,
+            addStats: true,
+            includeGraphSummary: true,
+            extendedGraphSummary: true,
+          },
+          signal
+        ).catch(function (e) {
+          self.logger.warn(MODULE, 'googleSearchIntentGraph failed: ' + e.message);
+          return null;
+        }),
+
+        // #1 — text analysis of the entity term itself for topics/gaps/bridge concepts
+        this.analyzeText(q, { aiTopics: true }).catch(function (e) {
+          self.logger.warn(MODULE, 'analyzeText(entity) failed: ' + e.message);
+          return null;
+        }),
+      ]);
+
+      var adviceResult = results[0]; // #10 AI advice on Google results
+      var intentResult = results[1]; // #11 search intent graph
+      var stmtResult   = results[2]; // #1 text analysis
+
+      if (!adviceResult && !intentResult && !stmtResult) return null;
+
+      // ─── AI advice from #10 ───────────────────────────────────────────
+      var advice = null;
+      if (adviceResult && Array.isArray(adviceResult.aiAdvice) && adviceResult.aiAdvice.length > 0) {
+        var firstAdvice = adviceResult.aiAdvice[0];
+        if (firstAdvice && typeof firstAdvice.text === 'string' && firstAdvice.text.length > 0) {
+          advice = firstAdvice.text.slice(0, 3000);
+        }
+      }
+
+      // ─── graphSummary — prefer adviceResult, fall back to others ──────
+      var graphSummary = null;
+      var summaryOrder = [adviceResult, intentResult, stmtResult];
+      for (var si = 0; si < summaryOrder.length; si++) {
+        var sc = summaryOrder[si];
+        if (!sc) continue;
+        if (typeof sc.graphSummary === 'string' && sc.graphSummary.length > 0) {
+          graphSummary = sc.graphSummary.slice(0, 1000);
+          break;
+        }
+        if (sc.graph && typeof sc.graph.graphSummary === 'string' && sc.graph.graphSummary.length > 0) {
+          graphSummary = sc.graph.graphSummary.slice(0, 1000);
+          break;
+        }
+      }
+
+      // ─── AI topics + gaps from stmtResult (#1) ───────────────────────
+      var aiTopicsData = {};
+      if (stmtResult) {
+        aiTopicsData = stmtResult.aiTopics || (stmtResult.graph && stmtResult.graph.aiTopics) || {};
+      }
+      var mainTopics        = Array.isArray(aiTopicsData.mainTopics)        ? aiTopicsData.mainTopics.slice(0, 10)       : [];
+      var contentGaps       = Array.isArray(aiTopicsData.contentGaps)       ? aiTopicsData.contentGaps.slice(0, 5)       : [];
+      var researchQuestions = Array.isArray(aiTopicsData.researchQuestions) ? aiTopicsData.researchQuestions.slice(0, 5) : [];
+
+      // ─── Bridge concepts (entities in gaps) from stmtResult ──────────
+      var statsData = stmtResult ? (stmtResult.stats || (stmtResult.graph && stmtResult.graph.stats) || {}) : {};
+      var missingEntities = [];
+      if (Array.isArray(statsData.gaps)) {
+        for (var i = 0; i < statsData.gaps.length; i++) {
+          var gap = statsData.gaps[i];
+          if (gap && Array.isArray(gap.bridgeConcepts)) {
+            for (var j = 0; j < gap.bridgeConcepts.length; j++) {
+              if (missingEntities.indexOf(gap.bridgeConcepts[j]) === -1) {
+                missingEntities.push(gap.bridgeConcepts[j]);
+              }
+            }
+          }
+        }
+        missingEntities = missingEntities.slice(0, 10);
+      }
+
+      // ─── Related search queries from intentResult (#11) ──────────────
+      // #11 response is same shape as #1 (statements + graph at root)
+      var relatedQueries = [];
+      if (intentResult) {
+        var intentTopics = intentResult.aiTopics || (intentResult.graph && intentResult.graph.aiTopics) || {};
+        if (Array.isArray(intentTopics.mainTopics) && intentTopics.mainTopics.length) {
+          relatedQueries = intentTopics.mainTopics.slice(0, 10);
+        }
+        // Fall back to raw statements if aiTopics is empty
+        if (!relatedQueries.length) {
+          var stmts = intentResult.statements ||
+                      (intentResult.entriesAndGraphOfContext && intentResult.entriesAndGraphOfContext.statements) || [];
+          for (var k = 0; k < stmts.length && relatedQueries.length < 10; k++) {
+            var s = stmts[k];
+            var content = (s && s.content) ? s.content : null;
+            if (content && relatedQueries.indexOf(content) === -1) {
+              relatedQueries.push(content);
+            }
+          }
+        }
+      }
+
+      var searchResult = {
+        entity:            q,
+        advice:            advice,
+        mainTopics:        mainTopics,
+        missingEntities:   missingEntities,
+        contentGaps:       contentGaps,
+        researchQuestions: researchQuestions,
+        relatedQueries:    relatedQueries,
+        graphSummary:      graphSummary,
+        analyzedAt:        new Date().toISOString(),
+      };
+
+      this.logger.info(MODULE,
+        'searchEntity "' + q + '" — topics:' + mainTopics.length +
+        ' related:' + relatedQueries.length +
+        ' advice:' + (advice ? 'yes' : 'no')
+      );
+
+      return searchResult;
+
+    } catch (err) {
+      this.logger.error(MODULE, 'searchEntity failed: ' + sanitizeAxiosError(err).message);
+      return null;
+    }
+  }
+
   async getEntityClusters(text) {
     var result = await this.analyzeText(text);
     if (!result || !result.stats || !result.stats.topClusters) return [];
