@@ -517,7 +517,7 @@
       case 'ready': loadReady(); break;
       case 'failed': loadFailedDrafts(); break;
       case 'published': loadPublished(); break;
-      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); break;
+      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
@@ -3699,6 +3699,13 @@
         var draft = data.data;
         currentDraft = draft;
 
+        // Populate taxonomy override selects
+        if (!_wpTaxonomy) {
+          loadWPTaxonomy(function() { _populateEditorTaxonomy(draft); });
+        } else {
+          _populateEditorTaxonomy(draft);
+        }
+
         // Populate top bar
         var editorTitleText = 'Draft Editor \u2014 ' + (draft.extracted_title || draft.source_title || 'Untitled');
         if (draft.cluster_id) {
@@ -4168,6 +4175,254 @@
   }
 
   window.__updateWpImage = updateWpImage;
+
+  // ─── WP Taxonomy & Routing Rules ──────────────────────────────────────────
+
+  var _wpTaxonomy = null; // { categories, tags, authors, synced_at }
+
+  function loadWPTaxonomy(cb) {
+    fetchApi('/api/wp/taxonomy')
+      .then(function (data) {
+        if (data && data.success) {
+          _wpTaxonomy = data;
+          _populateTaxonomySelects();
+          var statusEl = document.getElementById('wpTaxSyncStatus');
+          if (statusEl && data.synced_at) statusEl.textContent = 'Last synced: ' + data.synced_at.slice(0, 16).replace('T', ' ');
+          var wrap = document.getElementById('wpTaxCacheWrap');
+          if (wrap && (data.categories.length || data.tags.length || data.authors.length)) {
+            wrap.style.display = '';
+            window.__showTaxTab('category');
+          }
+          if (cb) cb(data);
+        }
+      })
+      .catch(function () {});
+  }
+
+  window.__showTaxTab = function (taxType) {
+    if (!_wpTaxonomy) return;
+    var wrap = document.getElementById('wpTaxTableWrap');
+    if (!wrap) return;
+    var items = _wpTaxonomy[taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors'] || [];
+    if (!items.length) { wrap.innerHTML = '<p style="color:#666;font-size:12px;padding:4px;">None synced yet.</p>'; return; }
+    wrap.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
+      '<thead><tr><th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">Name</th>' +
+      (taxType !== 'author' ? '<th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">Slug</th>' : '') +
+      '<th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">ID</th></tr></thead><tbody>' +
+      items.map(function (item) {
+        return '<tr>' +
+          '<td style="padding:3px 6px;color:#e6edf3;">' + escapeHtml(item.name) + '</td>' +
+          (taxType !== 'author' ? '<td style="padding:3px 6px;color:#6e7681;">/' + escapeHtml(item.slug) + '</td>' : '') +
+          '<td style="padding:3px 6px;color:#6e7681;">' + item.wp_id + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  };
+
+  function _populateTaxonomySelects() {
+    if (!_wpTaxonomy) return;
+    var cats = _wpTaxonomy.categories || [];
+    var tags = _wpTaxonomy.tags || [];
+    var authors = _wpTaxonomy.authors || [];
+
+    function fillSelect(selId, items, placeholder) {
+      var sel = document.getElementById(selId);
+      if (!sel) return;
+      var prevVals = Array.from(sel.selectedOptions || []).map(function(o){ return o.value; });
+      sel.innerHTML = (placeholder ? '<option value="">' + placeholder + '</option>' : '') +
+        items.map(function (item) {
+          return '<option value="' + item.wp_id + '"' + (prevVals.indexOf(String(item.wp_id)) !== -1 ? ' selected' : '') + '>' +
+            escapeHtml(item.name) + (item.slug ? ' (/' + item.slug + ')' : '') + '</option>';
+        }).join('');
+    }
+
+    // Settings rule editor
+    fillSelect('ruleEditorCategories', cats, null);
+    fillSelect('ruleEditorPrimaryCat', cats, '— same as first selected —');
+    fillSelect('ruleEditorTags', tags, null);
+    fillSelect('ruleEditorAuthor', authors, '— use global default —');
+
+    // Editor overlay taxonomy override
+    fillSelect('editor-wp-categories', cats, null);
+    fillSelect('editor-wp-primary-cat', cats, '— same as first selected —');
+    fillSelect('editor-wp-tags', tags, null);
+    fillSelect('editor-wp-author', authors, '— use rule/default —');
+  }
+
+  function syncWPTaxonomy() {
+    var btn = document.getElementById('wpTaxSyncBtn');
+    var statusEl = document.getElementById('wpTaxSyncStatus');
+    if (btn) { btn.disabled = true; btn.textContent = 'Syncing\u2026'; }
+    if (statusEl) statusEl.textContent = '';
+    fetchApi('/api/wp/taxonomy/sync', { method: 'POST' })
+      .then(function (data) {
+        if (btn) { btn.disabled = false; btn.textContent = '\u21BA Sync from WordPress'; }
+        if (data && data.success) {
+          showToast('Synced: ' + data.categories + ' categories, ' + data.tags + ' tags, ' + data.authors + ' authors', 'success');
+          if (data.errors && data.errors.length) showToast('Warnings: ' + data.errors.join('; '), 'warn');
+          loadWPTaxonomy();
+          loadPublishRules();
+        } else {
+          showToast((data && data.error) || 'Sync failed', 'error');
+          if (statusEl) statusEl.textContent = 'Sync failed';
+        }
+      })
+      .catch(function (err) {
+        if (btn) { btn.disabled = false; btn.textContent = '\u21BA Sync from WordPress'; }
+        showToast('Sync error: ' + (err.message || ''), 'error');
+      });
+  }
+
+  function loadPublishRules() {
+    var container = document.getElementById('publishRulesList');
+    if (!container) return;
+    fetchApi('/api/publish-rules')
+      .then(function (data) {
+        if (!data || !data.success) return;
+        var rules = data.rules || [];
+        if (!rules.length) {
+          container.innerHTML = '<p style="color:#888;font-size:12px;padding:8px 0;">No rules yet. Add one to start routing articles.</p>';
+          return;
+        }
+        container.innerHTML = rules.map(function (r) {
+          var cats = r.wp_category_ids ? JSON.parse(r.wp_category_ids) : [];
+          var tags = r.wp_tag_ids ? JSON.parse(r.wp_tag_ids) : [];
+          var matchParts = [];
+          if (r.match_source_domain) matchParts.push('domain: ' + r.match_source_domain);
+          if (r.match_source_category) matchParts.push('category: ' + r.match_source_category);
+          if (r.match_title_keyword) matchParts.push('keyword: ' + r.match_title_keyword);
+          return '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;">' +
+            '<div>' +
+              '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">' +
+                '<span style="background:#1d4ed8;color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;">P' + r.priority + '</span>' +
+                '<strong style="font-size:13px;">' + escapeHtml(r.rule_name) + '</strong>' +
+                (!r.is_active ? '<span style="color:#888;font-size:11px;">(disabled)</span>' : '') +
+              '</div>' +
+              (matchParts.length ? '<div style="font-size:11px;color:#888;margin-bottom:3px;">Match: ' + matchParts.join(' &amp; ') + '</div>' : '<div style="font-size:11px;color:#888;margin-bottom:3px;">Default rule (matches all)</div>') +
+              '<div style="font-size:11px;color:#6e7681;">' +
+                (cats.length ? 'Categories: ' + cats.join(', ') + (r.wp_primary_cat_id ? ' [primary: ' + r.wp_primary_cat_id + ']' : '') + ' &nbsp;' : '') +
+                (tags.length ? 'Tags: ' + tags.join(', ') + ' &nbsp;' : '') +
+                (r.wp_author_id ? 'Author: ' + r.wp_author_id : '') +
+              '</div>' +
+            '</div>' +
+            '<div style="display:flex;gap:6px;flex-shrink:0;">' +
+              '<button class="btn btn-xs btn-secondary" data-click="editPublishRule" data-rule-id="' + r.id + '">Edit</button>' +
+              '<button class="btn btn-xs" style="background:rgba(239,68,68,0.15);color:#f87171;border:none;" data-click="deletePublishRule" data-rule-id="' + r.id + '">Delete</button>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+      })
+      .catch(function () {});
+  }
+
+  function openRuleEditor(ruleId) {
+    var editor = document.getElementById('publishRuleEditor');
+    if (!editor) return;
+    document.getElementById('ruleEditorId').value = ruleId || '';
+    if (!ruleId) {
+      // New rule — clear form
+      ['ruleEditorName','ruleEditorDomain','ruleEditorSrcCat','ruleEditorKeyword'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+      document.getElementById('ruleEditorPriority').value = '10';
+      var catSel = document.getElementById('ruleEditorCategories');
+      var tagSel = document.getElementById('ruleEditorTags');
+      if (catSel) Array.from(catSel.options).forEach(function(o){ o.selected=false; });
+      if (tagSel) Array.from(tagSel.options).forEach(function(o){ o.selected=false; });
+    } else {
+      fetchApi('/api/publish-rules')
+        .then(function (data) {
+          var rule = (data.rules || []).find(function(r){ return r.id === ruleId; });
+          if (!rule) return;
+          document.getElementById('ruleEditorName').value = rule.rule_name || '';
+          document.getElementById('ruleEditorPriority').value = rule.priority || 0;
+          document.getElementById('ruleEditorDomain').value = rule.match_source_domain || '';
+          document.getElementById('ruleEditorSrcCat').value = rule.match_source_category || '';
+          document.getElementById('ruleEditorKeyword').value = rule.match_title_keyword || '';
+          var catIds = rule.wp_category_ids ? JSON.parse(rule.wp_category_ids) : [];
+          var tagIds = rule.wp_tag_ids ? JSON.parse(rule.wp_tag_ids) : [];
+          var catSel = document.getElementById('ruleEditorCategories');
+          var tagSel = document.getElementById('ruleEditorTags');
+          var primSel = document.getElementById('ruleEditorPrimaryCat');
+          var authSel = document.getElementById('ruleEditorAuthor');
+          if (catSel) Array.from(catSel.options).forEach(function(o){ o.selected = catIds.indexOf(Number(o.value)) !== -1; });
+          if (tagSel) Array.from(tagSel.options).forEach(function(o){ o.selected = tagIds.indexOf(Number(o.value)) !== -1; });
+          if (primSel) primSel.value = rule.wp_primary_cat_id || '';
+          if (authSel) authSel.value = rule.wp_author_id || '';
+        });
+    }
+    editor.style.display = '';
+    editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function savePublishRule() {
+    var ruleId = document.getElementById('ruleEditorId').value;
+    var catSel = document.getElementById('ruleEditorCategories');
+    var tagSel = document.getElementById('ruleEditorTags');
+    var catIds = catSel ? Array.from(catSel.selectedOptions).map(function(o){ return Number(o.value); }) : [];
+    var tagIds = tagSel ? Array.from(tagSel.selectedOptions).map(function(o){ return Number(o.value); }) : [];
+    var primCat = document.getElementById('ruleEditorPrimaryCat').value;
+    var author = document.getElementById('ruleEditorAuthor').value;
+
+    var body = {
+      rule_name:            document.getElementById('ruleEditorName').value,
+      priority:             Number(document.getElementById('ruleEditorPriority').value) || 0,
+      match_source_domain:  document.getElementById('ruleEditorDomain').value || null,
+      match_source_category:document.getElementById('ruleEditorSrcCat').value || null,
+      match_title_keyword:  document.getElementById('ruleEditorKeyword').value || null,
+      wp_category_ids:      catIds.length ? JSON.stringify(catIds) : null,
+      wp_primary_cat_id:    primCat ? Number(primCat) : (catIds[0] || null),
+      wp_tag_ids:           tagIds.length ? JSON.stringify(tagIds) : null,
+      wp_author_id:         author ? Number(author) : null,
+      is_active:            1,
+    };
+
+    var url = ruleId ? '/api/publish-rules/' + ruleId : '/api/publish-rules';
+    var method = ruleId ? 'PUT' : 'POST';
+
+    fetchApi(url, { method: method, body: body })
+      .then(function (data) {
+        if (data && data.success) {
+          showToast(ruleId ? 'Rule updated' : 'Rule created', 'success');
+          document.getElementById('publishRuleEditor').style.display = 'none';
+          loadPublishRules();
+        } else {
+          showToast((data && data.error) || 'Save failed', 'error');
+        }
+      })
+      .catch(function (err) { showToast('Error: ' + err.message, 'error'); });
+  }
+
+  function deletePublishRule(ruleId) {
+    if (!confirm('Delete this rule?')) return;
+    fetchApi('/api/publish-rules/' + ruleId, { method: 'DELETE' })
+      .then(function (data) {
+        if (data && data.success) { showToast('Rule deleted', 'success'); loadPublishRules(); }
+        else showToast('Delete failed', 'error');
+      })
+      .catch(function (err) { showToast('Error: ' + err.message, 'error'); });
+  }
+
+  function _populateEditorTaxonomy(draft) {
+    _populateTaxonomySelects(); // ensure options are filled
+    var catSel = document.getElementById('editor-wp-categories');
+    var primSel = document.getElementById('editor-wp-primary-cat');
+    var tagSel = document.getElementById('editor-wp-tags');
+    var authSel = document.getElementById('editor-wp-author');
+
+    var catIds = [];
+    if (draft.wp_category_ids) { try { catIds = JSON.parse(draft.wp_category_ids); } catch(e){} }
+    var tagIds = [];
+    if (draft.wp_tag_ids) { try { tagIds = JSON.parse(draft.wp_tag_ids); } catch(e){} }
+
+    if (catSel) Array.from(catSel.options).forEach(function(o){ o.selected = catIds.indexOf(Number(o.value)) !== -1; });
+    if (tagSel) Array.from(tagSel.options).forEach(function(o){ o.selected = tagIds.indexOf(Number(o.value)) !== -1; });
+    if (primSel && draft.wp_primary_cat_id) primSel.value = String(draft.wp_primary_cat_id);
+    if (authSel && draft.wp_author_id_override) authSel.value = String(draft.wp_author_id_override);
+  }
+
+  window.__syncWPTaxonomy = syncWPTaxonomy;
+  window.__addPublishRule = function () { openRuleEditor(null); };
+  window.__editPublishRule = function (el) { openRuleEditor(Number(el.dataset.ruleId)); };
+  window.__deletePublishRule = function (el) { deletePublishRule(Number(el.dataset.ruleId)); };
+  window.__savePublishRule = savePublishRule;
+  window.__cancelPublishRule = function () { var e = document.getElementById('publishRuleEditor'); if(e) e.style.display='none'; };
 
   function closeEditor() {
     // Exit full view mode before closing
@@ -5679,6 +5934,13 @@
     var checkboxes = document.querySelectorAll('#draft-settings-form .checkbox-group input:checked');
     for (var i = 0; i < checkboxes.length; i++) schemaTypes.push(checkboxes[i].value);
 
+    var editorCatSel = document.getElementById('editor-wp-categories');
+    var editorTagSel = document.getElementById('editor-wp-tags');
+    var editorCatIds = editorCatSel ? Array.from(editorCatSel.selectedOptions).map(function(o){ return Number(o.value); }) : [];
+    var editorTagIds = editorTagSel ? Array.from(editorTagSel.selectedOptions).map(function(o){ return Number(o.value); }) : [];
+    var editorPrimCat = document.getElementById('editor-wp-primary-cat');
+    var editorAuthor = document.getElementById('editor-wp-author');
+
     fetchApi('/api/drafts/' + currentDraftId, {
       method: 'PUT',
       body: {
@@ -5688,6 +5950,10 @@
         target_language: $('setting-language').value,
         schema_types: schemaTypes.join(','),
         custom_ai_instructions: $('setting-custom-prompt') ? $('setting-custom-prompt').value : '',
+        wp_category_ids: editorCatIds.length ? JSON.stringify(editorCatIds) : null,
+        wp_primary_cat_id: editorPrimCat && editorPrimCat.value ? Number(editorPrimCat.value) : null,
+        wp_tag_ids: editorTagIds.length ? JSON.stringify(editorTagIds) : null,
+        wp_author_id_override: editorAuthor && editorAuthor.value ? Number(editorAuthor.value) : null,
       }
     }).catch(function (err) { showToast('Failed to save settings', 'error'); });
   }
@@ -7163,6 +7429,12 @@
     'applyEntityToDraft':      function (el) { __applyEntityToDraft(String(el.dataset.draftId)); },
     'addEntityToContent':      function (el) { __addEntityToContent(el.dataset.entity, String(el.dataset.draftId)); },
     'addAllMissingEntities':   function (el) { __addAllMissingEntities(String(el.dataset.draftId)); },
+    'syncWPTaxonomy':   function () { window.__syncWPTaxonomy(); },
+    'addPublishRule':   function () { window.__addPublishRule(); },
+    'editPublishRule':  function (el) { window.__editPublishRule(el); },
+    'deletePublishRule':function (el) { window.__deletePublishRule(el); },
+    'savePublishRule':  function () { window.__savePublishRule(); },
+    'cancelPublishRule':function () { window.__cancelPublishRule(); },
     'switchToInfraTab':        function () { __switchToInfraTab(); },
     'toggleSelectMode':        function () { __toggleSelectMode(); },
     'batchDeleteFailed':       function () { __batchDeleteFailed(); },

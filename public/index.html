@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HDF AutoPub Dashboard</title>
-  <link rel="stylesheet" href="/css/dashboard.css?v=24">
+  <link rel="stylesheet" href="/css/dashboard.css?v=25">
 </head>
 <body>
 
@@ -475,6 +475,58 @@
               <button class="btn btn-purple" data-click="saveWPPublishingSettings">💾 Save</button>
             </div>
             <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
+          </div>
+        </div>
+
+        <!-- WP Taxonomy & Routing Rules -->
+        <div class="settings-form" id="wp-taxonomy-section">
+          <div class="settings-group">
+            <div class="settings-group-title">WordPress Taxonomy &amp; Routing</div>
+            <small style="color:#888;display:block;margin-bottom:12px;">Sync categories, tags and authors from your WordPress site. Then create rules to automatically assign them to articles.</small>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+              <button class="btn btn-secondary" data-click="syncWPTaxonomy" id="wpTaxSyncBtn">&#8635; Sync from WordPress</button>
+              <span id="wpTaxSyncStatus" style="font-size:12px;color:#888;"></span>
+            </div>
+            <!-- Taxonomy cache display (collapsed) -->
+            <div id="wpTaxCacheWrap" style="display:none;margin-bottom:14px;">
+              <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <button class="btn btn-xs btn-secondary" data-tax-tab="category" onclick="window.__showTaxTab('category')">Categories</button>
+                <button class="btn btn-xs btn-secondary" data-tax-tab="tag" onclick="window.__showTaxTab('tag')">Tags</button>
+                <button class="btn btn-xs btn-secondary" data-tax-tab="author" onclick="window.__showTaxTab('author')">Authors</button>
+              </div>
+              <div id="wpTaxTableWrap" style="max-height:180px;overflow-y:auto;background:#111;border-radius:6px;padding:8px;"></div>
+            </div>
+            <!-- Rules -->
+            <div class="settings-group-title" style="margin-top:16px;">Publishing Rules</div>
+            <small style="color:#888;display:block;margin-bottom:10px;">Rules run in priority order (highest first). First match sets categories, tags &amp; author for the article.</small>
+            <button class="btn btn-xs btn-primary" data-click="addPublishRule" style="margin-bottom:10px;">+ Add Rule</button>
+            <div id="publishRulesList"></div>
+            <!-- Rule editor (inline) -->
+            <div id="publishRuleEditor" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-top:12px;">
+              <input type="hidden" id="ruleEditorId" value="" />
+              <div class="settings-row"><label class="settings-label">Rule Name</label><input type="text" id="ruleEditorName" class="settings-input" placeholder="e.g. Cricket Articles" /></div>
+              <div class="settings-row"><label class="settings-label">Priority</label><input type="number" id="ruleEditorPriority" class="settings-input" value="10" style="width:80px;" /></div>
+              <div class="settings-row"><label class="settings-label">Match Domain</label><input type="text" id="ruleEditorDomain" class="settings-input" placeholder="ndtv.com (optional)" /></div>
+              <div class="settings-row"><label class="settings-label">Match Source Category</label><input type="text" id="ruleEditorSrcCat" class="settings-input" placeholder="sports (optional)" /></div>
+              <div class="settings-row"><label class="settings-label">Match Title Keyword</label><input type="text" id="ruleEditorKeyword" class="settings-input" placeholder="IPL (optional)" /></div>
+              <div class="settings-row">
+                <label class="settings-label">Categories <small style="color:#888">(multi-select)</small></label>
+                <select id="ruleEditorCategories" multiple class="settings-input" style="height:90px;"></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Primary Category <small style="color:#888">(for permalink)</small></label>
+                <select id="ruleEditorPrimaryCat" class="settings-input"></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Tags <small style="color:#888">(multi-select)</small></label>
+                <select id="ruleEditorTags" multiple class="settings-input" style="height:90px;"></select>
+              </div>
+              <div class="settings-row"><label class="settings-label">Author</label><select id="ruleEditorAuthor" class="settings-input"></select></div>
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                <button class="btn btn-primary" data-click="savePublishRule">&#128190; Save Rule</button>
+                <button class="btn btn-secondary" data-click="cancelPublishRule">Cancel</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1094,6 +1146,32 @@
                   <textarea id="setting-custom-prompt" rows="3" placeholder="e.g., Write in Hindi, add FAQ section, focus on SEO for 'keyword'..."></textarea>
                 </label>
               </div>
+              <!-- Taxonomy Override (per-draft) -->
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;padding-top:12px;border-top:1px solid var(--border);">
+                <label class="settings-label" style="font-weight:600;">WP Taxonomy Override</label>
+                <small style="color:#888;font-size:11px;">Overrides rules for this draft only. Leave blank to use matching rule.</small>
+                <div style="display:flex;gap:8px;width:100%;flex-wrap:wrap;margin-top:6px;">
+                  <div style="flex:1;min-width:140px;">
+                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Categories</div>
+                    <select id="editor-wp-categories" multiple style="width:100%;height:80px;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:3px;font-size:12px;"></select>
+                  </div>
+                  <div style="flex:1;min-width:140px;">
+                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Primary Category <small>(permalink)</small></div>
+                    <select id="editor-wp-primary-cat" style="width:100%;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:4px;font-size:12px;"></select>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;width:100%;flex-wrap:wrap;margin-top:4px;">
+                  <div style="flex:1;min-width:140px;">
+                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Tags</div>
+                    <select id="editor-wp-tags" multiple style="width:100%;height:80px;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:3px;font-size:12px;"></select>
+                  </div>
+                  <div style="flex:1;min-width:140px;">
+                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Author</div>
+                    <select id="editor-wp-author" style="width:100%;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:4px;font-size:12px;"><option value="">— use rule/default —</option></select>
+                  </div>
+                </div>
+                <div id="editor-taxonomy-resolved" style="font-size:11px;color:#888;margin-top:6px;"></div>
+              </div>
               <div id="infra-status-bar" class="infra-status-bar" style="display:none;"></div>
               <button type="button" class="btn btn-purple btn-full" id="editorRewriteBtn">&#129302; Rewrite with AI</button>
             </form>
@@ -1243,6 +1321,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=45"></script>
+  <script src="/js/dashboard.js?v=46"></script>
 </body>
 </html>

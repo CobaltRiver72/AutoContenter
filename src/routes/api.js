@@ -65,6 +65,8 @@ function createApiRouter(deps) {
   var router = express.Router();
   var axios = require('axios');
   var { assertSafeUrl, safeAxiosOptions, sanitizeAxiosError } = require('../utils/safe-http');
+  var { syncTaxonomyFromWP, getCachedTaxonomy, getLastSyncedAt } = require('../modules/wp-taxonomy');
+  var { resolveTaxonomy } = require('../utils/publish-rule-engine');
   var { AiCostGuard } = require('../utils/ai-cost-guard');
   var configUtils = require('../utils/config');
   var aiGuard = new AiCostGuard({
@@ -1450,6 +1452,113 @@ function createApiRouter(deps) {
       res.json(wpPub.getHealth());
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── GET /api/wp/taxonomy — return cached taxonomy ────────────────────────
+  router.get('/wp/taxonomy', function (req, res) {
+    try {
+      return res.json({
+        success: true,
+        categories: getCachedTaxonomy(db, 'category'),
+        tags:       getCachedTaxonomy(db, 'tag'),
+        authors:    getCachedTaxonomy(db, 'author'),
+        synced_at:  getLastSyncedAt(db),
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/wp/taxonomy/sync — pull fresh data from WP ────────────────
+  router.post('/wp/taxonomy/sync', async function (req, res) {
+    try {
+      var config = getConfig();
+      var result = await syncTaxonomyFromWP(db, config);
+      logger.info('api', 'WP taxonomy synced: ' + result.categories + ' categories, ' + result.tags + ' tags, ' + result.authors + ' authors');
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      logger.error('api', 'WP taxonomy sync failed: ' + err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/publish-rules ───────────────────────────────────────────────
+  router.get('/publish-rules', function (req, res) {
+    try {
+      var rules = db.prepare('SELECT * FROM publish_rules ORDER BY priority DESC, id ASC').all();
+      return res.json({ success: true, rules: rules });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/publish-rules — create a rule ─────────────────────────────
+  router.post('/publish-rules', function (req, res) {
+    try {
+      var b = req.body || {};
+      if (!b.rule_name || !String(b.rule_name).trim()) {
+        return res.status(400).json({ success: false, error: 'rule_name is required' });
+      }
+      // Validate JSON arrays
+      ['wp_category_ids', 'wp_tag_ids'].forEach(function (f) {
+        if (b[f]) { try { JSON.parse(b[f]); } catch (e) { throw new Error(f + ' must be a JSON array string'); } }
+      });
+      var stmt = db.prepare(
+        'INSERT INTO publish_rules (rule_name, priority, match_source_domain, match_source_category, ' +
+        'match_title_keyword, wp_category_ids, wp_primary_cat_id, wp_tag_ids, wp_author_id, is_active) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      );
+      var result = stmt.run(
+        String(b.rule_name).trim(), Number(b.priority) || 0,
+        b.match_source_domain || null, b.match_source_category || null,
+        b.match_title_keyword || null,
+        b.wp_category_ids || null, b.wp_primary_cat_id ? Number(b.wp_primary_cat_id) : null,
+        b.wp_tag_ids || null, b.wp_author_id ? Number(b.wp_author_id) : null,
+        b.is_active !== undefined ? (b.is_active ? 1 : 0) : 1
+      );
+      return res.json({ success: true, id: result.lastInsertRowid });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── PUT /api/publish-rules/:id — update a rule ──────────────────────────
+  router.put('/publish-rules/:id', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid rule id' });
+      var b = req.body || {};
+      var existing = db.prepare('SELECT id FROM publish_rules WHERE id = ?').get(id);
+      if (!existing) return res.status(404).json({ success: false, error: 'Rule not found' });
+      db.prepare(
+        'UPDATE publish_rules SET rule_name=?, priority=?, match_source_domain=?, match_source_category=?, ' +
+        'match_title_keyword=?, wp_category_ids=?, wp_primary_cat_id=?, wp_tag_ids=?, wp_author_id=?, ' +
+        'is_active=?, updated_at=datetime(\'now\') WHERE id=?'
+      ).run(
+        String(b.rule_name || '').trim() || 'Rule ' + id, Number(b.priority) || 0,
+        b.match_source_domain || null, b.match_source_category || null,
+        b.match_title_keyword || null,
+        b.wp_category_ids || null, b.wp_primary_cat_id ? Number(b.wp_primary_cat_id) : null,
+        b.wp_tag_ids || null, b.wp_author_id ? Number(b.wp_author_id) : null,
+        b.is_active !== undefined ? (b.is_active ? 1 : 0) : 1,
+        id
+      );
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── DELETE /api/publish-rules/:id ───────────────────────────────────────
+  router.delete('/publish-rules/:id', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid rule id' });
+      db.prepare('DELETE FROM publish_rules WHERE id = ?').run(id);
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -2970,7 +3079,7 @@ function createApiRouter(deps) {
       var updates = [];
       var params = [];
 
-      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status', 'featured_image', 'custom_ai_instructions'];
+      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status', 'featured_image', 'custom_ai_instructions', 'wp_category_ids', 'wp_primary_cat_id', 'wp_tag_ids', 'wp_author_id_override'];
       for (var i = 0; i < fields.length; i++) {
         if (body[fields[i]] !== undefined) {
           updates.push(fields[i] + ' = ?');
@@ -4128,6 +4237,7 @@ function createApiRouter(deps) {
       var platform = body.platform || (wpConfigured ? 'wordpress' : 'blogspot');
       var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+      var taxonomy = resolveTaxonomy(draft, db, getConfig());
 
       var publishUrl = null;
 
@@ -4163,6 +4273,10 @@ function createApiRouter(deps) {
             featuredImage: draft.featured_image || null,
             schemaTypes: draft.schema_types || 'NewsArticle,FAQPage,BreadcrumbList',
             targetDomain: draft.target_domain || '',
+            wpCategories:   taxonomy.categoryIds,
+            wpPrimaryCatId: taxonomy.primaryCategoryId,
+            wpTags:         taxonomy.tagIds,
+            wpAuthorId:     taxonomy.authorId,
           };
 
           // Build a minimal cluster with articles for image extraction
