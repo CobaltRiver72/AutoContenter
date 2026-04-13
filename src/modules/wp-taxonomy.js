@@ -2,6 +2,17 @@
 
 var axios = require('axios');
 
+/** Decode HTML entities that WP REST API returns in name fields (e.g. "Gold &amp; Silver" → "Gold & Silver"). */
+function _decodeHtml(str) {
+  return (str || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, function (_, code) { return String.fromCharCode(parseInt(code, 10)); });
+}
+
 /**
  * Fetch all pages from a WP REST API endpoint (handles X-WP-TotalPages pagination).
  * Uses ?rest_route= format for Cloudways/Nginx compatibility.
@@ -71,13 +82,13 @@ async function syncTaxonomyFromWP(db, config) {
 
   var upsertAll = db.transaction(function () {
     categories.forEach(function (c) {
-      upsertStmt.run('category', c.id, c.name || '', c.slug || '', c.parent || 0);
+      upsertStmt.run('category', c.id, _decodeHtml(c.name), c.slug || '', c.parent || 0);
     });
     tags.forEach(function (t) {
-      upsertStmt.run('tag', t.id, t.name || '', t.slug || '', 0);
+      upsertStmt.run('tag', t.id, _decodeHtml(t.name), t.slug || '', 0);
     });
     authors.forEach(function (a) {
-      upsertStmt.run('author', a.id, a.name || a.username || '', a.slug || '', 0);
+      upsertStmt.run('author', a.id, _decodeHtml(a.name || a.username), a.slug || '', 0);
     });
   });
   upsertAll();

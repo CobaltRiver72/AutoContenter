@@ -1146,32 +1146,6 @@
                   <textarea id="setting-custom-prompt" rows="3" placeholder="e.g., Write in Hindi, add FAQ section, focus on SEO for 'keyword'..."></textarea>
                 </label>
               </div>
-              <!-- Taxonomy Override (per-draft) -->
-              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;padding-top:12px;border-top:1px solid var(--border);">
-                <label class="settings-label" style="font-weight:600;">WP Taxonomy Override</label>
-                <small style="color:#888;font-size:11px;">Overrides rules for this draft only. Leave blank to use matching rule.</small>
-                <div style="display:flex;gap:8px;width:100%;flex-wrap:wrap;margin-top:6px;">
-                  <div style="flex:1;min-width:140px;">
-                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Categories</div>
-                    <select id="editor-wp-categories" multiple style="width:100%;height:80px;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:3px;font-size:12px;"></select>
-                  </div>
-                  <div style="flex:1;min-width:140px;">
-                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Primary Category <small>(permalink)</small></div>
-                    <select id="editor-wp-primary-cat" style="width:100%;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:4px;font-size:12px;"></select>
-                  </div>
-                </div>
-                <div style="display:flex;gap:8px;width:100%;flex-wrap:wrap;margin-top:4px;">
-                  <div style="flex:1;min-width:140px;">
-                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Tags</div>
-                    <select id="editor-wp-tags" multiple style="width:100%;height:80px;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:3px;font-size:12px;"></select>
-                  </div>
-                  <div style="flex:1;min-width:140px;">
-                    <div style="font-size:11px;color:#888;margin-bottom:3px;">Author</div>
-                    <select id="editor-wp-author" style="width:100%;background:#111;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:4px;font-size:12px;"><option value="">— use rule/default —</option></select>
-                  </div>
-                </div>
-                <div id="editor-taxonomy-resolved" style="font-size:11px;color:#888;margin-top:6px;"></div>
-              </div>
               <div id="infra-status-bar" class="infra-status-bar" style="display:none;"></div>
               <button type="button" class="btn btn-purple btn-full" id="editorRewriteBtn">&#129302; Rewrite with AI</button>
             </form>
@@ -1190,6 +1164,7 @@
             <button class="editor-tab" data-panel="right" data-tab="preview">Preview</button>
             <button class="editor-tab" data-panel="right" data-tab="infranodus">&#128300; InfraNodus</button>
             <button class="editor-tab" data-panel="right" data-tab="ai-edit">&#9999;&#65039; AI Edit</button>
+            <button class="editor-tab" data-panel="right" data-tab="wp-publish">&#127991; WP Publish</button>
           </div>
           <div class="editor-tab-content" id="tab-ai-output">
             <div id="ai-output-content" class="ai-output-content">
@@ -1241,6 +1216,52 @@
                   <p class="aiedit-empty">Load content and click Check Coverage to see which InfraNodus entities appear in the article.</p>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+        <!-- WP Publish tab -->
+        <div class="editor-tab-content" id="tab-wp-publish" style="display:none;">
+          <div style="max-width:520px;">
+            <div style="font-size:13px;font-weight:600;color:#e6edf3;margin-bottom:4px;">WordPress Publish Settings</div>
+            <div style="font-size:11px;color:#888;margin-bottom:14px;">Overrides the routing rules for this draft only. Leave blank to let the rules (or global defaults) decide.</div>
+
+            <!-- Resolved preview -->
+            <div id="editor-taxonomy-resolved" style="font-size:11px;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px;margin-bottom:14px;color:#aaa;line-height:1.6;"></div>
+
+            <!-- Categories -->
+            <div style="margin-bottom:12px;">
+              <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Categories <small style="color:#666;font-weight:400;">(hold Ctrl/Cmd to select multiple)</small></div>
+              <select id="editor-wp-categories" multiple style="width:100%;height:100px;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px;font-size:12px;"></select>
+            </div>
+
+            <!-- Primary Category -->
+            <div style="margin-bottom:12px;">
+              <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Primary Category <small style="color:#666;font-weight:400;">— controls the /slug/ in the permalink</small></div>
+              <select id="editor-wp-primary-cat" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:12px;"></select>
+            </div>
+
+            <!-- Tags -->
+            <div style="margin-bottom:12px;">
+              <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Tags <small style="color:#666;font-weight:400;">(hold Ctrl/Cmd to select multiple)</small></div>
+              <select id="editor-wp-tags" multiple style="width:100%;height:100px;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px;font-size:12px;"></select>
+            </div>
+
+            <!-- Author -->
+            <div style="margin-bottom:16px;">
+              <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Author</div>
+              <select id="editor-wp-author" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:12px;">
+                <option value="">— use rule / global default —</option>
+              </select>
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn btn-primary" id="editor-wp-publish-save">&#128190; Save Override</button>
+              <button class="btn btn-secondary" id="editor-wp-publish-clear">&#10006; Clear Override</button>
+              <span id="editor-wp-publish-saved" style="font-size:11px;color:#22c55e;display:none;">Saved</span>
+            </div>
+
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid #21262d;font-size:11px;color:#555;">
+              No taxonomy synced yet? Go to <strong style="color:#888;">Settings → WordPress Taxonomy &amp; Routing</strong> and click <em>Sync from WordPress</em>.
             </div>
           </div>
         </div>
@@ -1321,6 +1342,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=46"></script>
+  <script src="/js/dashboard.js?v=48"></script>
 </body>
 </html>

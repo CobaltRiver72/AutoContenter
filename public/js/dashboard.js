@@ -4203,6 +4203,12 @@
     if (!_wpTaxonomy) return;
     var wrap = document.getElementById('wpTaxTableWrap');
     if (!wrap) return;
+    // Update active state on tab buttons
+    document.querySelectorAll('[data-tax-tab]').forEach(function (btn) {
+      var isActive = btn.getAttribute('data-tax-tab') === taxType;
+      btn.classList.toggle('btn-primary', isActive);
+      btn.classList.toggle('btn-secondary', !isActive);
+    });
     var items = _wpTaxonomy[taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors'] || [];
     if (!items.length) { wrap.innerHTML = '<p style="color:#666;font-size:12px;padding:4px;">None synced yet.</p>'; return; }
     wrap.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
@@ -4415,6 +4421,60 @@
     if (tagSel) Array.from(tagSel.options).forEach(function(o){ o.selected = tagIds.indexOf(Number(o.value)) !== -1; });
     if (primSel && draft.wp_primary_cat_id) primSel.value = String(draft.wp_primary_cat_id);
     if (authSel && draft.wp_author_id_override) authSel.value = String(draft.wp_author_id_override);
+
+    // Build resolved preview
+    var resolvedEl = document.getElementById('editor-taxonomy-resolved');
+    if (resolvedEl) {
+      var tax = _wpTaxonomy || {};
+      var cats = tax.categories || [];
+      var tags = tax.tags || [];
+      var authors = tax.authors || [];
+
+      var hasOverride = catIds.length || tagIds.length || draft.wp_primary_cat_id || draft.wp_author_id_override;
+      if (!cats.length && !tags.length && !authors.length) {
+        resolvedEl.innerHTML = '<span style="color:#555;">No taxonomy synced yet — sync first to populate these selects.</span>';
+      } else if (hasOverride) {
+        var catNames = catIds.map(function(id){ var c = cats.find(function(x){ return x.wp_id === id; }); return c ? escapeHtml(c.name) : id; });
+        var primCat = cats.find(function(x){ return x.wp_id === draft.wp_primary_cat_id; });
+        var tagNames = tagIds.map(function(id){ var t = tags.find(function(x){ return x.wp_id === id; }); return t ? escapeHtml(t.name) : id; });
+        var auth = authors.find(function(x){ return x.wp_id === draft.wp_author_id_override; });
+        resolvedEl.innerHTML =
+          '<strong style="color:#4ade80;">&#10003; Override active</strong><br>' +
+          (catNames.length ? '<span>Categories: ' + catNames.join(', ') + '</span><br>' : '') +
+          (primCat ? '<span>Primary (permalink): /' + escapeHtml(primCat.slug) + '/</span><br>' : '') +
+          (tagNames.length ? '<span>Tags: ' + tagNames.join(', ') + '</span><br>' : '') +
+          (auth ? '<span>Author: ' + escapeHtml(auth.name) + '</span>' : '');
+      } else {
+        resolvedEl.innerHTML = '<span style="color:#f59e0b;">&#9656; No override — will use matching rule or global default at publish time.</span>';
+      }
+    }
+
+    // Wire Save and Clear buttons (idempotent)
+    var saveBtn = document.getElementById('editor-wp-publish-save');
+    var clearBtn = document.getElementById('editor-wp-publish-clear');
+    var savedLabel = document.getElementById('editor-wp-publish-saved');
+
+    if (saveBtn && !saveBtn._wired) {
+      saveBtn._wired = true;
+      saveBtn.addEventListener('click', function () {
+        saveEditorSettings();
+        if (savedLabel) { savedLabel.style.display = ''; setTimeout(function(){ savedLabel.style.display = 'none'; }, 2000); }
+        // Refresh resolved preview after save
+        fetchApi('/api/drafts/' + currentDraftId).then(function(d){ if(d && d.data) _populateEditorTaxonomy(d.data); }).catch(function(){});
+      });
+    }
+    if (clearBtn && !clearBtn._wired) {
+      clearBtn._wired = true;
+      clearBtn.addEventListener('click', function () {
+        if (catSel) Array.from(catSel.options).forEach(function(o){ o.selected = false; });
+        if (tagSel) Array.from(tagSel.options).forEach(function(o){ o.selected = false; });
+        if (primSel) primSel.value = '';
+        if (authSel) authSel.value = '';
+        saveEditorSettings();
+        if (savedLabel) { savedLabel.style.display = ''; setTimeout(function(){ savedLabel.style.display = 'none'; }, 2000); }
+        fetchApi('/api/drafts/' + currentDraftId).then(function(d){ if(d && d.data) _populateEditorTaxonomy(d.data); }).catch(function(){});
+      });
+    }
   }
 
   window.__syncWPTaxonomy = syncWPTaxonomy;
