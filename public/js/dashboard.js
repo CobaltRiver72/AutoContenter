@@ -4137,12 +4137,23 @@
       body: { imageUrl: imageUrl },
     }).then(function (resp) {
       if (resp && resp.success) {
-        var msg = resp.wpUpdated
-          ? '✓ Image uploaded and set as featured image on WordPress (media #' + resp.wpMediaId + ')'
-          : '✓ Image uploaded to WordPress media library (media #' + resp.wpMediaId + '). Will be used on next publish.';
+        var msg, toastMsg;
+        if (resp.wpUpdated) {
+          msg = '✓ Image uploaded and set as featured image on WordPress (media #' + resp.wpMediaId + ')';
+          toastMsg = 'WP featured image updated';
+        } else if (resp.wpPostMissing) {
+          msg = '✓ Image uploaded to WP media library (media #' + resp.wpMediaId + ') — WP post was deleted, so featured_media not set.';
+          toastMsg = 'Image uploaded — WP post was deleted';
+        } else if (resp.wpError) {
+          msg = '✓ Image uploaded (media #' + resp.wpMediaId + ') but could not set on WP post: ' + resp.wpError;
+          toastMsg = 'Image uploaded, post update failed';
+        } else {
+          msg = '✓ Image uploaded to WordPress media library (media #' + resp.wpMediaId + '). Will be used on next publish.';
+          toastMsg = 'Image uploaded to WP media';
+        }
         if (statusEl) { statusEl.textContent = msg; statusEl.className = 'imgpicker-wp-status success'; }
         if (btn) { btn.disabled = false; btn.textContent = resp.wpUpdated ? '✓ Updated on WordPress' : '⬆ Upload to WordPress'; }
-        showToast(resp.wpUpdated ? 'WP featured image updated' : 'Image uploaded to WP media', 'success');
+        showToast(toastMsg, 'success');
       } else {
         var err = (resp && resp.error) || 'Upload failed';
         if (statusEl) { statusEl.textContent = '✗ ' + err; statusEl.className = 'imgpicker-wp-status error'; }

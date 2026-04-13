@@ -317,6 +317,7 @@ class WordPressPublisher {
     this.wpBaseUrl = '';
 
     this.enabled = false;
+    this.ready = false;   // alias for enabled — kept in sync in reinit()
     this.status = 'disabled';
     this.error = null;
 
@@ -713,6 +714,7 @@ class WordPressPublisher {
 
       if (!this.config.WP_URL || !this.config.WP_USERNAME || !this.config.WP_APP_PASSWORD) {
         this.enabled = false;
+        this.ready = false;
         this.status = 'disabled';
         this.error = null;
         this.authHeader = '';
@@ -725,11 +727,14 @@ class WordPressPublisher {
       ).toString('base64');
       this.wpBaseUrl = (this.config.WP_URL || '').replace(/\/+$/, '');
       this.enabled = true;
+      this.ready = true;
       this.status = 'connected';
       this.error = null;
 
       this.logger.info('publisher', 'Publisher initialized: ' + this.wpBaseUrl);
     } catch (err) {
+      this.enabled = false;
+      this.ready = false;
       this.status = 'error';
       this.error = err.message;
       this.logger.error('publisher', 'Publisher reinit failed: ' + err.message);
