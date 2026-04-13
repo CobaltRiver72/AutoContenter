@@ -3,6 +3,7 @@ module.exports = {
     name: 'hdf-autopub',
     script: 'src/index.js',
     instances: 1,
+    user: 'hdf', // Change to your non-root system user
     autorestart: true,
     watch: false,
     max_memory_restart: '900M',
@@ -22,3 +23,9 @@ module.exports = {
     log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
   }]
 };
+
+// Log rotation: run once on server:
+//   pm2 install pm2-logrotate
+//   pm2 set pm2-logrotate:max_size 10M
+//   pm2 set pm2-logrotate:retain 7
+//   pm2 set pm2-logrotate:compress true

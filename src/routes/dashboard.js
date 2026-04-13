@@ -152,6 +152,8 @@ function createDashboardRouter() {
           return res.redirect('/login?error=1');
         }
         req.session.authenticated = true;
+        var { setCsrfCookie } = require('./auth');
+        setCsrfCookie(req, res); // sets session.csrfToken + readable _csrf cookie (H1)
         return res.redirect('/');
       });
       return;

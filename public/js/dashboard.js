@@ -5,6 +5,26 @@
   //  HDF AutoPub Dashboard — Client-Side SPA
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ─── CSRF auto-inject (H1) ──────────────────────────────────────────────
+  // Patch window.fetch so every mutating call to /api/* automatically carries
+  // the X-CSRF-Token header read from the _csrf readable cookie set at login.
+  (function () {
+    var _origFetch = window.fetch;
+    window.fetch = function (url, options) {
+      options = options || {};
+      var method = (options.method || 'GET').toUpperCase();
+      var urlStr = typeof url === 'string' ? url : (url && url.url) || '';
+      if (urlStr.indexOf('/api/') === 0 && ['POST', 'PUT', 'DELETE', 'PATCH'].indexOf(method) !== -1) {
+        var csrfMatch = document.cookie.match(/(?:^|;\s*)_csrf=([^;]+)/);
+        if (csrfMatch) {
+          options.headers = options.headers || {};
+          options.headers['X-CSRF-Token'] = decodeURIComponent(csrfMatch[1]);
+        }
+      }
+      return _origFetch.apply(this, arguments);
+    };
+  }());
+
   // ─── State ──────────────────────────────────────────────────────────────
 
   var state = {

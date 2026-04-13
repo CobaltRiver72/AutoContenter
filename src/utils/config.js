@@ -254,8 +254,10 @@ function seedSettingsFromEnv(db) {
     'INFRANODUS_API_KEY', 'JINA_API_KEY',
   ];
 
+  // Use upsert so .env rotations always override stored DB values (C5)
   var stmt = db.prepare(
-    "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))"
+    "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
   );
 
   var seeded = [];
@@ -263,21 +265,15 @@ function seedSettingsFromEnv(db) {
     var key = ENV_KEYS[i];
     var val = process.env[key];
     if (val) {
-      var existing = db.prepare('SELECT 1 FROM settings WHERE key = ?').get(key);
-      if (!existing) {
-        stmt.run(key, val);
-        seeded.push(key);
-      }
+      stmt.run(key, val);
+      seeded.push(key);
     }
   }
 
-  // If WP_URL is set in env but WP_SITE_URL isn't in settings, seed WP_SITE_URL too
+  // If WP_URL is set in env, also keep WP_SITE_URL in sync
   if (process.env.WP_URL) {
-    var wpSiteExisting = db.prepare("SELECT 1 FROM settings WHERE key = 'WP_SITE_URL'").get();
-    if (!wpSiteExisting) {
-      stmt.run('WP_SITE_URL', process.env.WP_URL);
-      seeded.push('WP_SITE_URL (from WP_URL)');
-    }
+    stmt.run('WP_SITE_URL', process.env.WP_URL);
+    seeded.push('WP_SITE_URL (from WP_URL)');
   }
 
   if (seeded.length > 0) {

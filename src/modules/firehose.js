@@ -7,6 +7,7 @@ const { URL } = require('url');
 const MODULE = 'firehose';
 const BASE_URL = 'https://api.firehose.com';
 const MIN_RECONNECT_MS = 2000;
+const MAX_RECONNECT_MS = 60000; // 1 minute cap for exponential backoff
 
 class FirehoseListener extends EventEmitter {
   /**
@@ -29,6 +30,7 @@ class FirehoseListener extends EventEmitter {
     this._reconnectTimer = null;
     this._lastConnectAttempt = 0;
     this._stopped = false;
+    this._reconnectAttempts = 0;
 
     // Language gate — only accept these ISO codes from the firehose stream.
     // Override via ALLOWED_LANGUAGES=en,hi,bn in env. Hindi and English only by default.
@@ -104,6 +106,7 @@ class FirehoseListener extends EventEmitter {
         this._connected = true;
         this.status = 'connected';
         this.ready = true;
+        this._reconnectAttempts = 0; // reset backoff on successful connection
         this.logger.info(MODULE, 'SSE connected');
         this.emit('status', { type: 'connected' });
       });
@@ -175,8 +178,12 @@ class FirehoseListener extends EventEmitter {
       clearTimeout(this._reconnectTimer);
     }
 
-    const delay = Math.max(MIN_RECONNECT_MS, 2000);
-    this.logger.info(MODULE, `Reconnecting in ${delay}ms`);
+    // Exponential backoff with full jitter: delay is random in [MIN_RECONNECT_MS, base]
+    // where base grows as 2^attempt, capped at MAX_RECONNECT_MS.
+    var base = Math.min(MIN_RECONNECT_MS * Math.pow(2, this._reconnectAttempts), MAX_RECONNECT_MS);
+    var delay = Math.floor(Math.random() * base) + MIN_RECONNECT_MS;
+    this._reconnectAttempts++;
+    this.logger.info(MODULE, `Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
     this._reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 

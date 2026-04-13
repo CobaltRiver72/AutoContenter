@@ -37,7 +37,7 @@ var { MetalsModule } = require('./modules/metals');
 var { WPPublisher } = require('./modules/wp-publisher');
 var { FuelPostCreator } = require('./modules/fuel-posts');
 var { MetalsPostCreator } = require('./modules/metals-posts');
-var { setupSession, checkAuth } = require('./routes/auth');
+var { setupSession, checkAuth, verifyCsrf } = require('./routes/auth');
 var createApiRouter = require('./routes/api');
 var createDashboardRouter = require('./routes/dashboard');
 
@@ -60,6 +60,7 @@ var _clusteringProcessing = false;
 var CLUSTERING_DEBOUNCE_MS = 3000;
 var CLUSTERING_MAX_WAIT_MS = 10000;
 var _clusteringFirstEventAt = null;
+var CLUSTER_QUEUE_MAX = 500;
 
 async function boot() {
   // ─── Wire up event listeners BEFORE any module init ──────────────────────
@@ -79,6 +80,10 @@ async function boot() {
       }
 
       // Queue article for batch similarity processing instead of immediate
+      if (_clusteringQueue.length >= CLUSTER_QUEUE_MAX) {
+        logger.warn('index', 'Clustering queue full, dropping article', { url: article.url });
+        return;
+      }
       _clusteringQueue.push({ article: article, trendsMatch: trendsMatch });
 
       if (!_clusteringFirstEventAt) {
@@ -241,16 +246,11 @@ async function boot() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        // script-src-attr governs inline event handlers (onclick=, onchange=, …).
-        // Helmet's default is 'none', which silently breaks every onclick="..."
-        // button in the dashboard. dashboard.js wires card-level actions through
-        // onclick attributes, so without this the Publish / Edit / Delete /
-        // Retry / Preview buttons on the Published and Ready pages are dead.
-        scriptSrcAttr: ["'unsafe-inline'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'"]
+        connectSrc: ["'self'"],
+        frameAncestors: ["'none'"]
       }
     }
   }));
@@ -307,7 +307,7 @@ async function boot() {
   });
   var publicRouter = require('./routes/public')(db);
   app.use('/api/public', publicRouter);
-  app.use('/api', checkAuth, apiRouter);
+  app.use('/api', checkAuth, verifyCsrf, apiRouter);
 
   // Static assets — accessible without auth for login page to work
   app.use('/css', express.static(path.resolve(__dirname, '..', 'public', 'css')));

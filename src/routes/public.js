@@ -4,6 +4,8 @@ var express = require('express');
 var cors = require('cors');
 var router = express.Router();
 
+var logger = require('../utils/logger');
+
 var publicCors = cors({ origin: '*', methods: ['GET'] });
 router.use(publicCors);
 
@@ -60,7 +62,8 @@ module.exports = function(db) {
       if (!row) return res.json({ ok: false, data: null });
       res.json({ ok: true, data: Object.assign({}, row, { delta: delta, delta_pct: delta_pct }), ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -91,7 +94,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: rows || [], ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -128,7 +132,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: rows || [], ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -172,7 +177,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: summary || {}, ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -203,7 +209,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: rows || [], ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -224,7 +231,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: result, ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 
@@ -248,7 +256,8 @@ module.exports = function(db) {
       }
       res.json({ ok: true, data: (rows || []).map(function(r) { return r.city_name; }), ts: Date.now() });
     } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
+      logger.error('public', 'Unhandled route error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
     }
   });
 

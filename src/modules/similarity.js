@@ -4,6 +4,7 @@ const natural = require('natural');
 const TfIdf = natural.TfIdf;
 
 const MODULE = 'similarity';
+const MAX_FINGERPRINT_BYTES = 512 * 1024; // 512 KB
 
 class SimilarityEngine {
   /**
@@ -106,7 +107,16 @@ class SimilarityEngine {
         reject(new Error('Worker timeout after ' + self._WORKER_TIMEOUT_MS + 'ms'));
       }, self._WORKER_TIMEOUT_MS);
       self._pendingJobs.set(id, { resolve: resolve, reject: reject, timer: timer });
-      self._worker.postMessage({ type: 'findMatches', id: id, payload: payload });
+      var msg = { type: 'findMatches', id: id, payload: payload };
+      var payload_str = JSON.stringify(msg);
+      if (payload_str.length > MAX_FINGERPRINT_BYTES) {
+        clearTimeout(timer);
+        self._pendingJobs.delete(id);
+        self.logger.warn(MODULE, 'Fingerprint too large, skipping', { size: payload_str.length });
+        reject(new Error('Fingerprint payload too large: ' + payload_str.length + ' bytes'));
+        return;
+      }
+      self._worker.postMessage(msg);
     });
   }
 

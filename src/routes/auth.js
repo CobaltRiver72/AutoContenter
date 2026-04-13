@@ -2,10 +2,49 @@
 
 var session = require('express-session');
 var bcrypt = require('bcryptjs');
+var crypto = require('crypto');
 var { getConfig } = require('../utils/config');
 
 // In-memory reference to db (set via setupSession)
 var _db = null;
+
+// ── CSRF helpers (H1) ────────────────────────────────────────────────────────
+
+function _generateCsrfToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+/**
+ * Generate a CSRF token, store it in the session, and set a readable cookie.
+ * Call this immediately after session.regenerate() on login.
+ */
+function setCsrfCookie(req, res) {
+  var token = _generateCsrfToken();
+  req.session.csrfToken = token;
+  res.cookie('_csrf', token, {
+    httpOnly: false, // intentional — frontend JS must read this
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  });
+  return token;
+}
+
+/**
+ * Middleware: validate X-CSRF-Token header on state-changing requests.
+ * Skip GET / HEAD / OPTIONS (read-only). 403 on mismatch.
+ */
+function verifyCsrf(req, res, next) {
+  if (['GET', 'HEAD', 'OPTIONS'].indexOf(req.method) !== -1) {
+    return next();
+  }
+  var sessionToken = req.session && req.session.csrfToken;
+  var headerToken = req.headers['x-csrf-token'];
+  if (!sessionToken || !headerToken || sessionToken !== headerToken) {
+    return res.status(403).json({ error: 'Invalid CSRF token' });
+  }
+  return next();
+}
 
 /**
  * Configure express-session middleware.
@@ -44,10 +83,20 @@ function setupSession(db) {
       .digest('hex');
   }
 
+  // Use SQLite-backed session store to survive process restarts (H2)
+  var SqliteStore = require('better-sqlite3-session-store')(session);
+  var store = _db
+    ? new SqliteStore({
+        client: _db,
+        expired: { clear: true, intervalMs: 15 * 60 * 1000 }, // prune expired every 15 min
+      })
+    : undefined; // fall back to MemoryStore if no DB (dev/test without DB)
+
   return session({
     secret: secret,
     resave: false,
     saveUninitialized: false,
+    store: store,
     cookie: {
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       httpOnly: true,
@@ -161,4 +210,6 @@ module.exports = {
   checkAuth: checkAuth,
   verifyPassword: verifyPassword,
   changePassword: changePassword,
+  setCsrfCookie: setCsrfCookie,
+  verifyCsrf: verifyCsrf,
 };
