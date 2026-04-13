@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HDF AutoPub Dashboard</title>
-  <link rel="stylesheet" href="/css/dashboard.css?v=20">
+  <link rel="stylesheet" href="/css/dashboard.css?v=22">
 </head>
 <body>
 
@@ -1131,22 +1131,32 @@
               <div class="aiedit-editor-col">
                 <div class="aiedit-toolbar">
                   <span class="aiedit-label">Content Editor</span>
+                  <span class="aiedit-wordcount" id="aiedit-wordcount">0 words</span>
                   <div class="aiedit-toolbar-actions">
                     <button class="btn btn-xs btn-secondary" id="aiedit-load-btn" title="Load current AI output into editor">&#8593; Load from AI Output</button>
                     <button class="btn btn-xs btn-secondary" id="aiedit-save-btn" title="Save back to HTML Editor">&#8595; Save to HTML Editor</button>
+                    <button class="btn btn-xs btn-secondary" id="aiedit-expand-btn" title="Toggle full-width view">&#x26F6; Full View</button>
                   </div>
                 </div>
                 <div id="aiedit-content" class="aiedit-content" contenteditable="true" spellcheck="false"></div>
+                <!-- Quick-action chips (populated by JS from InfraNodus data) -->
+                <div class="aiedit-quick-chips" id="aiedit-quick-chips">
+                  <button class="aiedit-chip" data-instruction="Add a FAQ section answering the most common questions readers would have about this topic.">&#10133; Add FAQ</button>
+                  <button class="aiedit-chip" data-instruction="Simplify the language so it is easier to read for a general audience. Keep all facts intact.">&#128221; Simplify</button>
+                  <button class="aiedit-chip" data-instruction="Improve the introduction to hook the reader in the first 2 sentences. Make it more compelling.">&#9889; Better Intro</button>
+                  <button class="aiedit-chip" data-instruction="Add a concise News Summary bullet list at the top of the article with the 4-5 most important facts.">&#128203; News Summary</button>
+                  <button class="aiedit-chip" data-instruction="Make the article longer and more detailed. Expand each section with additional context, examples, or data.">&#128196; Expand</button>
+                </div>
                 <div class="aiedit-instruction-bar">
                   <input type="text" id="aiedit-instruction" class="aiedit-instruction-input" placeholder="e.g. Add more detail about the price, use simpler language, add FAQ..." maxlength="500" />
                   <button class="btn btn-sm btn-purple" id="aiedit-patch-btn">&#129302; AI Edit</button>
                 </div>
                 <div id="aiedit-patch-status" class="aiedit-patch-status" style="display:none;"></div>
               </div>
-              <!-- Right: entity coverage panel -->
+              <!-- Right: InfraNodus intelligence panel -->
               <div class="aiedit-coverage-col">
                 <div class="aiedit-coverage-header">
-                  <span class="aiedit-label">InfraNodus Entity Coverage</span>
+                  <span class="aiedit-label">&#128300; InfraNodus Intelligence</span>
                   <button class="btn btn-xs btn-secondary" id="aiedit-check-btn">&#128269; Check Coverage</button>
                 </div>
                 <div id="aiedit-coverage-body" class="aiedit-coverage-body">
@@ -1233,6 +1243,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=35"></script>
+  <script src="/js/dashboard.js?v=38"></script>
 </body>
 </html>

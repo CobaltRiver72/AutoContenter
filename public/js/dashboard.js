@@ -478,6 +478,7 @@
       editorOverlay.style.display = 'none';
       currentDraftId = null;
       currentDraft = null;
+      try { sessionStorage.removeItem('hdf_editor'); } catch (e) {}
     }
 
     // Close SSE connection when leaving feed page
@@ -533,6 +534,20 @@
   function initRouter() {
     var hash = window.location.hash.slice(1) || 'overview';
     navigateTo(hash);
+
+    // Restore editor state after refresh
+    try {
+      var saved = sessionStorage.getItem('hdf_editor');
+      if (saved) {
+        var editorState = JSON.parse(saved);
+        if (editorState && editorState.draftId) {
+          // Small delay so the page data loads first, then reopen editor
+          setTimeout(function () {
+            openEditor(editorState.draftId);
+          }, 400);
+        }
+      }
+    } catch (e) {}
 
     // Handle browser back/forward
     window.addEventListener('hashchange', function () {
@@ -3666,6 +3681,10 @@
 
   function openEditor(draftId) {
     currentDraftId = draftId;
+    // Persist so refresh reopens the same editor
+    try {
+      sessionStorage.setItem('hdf_editor', JSON.stringify({ draftId: draftId, page: state.currentPage }));
+    } catch (e) {}
 
     fetchApi('/api/drafts/' + draftId)
       .then(function (data) {
@@ -3885,6 +3904,13 @@
   }
 
   function closeEditor() {
+    // Exit full view mode before closing
+    var panels = document.querySelector('.editor-panels');
+    if (panels) panels.classList.remove('aiedit-fullview');
+    var expandBtn = document.getElementById('aiedit-expand-btn');
+    if (expandBtn) { expandBtn.classList.remove('active'); expandBtn.innerHTML = '&#x26F6; Full View'; }
+    // Clear persisted editor state
+    try { sessionStorage.removeItem('hdf_editor'); } catch (e) {}
     $('editor-overlay').style.display = 'none';
     currentDraftId = null;
     currentDraft = null;
@@ -4320,9 +4346,10 @@
     // Guard: only wire listeners once per DOM element lifetime
     if (loadBtn && loadBtn.dataset.init) return;
 
-    var saveBtn  = document.getElementById('aiedit-save-btn');
-    var patchBtn = document.getElementById('aiedit-patch-btn');
-    var checkBtn = document.getElementById('aiedit-check-btn');
+    var saveBtn    = document.getElementById('aiedit-save-btn');
+    var expandBtn  = document.getElementById('aiedit-expand-btn');
+    var patchBtn   = document.getElementById('aiedit-patch-btn');
+    var checkBtn   = document.getElementById('aiedit-check-btn');
     var instrInput = document.getElementById('aiedit-instruction');
 
     if (loadBtn) { loadBtn.dataset.init = '1';
@@ -4336,6 +4363,7 @@
           : (aiOut ? aiOut.innerHTML : '');
         if (!src) { showToast('No content loaded yet. Run AI Rewrite first.', 'warn'); return; }
         content.innerHTML = src;
+        updateAiEditWordCount();
         showToast('Content loaded into editor', 'info');
         // Auto-check coverage after loading
         checkEntityCoverage();
@@ -4373,6 +4401,44 @@
         checkEntityCoverage();
       });
     }
+
+    if (expandBtn) {
+      expandBtn.addEventListener('click', function () {
+        var panels = document.querySelector('.editor-panels');
+        if (!panels) return;
+        var isExpanded = panels.classList.toggle('aiedit-fullview');
+        expandBtn.classList.toggle('active', isExpanded);
+        expandBtn.innerHTML = isExpanded ? '&#x2715; Exit Full View' : '&#x26F6; Full View';
+      });
+    }
+
+    // Live word count
+    var contentEl = document.getElementById('aiedit-content');
+    if (contentEl) {
+      contentEl.addEventListener('input', function () { updateAiEditWordCount(); });
+    }
+
+    // Quick-action chip clicks
+    var chipsEl = document.getElementById('aiedit-quick-chips');
+    if (chipsEl) {
+      chipsEl.addEventListener('click', function (e) {
+        var chip = e.target.closest('.aiedit-chip');
+        if (!chip) return;
+        var instr = chip.dataset.instruction;
+        if (!instr) return;
+        var instrInput = document.getElementById('aiedit-instruction');
+        if (instrInput) { instrInput.value = instr; instrInput.focus(); }
+      });
+    }
+  }
+
+  function updateAiEditWordCount() {
+    var contentEl = document.getElementById('aiedit-content');
+    var wcEl = document.getElementById('aiedit-wordcount');
+    if (!contentEl || !wcEl) return;
+    var text = contentEl.innerText || contentEl.textContent || '';
+    var words = text.trim().split(/\s+/).filter(function (w) { return w.length > 0; }).length;
+    wcEl.textContent = words + ' word' + (words !== 1 ? 's' : '');
   }
 
   function applyAIPatch() {
@@ -4400,6 +4466,7 @@
       .then(function (resp) {
         if (resp && resp.success && resp.html) {
           content.innerHTML = resp.html;
+          updateAiEditWordCount();
           if (statusEl) statusEl.textContent = '✓ Edit applied. Check Coverage to see entity impact.';
           instrInput.value = '';
           showToast('AI edit applied', 'success');
@@ -4600,25 +4667,126 @@
       html += '</div>';
     }
 
-    // Target keyword + advice
-    if (d.targetKeyword || d.gapAdvice) {
-      html += '<div class="aiedit-entity-section" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">';
-      if (d.targetKeyword) {
-        html += '<div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Target keyword: <strong style="color:#a855f7">' + escapeHtml(d.targetKeyword) + '</strong></div>';
+    // ── SEO Advice ────────────────────────────────────────────────────────
+    var hasSeo = d.rankingAdvice || d.intentAdvice || d.gapAdvice;
+    if (hasSeo) {
+      html += '<div class="aiedit-intel-section">' +
+        '<div class="aiedit-intel-title">&#128200; SEO Intelligence' +
+          (d.targetKeyword ? ' <span style="color:#a855f7;font-weight:normal;text-transform:none;font-size:11px;">— ' + escapeHtml(d.targetKeyword) + '</span>' : '') +
+        '</div>' +
+        '<div class="aiedit-seo-grid">';
+      if (d.rankingAdvice) {
+        html += '<div class="aiedit-seo-card ranking">' +
+          '<div class="aiedit-seo-card-label">&#128269; What ranks</div>' +
+          escapeHtml(d.rankingAdvice.slice(0, 180)) + (d.rankingAdvice.length > 180 ? '…' : '') +
+          '<button class="aiedit-use-btn" style="display:block;margin-top:5px;" ' +
+            'data-instr="Adjust the article to better match what currently ranks well: ' + escapeHtml(d.rankingAdvice.slice(0, 120).replace(/"/g, "'")) + '">Use</button>' +
+        '</div>';
+      }
+      if (d.intentAdvice) {
+        html += '<div class="aiedit-seo-card intent">' +
+          '<div class="aiedit-seo-card-label">&#127919; Search intent</div>' +
+          escapeHtml(d.intentAdvice.slice(0, 180)) + (d.intentAdvice.length > 180 ? '…' : '') +
+          '<button class="aiedit-use-btn" style="display:block;margin-top:5px;" ' +
+            'data-instr="Rewrite to better match reader search intent: ' + escapeHtml(d.intentAdvice.slice(0, 120).replace(/"/g, "'")) + '">Use</button>' +
+        '</div>';
       }
       if (d.gapAdvice) {
-        html += '<div style="font-size:12px; color:var(--text-secondary); line-height:1.5;">' + escapeHtml(d.gapAdvice.slice(0, 200)) + (d.gapAdvice.length > 200 ? '…' : '') + '</div>';
+        html += '<div class="aiedit-seo-card gap">' +
+          '<div class="aiedit-seo-card-label">&#128161; Content gap</div>' +
+          escapeHtml(d.gapAdvice.slice(0, 180)) + (d.gapAdvice.length > 180 ? '…' : '') +
+          '<button class="aiedit-use-btn" style="display:block;margin-top:5px;" ' +
+            'data-instr="Add a new section covering this SEO content gap: ' + escapeHtml(d.gapAdvice.slice(0, 120).replace(/"/g, "'")) + '">Use</button>' +
+        '</div>';
       }
+      html += '</div></div>';
+    }
+
+    // ── Content Gaps ──────────────────────────────────────────────────────
+    if (d.contentGaps && d.contentGaps.length) {
+      html += '<div class="aiedit-intel-section">' +
+        '<div class="aiedit-intel-title">&#128269; Content Gaps</div>';
+      d.contentGaps.slice(0, 6).forEach(function (gap) {
+        var instr = 'Add a section or paragraph about: ' + gap;
+        html += '<div class="aiedit-gap-item">' +
+          '<span class="aiedit-gap-text">' + escapeHtml(gap) + '</span>' +
+          '<button class="aiedit-use-btn" data-instr="' + escapeHtml(instr) + '">Use</button>' +
+        '</div>';
+      });
       html += '</div>';
     }
 
+    // ── Research Questions ────────────────────────────────────────────────
+    if (d.researchQuestions && d.researchQuestions.length) {
+      html += '<div class="aiedit-intel-section">' +
+        '<div class="aiedit-intel-title">&#10067; Research Questions</div>';
+      d.researchQuestions.slice(0, 5).forEach(function (q) {
+        var instr = 'Add a paragraph that clearly answers this question: ' + q;
+        html += '<div class="aiedit-gap-item">' +
+          '<span class="aiedit-gap-text">' + escapeHtml(q) + '</span>' +
+          '<button class="aiedit-use-btn" data-instr="' + escapeHtml(instr) + '">Use</button>' +
+        '</div>';
+      });
+      html += '</div>';
+    }
+
+    // ── Related Queries ───────────────────────────────────────────────────
+    if (d.relatedQueries && d.relatedQueries.length) {
+      html += '<div class="aiedit-intel-section">' +
+        '<div class="aiedit-intel-title">&#128279; Related Queries</div>' +
+        '<div class="aiedit-query-chips">';
+      d.relatedQueries.slice(0, 8).forEach(function (q) {
+        var instr = 'Naturally mention and address the related query: "' + q + '"';
+        html += '<button class="aiedit-query-chip" data-instr="' + escapeHtml(instr) + '">' + escapeHtml(q) + '</button>';
+      });
+      html += '</div></div>';
+    }
+
+    // ── Demand Topics ─────────────────────────────────────────────────────
+    if (d.demandTopics && d.demandTopics.length) {
+      html += '<div class="aiedit-intel-section">' +
+        '<div class="aiedit-intel-title">&#128293; High-Demand Topics</div>' +
+        '<div class="aiedit-query-chips">';
+      d.demandTopics.slice(0, 6).forEach(function (t) {
+        var instr = 'Add content about this high-demand topic: "' + t + '"';
+        html += '<button class="aiedit-query-chip" data-instr="' + escapeHtml(instr) + '">' + escapeHtml(t) + '</button>';
+      });
+      html += '</div></div>';
+    }
+
     coverageBody.innerHTML = html;
+
+    // Wire up all "Use" buttons and query chips in the coverage panel
+    coverageBody.querySelectorAll('[data-instr]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var instrInput = document.getElementById('aiedit-instruction');
+        if (instrInput) { instrInput.value = btn.dataset.instr; instrInput.focus(); }
+        showToast('Instruction set — click AI Edit to apply', 'info');
+      });
+    });
+
+    // Inject keyword quick-action chip if we have a target keyword
+    if (d.targetKeyword) {
+      var chipsEl = document.getElementById('aiedit-quick-chips');
+      if (chipsEl && !chipsEl.querySelector('.keyword-chip')) {
+        var kwChip = document.createElement('button');
+        kwChip.className = 'aiedit-chip keyword-chip';
+        kwChip.dataset.instruction = 'Optimize the article to better target the keyword "' + d.targetKeyword + '". Use it naturally in headings and the first paragraph without keyword stuffing.';
+        kwChip.textContent = '&#128269; Target: ' + d.targetKeyword;
+        kwChip.innerHTML = '&#128269; Target: ' + escapeHtml(d.targetKeyword);
+        chipsEl.appendChild(kwChip);
+      }
+    }
   }
 
   function addEntityToContent(entity, draftId) {
     var instrInput = document.getElementById('aiedit-instruction');
     if (!instrInput) return;
-    instrInput.value = 'Naturally weave in the entity "' + entity + '" into the article where it fits best.';
+    // Context-aware instruction — if entity looks like a concept pair, phrase it differently
+    var instr = entity.indexOf('"') !== -1
+      ? 'Naturally weave in the concept pair ' + entity + ' into the article where they appear together meaningfully.'
+      : 'Naturally weave the entity "' + entity + '" into the article where it fits best without disrupting the flow.';
+    instrInput.value = instr;
     instrInput.focus();
     showToast('Instruction set — click AI Edit to apply', 'info');
   }
@@ -4955,6 +5123,16 @@
 
     if (tab === 'preview') {
       updatePreviewIframe($('html-code-editor').value);
+    }
+
+    // Exit full view when switching away from AI Edit tab
+    if (tab !== 'ai-edit') {
+      var panels = document.querySelector('.editor-panels');
+      if (panels && panels.classList.contains('aiedit-fullview')) {
+        panels.classList.remove('aiedit-fullview');
+        var expandBtn = document.getElementById('aiedit-expand-btn');
+        if (expandBtn) { expandBtn.classList.remove('active'); expandBtn.innerHTML = '&#x26F6; Full View'; }
+      }
     }
   });
 

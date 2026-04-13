@@ -1075,30 +1075,53 @@ class ArticleRewriter {
       throw new Error(provider.toUpperCase() + ' API key is not configured. Go to Settings.');
     }
 
-    // Build context block from InfraNodus data
+    // Build rich context block from InfraNodus data
     var infraCtx = '';
     var infra = opts.infraData || {};
+
+    if (infra.targetKeyword) {
+      infraCtx += 'PRIMARY TARGET KEYWORD: ' + infra.targetKeyword + '\n';
+    }
     if (infra.mainTopics && infra.mainTopics.length) {
-      infraCtx += 'Key entities/topics: ' + infra.mainTopics.slice(0, 12).join(', ') + '\n';
+      // Filter out InfraNodus bigram format strings for readability
+      var cleanTopics = infra.mainTopics.filter(function (t) { return t.indexOf('<->') === -1; });
+      if (cleanTopics.length) infraCtx += 'Key entities/topics in this story: ' + cleanTopics.slice(0, 12).join(', ') + '\n';
     }
     if (infra.missingEntities && infra.missingEntities.length) {
-      infraCtx += 'Entities missing from article: ' + infra.missingEntities.slice(0, 10).join(', ') + '\n';
+      var cleanMissing = infra.missingEntities.filter(function (t) { return t.indexOf('<->') === -1; });
+      if (cleanMissing.length) infraCtx += 'Important entities NOT yet in article: ' + cleanMissing.slice(0, 10).join(', ') + '\n';
     }
-    if (infra.targetKeyword) {
-      infraCtx += 'Target keyword: ' + infra.targetKeyword + '\n';
+    if (infra.contentGaps && infra.contentGaps.length) {
+      infraCtx += 'Content gaps to address: ' + infra.contentGaps.slice(0, 4).join('; ') + '\n';
+    }
+    if (infra.rankingAdvice) {
+      infraCtx += 'What currently ranks (competitive landscape): ' + infra.rankingAdvice.slice(0, 200) + '\n';
+    }
+    if (infra.intentAdvice) {
+      infraCtx += 'Reader search intent: ' + infra.intentAdvice.slice(0, 200) + '\n';
     }
     if (infra.gapAdvice) {
-      infraCtx += 'SEO gap advice: ' + infra.gapAdvice + '\n';
+      infraCtx += 'SEO content gap opportunity: ' + infra.gapAdvice.slice(0, 200) + '\n';
+    }
+    if (infra.researchQuestions && infra.researchQuestions.length) {
+      infraCtx += 'Questions readers want answered: ' + infra.researchQuestions.slice(0, 4).join('; ') + '\n';
+    }
+    if (infra.relatedQueries && infra.relatedQueries.length) {
+      infraCtx += 'Related searches to naturally address: ' + infra.relatedQueries.slice(0, 6).join(', ') + '\n';
     }
 
-    var systemPrompt = 'You are an expert news editor. ' +
-      'You will receive an HTML article and an editing instruction. ' +
-      'Apply ONLY the requested change — do not restructure or rewrite the whole article. ' +
-      'Return the edited HTML only, with no commentary, no markdown fences, no JSON wrapper.' +
-      (infraCtx ? '\n\nInfraNodus SEO context:\n' + infraCtx : '');
+    var systemPrompt = 'You are an expert news editor and SEO specialist.\n' +
+      'You will receive an HTML article and a specific editing instruction.\n' +
+      'Rules:\n' +
+      '- Apply ONLY the requested change. Do not restructure unaffected sections.\n' +
+      '- Preserve all existing HTML structure, headings, links, and schema markup.\n' +
+      '- Write in the same tone and style as the existing article.\n' +
+      '- Use the InfraNodus SEO context below to make smarter editorial decisions.\n' +
+      '- Return ONLY the complete edited HTML — no commentary, no markdown fences, no JSON.' +
+      (infraCtx ? '\n\n=== InfraNodus SEO Intelligence ===\n' + infraCtx + '===' : '');
 
-    var userPrompt = 'INSTRUCTION: ' + instruction + '\n\n' +
-      'CURRENT HTML:\n' + html.slice(0, 32000); // cap to avoid token overflow
+    var userPrompt = 'EDITING INSTRUCTION: ' + instruction + '\n\n' +
+      'ARTICLE HTML:\n' + html.slice(0, 32000);
 
     return this._callProviderRaw(provider, apiKey, model, systemPrompt, userPrompt, opts.signal || null);
   }

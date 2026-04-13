@@ -3763,3 +3763,161 @@ select:focus {
   vertical-align: middle;
   margin-right: 5px;
 }
+
+/* ─── AI Edit: Full-Width Expanded Mode ───────────────────────────────── */
+/* When .aiedit-fullview is on .editor-panels, hide the left panel and
+   expand the right panel to fill the whole editor width.               */
+.editor-panels.aiedit-fullview .editor-left {
+  display: none !important;
+}
+.editor-panels.aiedit-fullview .editor-right {
+  width: 100% !important;
+}
+/* In full view give the coverage column a fixed wider width */
+.editor-panels.aiedit-fullview .aiedit-editor-col {
+  flex: 0 0 65%;
+}
+.editor-panels.aiedit-fullview .aiedit-coverage-col {
+  flex: 0 0 35%;
+}
+/* Expand button active state */
+#aiedit-expand-btn.active {
+  background: #1e1e3a;
+  border-color: #a855f7;
+  color: #a855f7;
+}
+/* Word count badge */
+.aiedit-wordcount {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: #1a1a2e;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+/* Quick-action chips */
+.aiedit-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 7px 12px;
+  background: #0d0d1a;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.aiedit-chip {
+  background: #1a1a2e;
+  border: 1px solid #2d2d4a;
+  border-radius: 14px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.aiedit-chip:hover {
+  background: #252545;
+  border-color: #a855f7;
+  color: #d4a8ff;
+}
+.aiedit-chip.keyword-chip {
+  border-color: #3b82f6;
+  color: #93c5fd;
+  background: #0f1a2e;
+}
+.aiedit-chip.keyword-chip:hover {
+  background: #1a2a3e;
+  border-color: #60a5fa;
+  color: #bfdbfe;
+}
+/* InfraNodus intelligence panel sections */
+.aiedit-intel-section {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.aiedit-intel-section:last-child { border-bottom: none; margin-bottom: 0; }
+.aiedit-intel-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+/* Gap / question items */
+.aiedit-gap-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #0d0d1a;
+  border: 1px solid #1e1e2e;
+  margin-bottom: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.aiedit-gap-item:hover { border-color: #2d2d4a; }
+.aiedit-gap-text { flex: 1; }
+.aiedit-use-btn {
+  flex-shrink: 0;
+  background: #1a1a30;
+  border: 1px solid #3b3b60;
+  border-radius: 4px;
+  color: #a855f7;
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+.aiedit-use-btn:hover { background: #252545; border-color: #a855f7; }
+/* SEO advice mini cards */
+.aiedit-seo-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.aiedit-seo-card {
+  background: #0d0d1a;
+  border: 1px solid #1e1e2e;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.aiedit-seo-card-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 3px;
+}
+.aiedit-seo-card.ranking .aiedit-seo-card-label { color: #3b82f6; }
+.aiedit-seo-card.intent  .aiedit-seo-card-label { color: #22c55e; }
+.aiedit-seo-card.gap     .aiedit-seo-card-label { color: #f97316; }
+/* Related query chips */
+.aiedit-query-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+.aiedit-query-chip {
+  background: #111126;
+  border: 1px solid #2d2d4a;
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.aiedit-query-chip:hover { border-color: #3b82f6; color: #93c5fd; }
