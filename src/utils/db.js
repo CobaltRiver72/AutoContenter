@@ -755,7 +755,7 @@ function closeDb() {
 function recoverStuckDrafts(logger) {
   try {
     var stuck = db.prepare(
-      "SELECT id, status, retry_count, max_retries FROM drafts WHERE status IN ('fetching', 'rewriting', 'publishing')"
+      "SELECT id, status, retry_count, max_retries, wp_post_id FROM drafts WHERE status IN ('fetching', 'rewriting', 'publishing')"
     ).all();
 
     for (var i = 0; i < stuck.length; i++) {
@@ -770,12 +770,19 @@ function recoverStuckDrafts(logger) {
         ).run(newRetry, 'Stuck in ' + draft.status + ' after ' + newRetry + ' attempts (server restarted)', draft.id);
         if (logger) logger.warn('recovery', 'Draft ' + draft.id + ': permanently failed after ' + newRetry + ' stuck recoveries');
       } else {
-        var resetStatus = draft.status === 'publishing' ? 'ready' : 'draft';
+        // For publishing-state drafts: if wp_post_id is already set the WP post was
+        // created before the crash — mark 'published' to avoid creating a duplicate.
+        var resetStatus;
+        if (draft.status === 'publishing') {
+          resetStatus = draft.wp_post_id ? 'published' : 'ready';
+        } else {
+          resetStatus = 'draft';
+        }
         db.prepare(
           "UPDATE drafts SET status = ?, retry_count = ?, " +
           "error_message = ?, last_error_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
         ).run(resetStatus, newRetry, 'Recovered from stuck ' + draft.status + ' state (server restarted)', draft.id);
-        if (logger) logger.info('recovery', 'Draft ' + draft.id + ': ' + draft.status + ' -> ' + resetStatus + ' (attempt ' + newRetry + '/' + maxR + ')');
+        if (logger) logger.info('recovery', 'Draft ' + draft.id + ': ' + draft.status + ' -> ' + resetStatus + (draft.wp_post_id ? ' (wp_post_id=' + draft.wp_post_id + ' preserved)' : '') + ' (attempt ' + newRetry + '/' + maxR + ')');
       }
     }
 

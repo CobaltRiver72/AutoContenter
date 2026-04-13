@@ -3296,7 +3296,7 @@ function createApiRouter(deps) {
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
     var publisherMod = deps.publisher;
-    if (!publisherMod || !publisherMod.ready) {
+    if (!publisherMod || !publisherMod.enabled) {
       return res.status(503).json({ error: 'WordPress publisher not configured. Set WP credentials in Settings.' });
     }
 
@@ -3318,9 +3318,21 @@ function createApiRouter(deps) {
 
       // If post already published, also update featured_media on WP
       if (draft.wp_post_id) {
-        await publisherMod.updatePost(draft.wp_post_id, { featured_media: newMediaId });
-        logger.info('api', 'WP featured image updated: draft #' + id + ' post #' + draft.wp_post_id + ' media #' + newMediaId);
-        return res.json({ success: true, wpMediaId: newMediaId, mediaUrl: mediaUrl, wpUpdated: true });
+        try {
+          await publisherMod.updatePost(draft.wp_post_id, { featured_media: newMediaId });
+          logger.info('api', 'WP featured image updated: draft #' + id + ' post #' + draft.wp_post_id + ' media #' + newMediaId);
+          return res.json({ success: true, wpMediaId: newMediaId, mediaUrl: mediaUrl, wpUpdated: true });
+        } catch (wpErr) {
+          // 404 means the WP post was deleted — image still uploaded OK, just can't update the post
+          var is404 = wpErr.wpErrors && wpErr.wpErrors.some(function(e) { return e.status === 404; });
+          if (is404) {
+            logger.warn('api', 'WP post #' + draft.wp_post_id + ' not found (deleted?) — image uploaded but post not updated');
+            return res.json({ success: true, wpMediaId: newMediaId, mediaUrl: mediaUrl, wpUpdated: false, wpPostMissing: true });
+          }
+          // Any other WP error: image IS uploaded & saved, but post update failed — surface clearly
+          logger.error('api', 'WP featured_media update failed for post #' + draft.wp_post_id + ': ' + wpErr.message);
+          return res.json({ success: true, wpMediaId: newMediaId, mediaUrl: mediaUrl, wpUpdated: false, wpError: wpErr.message });
+        }
       }
 
       logger.info('api', 'WP image uploaded for draft #' + id + ': media #' + newMediaId + ' (post not yet published)');
