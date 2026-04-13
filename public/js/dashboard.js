@@ -2378,7 +2378,7 @@
 
         if (pagination && typeof renderPagination === 'function') {
           var totalPages = Math.ceil((data.total || 0) / (data.perPage || 20));
-          renderPagination('readyPagination', data.page || 1, totalPages, loadReady);
+          renderPaginationById('readyPagination', data.page || 1, totalPages, loadReady);
         }
       })
       .catch(function (err) {
@@ -3679,6 +3679,7 @@
   // ─── Content Editor ─────────────────────────────────────────────────────
 
   var currentDraftId = null;
+  var _rewritePollInterval = null;
   var currentDraft = null;
   // Last entity search results keyed by draftId — used by "Apply to Rewrite"
   var _entitySearchResults = {};
@@ -4485,6 +4486,7 @@
   window.__cancelPublishRule = function () { var e = document.getElementById('publishRuleEditor'); if(e) e.style.display='none'; };
 
   function closeEditor() {
+    if (_rewritePollInterval) { clearInterval(_rewritePollInterval); _rewritePollInterval = null; }
     // Exit full view mode before closing
     var panels = document.querySelector('.editor-panels');
     if (panels) panels.classList.remove('aiedit-fullview');
@@ -5906,10 +5908,11 @@
       previewTabBtn.onclick = function () {
         var html = $('html-code-editor').value;
         if (!html) { showToast('No HTML to preview', 'error'); return; }
-        var win = window.open('', '_blank');
-        if (!win) { showToast('Popup blocked by browser', 'error'); return; }
-        win.document.write(html);
-        win.document.close();
+        var blob = new Blob([html], { type: 'text/html' });
+        var blobUrl = URL.createObjectURL(blob);
+        var win = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+        if (!win) { URL.revokeObjectURL(blobUrl); showToast('Popup blocked by browser', 'error'); return; }
+        setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 10000);
       };
     }
 
@@ -6019,12 +6022,13 @@
   }
 
   function pollEditorRewriteStatus(draftId) {
-    var interval = setInterval(function () {
+    if (_rewritePollInterval) { clearInterval(_rewritePollInterval); _rewritePollInterval = null; }
+    _rewritePollInterval = setInterval(function () {
       fetchApi('/api/drafts/' + draftId)
         .then(function (data) {
           var draft = data.data;
           if (draft.status === 'ready' && draft.rewritten_html) {
-            clearInterval(interval);
+            clearInterval(_rewritePollInterval); _rewritePollInterval = null;
             currentDraft = draft;
             $('editor-status').textContent = 'READY';
             $('editor-status').style.background = '#22c55e';
@@ -6034,16 +6038,16 @@
             $('html-code-editor').value = draft.rewritten_html;
             updatePreviewIframe(draft.rewritten_html);
           } else if (draft.status === 'draft') {
-            clearInterval(interval);
+            clearInterval(_rewritePollInterval); _rewritePollInterval = null;
             $('editor-status').textContent = 'DRAFT';
             $('editor-status').style.background = '#4a7aff';
             $('ai-output-content').innerHTML = '<p style="color:var(--red);">Rewrite failed. Check logs for details.</p>';
           }
         })
-        .catch(function () { clearInterval(interval); });
+        .catch(function () { clearInterval(_rewritePollInterval); _rewritePollInterval = null; });
     }, 3000);
     // Timeout after 2 minutes
-    setTimeout(function () { clearInterval(interval); }, 120000);
+    setTimeout(function () { if (_rewritePollInterval) { clearInterval(_rewritePollInterval); _rewritePollInterval = null; } }, 120000);
   }
 
   // ─── Settings Page ──────────────────────────────────────────────────────
@@ -7623,7 +7627,7 @@
         if (lfr.fail > 0) {
           lfrHtml += ', <span class="text-red">' + lfr.fail + ' failed</span>';
           if (lfr.details && lfr.details.failedCities) {
-            lfrHtml += '<br><span class="text-sm text-muted">Failed: ' + lfr.details.failedCities.join(', ') + '</span>';
+            lfrHtml += '<br><span class="text-sm text-muted">Failed: ' + lfr.details.failedCities.map(escapeHtml).join(', ') + '</span>';
           }
         }
         lfrHtml += '</div>';
@@ -7651,12 +7655,12 @@
           '</td><td>' + (s.avg_petrol ? '₹' + s.avg_petrol : '—') +
           '</td><td>' + (s.avg_diesel ? '₹' + s.avg_diesel : '—') + '</td></tr>';
       }).join('');
-    });
+    }).catch(function(e) { showToast('Failed to load fuel states: ' + e.message, 'error'); });
 
     fetchApi('/api/fuel/cities').then(function(data) {
       _fuelCitiesData = data.data || [];
       renderFuelCities(_fuelCitiesData);
-    });
+    }).catch(function(e) { showToast('Failed to load fuel cities: ' + e.message, 'error'); });
 
     fetchApi('/api/fuel/history?city=Delhi&days=30').then(function(data) {
       renderFuelNationalChart(data);
@@ -7815,7 +7819,7 @@
           '<td>' + (c.price_18k ? '₹' + Number(c.price_18k).toLocaleString() : '—') + '</td>' +
           '<td>' + (c.price_1g ? '₹' + Number(c.price_1g).toFixed(2) : '—') + '</td></tr>';
       }).join('');
-    });
+    }).catch(function(e) { showToast('Failed to load metals cities: ' + e.message, 'error'); });
 
     var chartTitle = $('metals-chart-title');
     if (chartTitle) chartTitle.textContent = metal.charAt(0).toUpperCase() + metal.slice(1) + ' National Trend (30d)';
@@ -8060,13 +8064,13 @@
         '<td>' + esc(p.action || '—') + (p.error_message ? ' <span class="text-red text-sm" title="' + esc(p.error_message) + '">⚠</span>' : '') + '</td>' +
         '<td class="text-muted text-sm" title="' + esc(p.created_at) + '">' + timeAgo(p.created_at) + '</td>' +
         '<td>' +
-          (p.wp_url ? '<a href="' + esc(p.wp_url) + '" target="_blank" class="btn-icon" title="Open WP">🔗</a>' : '') +
+          (p.wp_url && /^https?:\/\//i.test(p.wp_url) ? '<a href="' + esc(p.wp_url) + '" target="_blank" rel="noopener noreferrer" class="btn-icon" title="Open WP">🔗</a>' : '') +
           '<button class="btn-icon" title="Regenerate" data-click="regeneratePost" data-module="' + esc(module) + '" data-item-type="' + esc(p.item_type) + '" data-post-type="' + esc(p.post_type) + '" data-item-name="' + esc(p.item_name) + '">🔄</button>' +
         '</td></tr>';
     }).join('');
   }
 
-  function renderPagination(containerId, currentPage, totalPages, onPage) {
+  function renderPaginationById(containerId, currentPage, totalPages, onPage) {
     var el = document.getElementById(containerId);
     if (!el) return;
     if (totalPages <= 1) { el.innerHTML = ''; return; }
@@ -8136,7 +8140,7 @@
 
     fetchApi('/api/posts/list?' + params).then(function(json) {
       renderPosts('fuel-posts-tbody', json.data || [], 'fuel');
-      renderPagination('fuel-posts-pagination', json.page, json.pages, loadFuelPosts);
+      renderPaginationById('fuel-posts-pagination', json.page, json.pages, loadFuelPosts);
     }).catch(function() {});
 
     fetchApi('/api/posts/stats').then(function(data) {
@@ -8246,7 +8250,7 @@
 
     fetchApi('/api/posts/list?' + params).then(function(json) {
       renderPosts('metals-posts-tbody', json.data || [], 'metals');
-      renderPagination('metals-posts-pagination', json.page, json.pages, loadMetalsPosts);
+      renderPaginationById('metals-posts-pagination', json.page, json.pages, loadMetalsPosts);
     }).catch(function() {});
 
     fetchApi('/api/posts/stats').then(function(data) {
