@@ -100,6 +100,7 @@ class InfranodusAnalyzer extends EventEmitter {
 
   async enhanceArticle(articleText) {
     if (!this.enabled) return null;
+    if (!articleText || articleText.length < 200) return null;
 
     try {
       var result = await this.analyzeText(articleText, { aiTopics: true });

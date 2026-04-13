@@ -2537,7 +2537,34 @@ function createApiRouter(deps) {
       var mode = req.query.mode || null;
       var clusterId = req.query.cluster_id || null;
 
-      var query = 'SELECT * FROM drafts';
+      // Explicit column list: large text blobs (rewritten_html, extracted_content,
+      // source_content_markdown, body_markdown, faq_json, ai_signals, infranodus_data)
+      // are excluded or truncated to keep the listing payload small and avoid
+      // ERR_HTTP2_PROTOCOL_ERROR on connections with many drafts.
+      //   extracted_chars  — exact byte length before truncation (for UI display)
+      //   extracted_content  — first 1200 chars (enough for 800-char card preview)
+      //   rewritten_html  — stub '1'/NULL so JS truthiness checks still work;
+      //                      full HTML is fetched per-draft in the editor
+      var query = `SELECT
+        id, source_article_id, source_url, source_domain, source_title,
+        source_language, source_category, source_publish_time,
+        COALESCE(LENGTH(extracted_content), 0) AS extracted_chars,
+        SUBSTR(extracted_content, 1, 1200) AS extracted_content,
+        SUBSTR(source_content_markdown, 1, 1200) AS source_content_markdown,
+        extracted_title, extracted_excerpt, extracted_byline,
+        extraction_status, extraction_error, extraction_method,
+        target_keyword, target_domain, target_platform, target_language,
+        schema_types, featured_image,
+        CASE WHEN rewritten_html IS NOT NULL AND LENGTH(rewritten_html) > 0
+             THEN '1' ELSE NULL END AS rewritten_html,
+        rewritten_title, rewritten_word_count, ai_model_used,
+        status, mode, created_at, updated_at, published_at,
+        current_version, is_partial, ai_provider, ai_tokens_used,
+        wp_media_id, wp_post_id, wp_post_url,
+        retry_count, max_retries, error_message, last_error_at, failed_permanent,
+        cluster_id, cluster_role,
+        locked_by, locked_at, lease_expires_at, next_run_at
+      FROM drafts`;
       var conditions = [];
       var params = [];
 
