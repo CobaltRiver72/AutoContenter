@@ -422,6 +422,12 @@ function runMigrations() {
       db.exec('ALTER TABLE drafts ADD COLUMN infranodus_data TEXT DEFAULT NULL');
     } catch (e) { /* already exists */ }
 
+    // WP Taxonomy routing — per-draft overrides
+    try { db.exec('ALTER TABLE drafts ADD COLUMN wp_category_ids TEXT DEFAULT NULL'); } catch (e) { /* already exists */ }
+    try { db.exec('ALTER TABLE drafts ADD COLUMN wp_primary_cat_id INTEGER DEFAULT NULL'); } catch (e) { /* already exists */ }
+    try { db.exec('ALTER TABLE drafts ADD COLUMN wp_tag_ids TEXT DEFAULT NULL'); } catch (e) { /* already exists */ }
+    try { db.exec('ALTER TABLE drafts ADD COLUMN wp_author_id_override INTEGER DEFAULT NULL'); } catch (e) { /* already exists */ }
+
     // InfraNodus analysis history — one row per analysis run so users can
     // pull past data without it being overwritten by future runs.
     db.exec(`CREATE TABLE IF NOT EXISTS infranodus_history (
@@ -636,6 +642,35 @@ function runMigrations() {
       );
 
       CREATE INDEX IF NOT EXISTS idx_fetch_log_module ON fetch_log(module, created_at);
+
+      CREATE TABLE IF NOT EXISTS wp_taxonomy_cache (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        tax_type   TEXT NOT NULL,
+        wp_id      INTEGER NOT NULL,
+        name       TEXT NOT NULL,
+        slug       TEXT NOT NULL DEFAULT '',
+        parent_id  INTEGER DEFAULT 0,
+        synced_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(tax_type, wp_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_wp_tax_type ON wp_taxonomy_cache(tax_type);
+
+      CREATE TABLE IF NOT EXISTS publish_rules (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        rule_name             TEXT NOT NULL,
+        priority              INTEGER DEFAULT 0,
+        match_source_domain   TEXT DEFAULT NULL,
+        match_source_category TEXT DEFAULT NULL,
+        match_title_keyword   TEXT DEFAULT NULL,
+        wp_category_ids       TEXT DEFAULT NULL,
+        wp_primary_cat_id     INTEGER DEFAULT NULL,
+        wp_tag_ids            TEXT DEFAULT NULL,
+        wp_author_id          INTEGER DEFAULT NULL,
+        is_active             INTEGER DEFAULT 1,
+        created_at            TEXT DEFAULT (datetime('now')),
+        updated_at            TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_publish_rules_priority ON publish_rules(priority DESC, is_active);
     `);
 
     // One-time fix: clean known-wrong model IDs from settings

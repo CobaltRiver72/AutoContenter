@@ -481,20 +481,31 @@ class WordPressPublisher {
       postContent += '\n\n' + schemaHtml;
     }
 
+    var wpCategories = rewrittenArticle.wpCategories && rewrittenArticle.wpCategories.length
+      ? rewrittenArticle.wpCategories
+      : [parseInt(this.config.WP_DEFAULT_CATEGORY, 10) || 1];
+    var wpTags = rewrittenArticle.wpTags && rewrittenArticle.wpTags.length
+      ? rewrittenArticle.wpTags : [];
+    var wpAuthorId = rewrittenArticle.wpAuthorId || parseInt(this.config.WP_AUTHOR_ID, 10) || 1;
+    var wpPrimaryCatId = rewrittenArticle.wpPrimaryCatId || wpCategories[0];
+
     var postData = {
       title: rewrittenArticle.title,
       slug: rewrittenArticle.slug || '',
       content: postContent,
       excerpt: rewrittenArticle.excerpt,
       status: this.config.WP_POST_STATUS || 'draft',
-      author: parseInt(this.config.WP_AUTHOR_ID, 10) || 1,
-      categories: [parseInt(this.config.WP_DEFAULT_CATEGORY, 10) || 1],
+      author: wpAuthorId,
+      categories: wpCategories,
+      tags: wpTags,
       featured_media: wpImageId || 0,
       meta: {
         _yoast_wpseo_metadesc: rewrittenArticle.metaDescription || '',
         _yoast_wpseo_focuskw: rewrittenArticle.targetKeyword || '',
+        _yoast_wpseo_primary_category: String(wpPrimaryCatId),
         rank_math_description: rewrittenArticle.metaDescription || '',
         rank_math_focus_keyword: rewrittenArticle.targetKeyword || '',
+        rank_math_primary_category: String(wpPrimaryCatId),
       },
     };
 
