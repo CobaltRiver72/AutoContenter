@@ -16,3 +16,9 @@ data/import-*.csv
 .obsidian/
 .trash/
 notes/
+Untitled.md
+Untitled.canvas
+**/Untitled.canvas
+
+# Claude Code per-user state
+.claude/
