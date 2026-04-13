@@ -250,7 +250,7 @@ class InfranodusAnalyzer extends EventEmitter {
    * Cached by sha256(text) for 30 min — same text within a session is free.
    */
   async enhanceArticle(articleText, options, signal) {
-    if (!this.enabled) return null;
+    if (!this.enabled || !this.ready) return null;
     if (!articleText || articleText.length < 200) return null;
 
     var text = articleText.slice(0, TEXT_LIMIT);

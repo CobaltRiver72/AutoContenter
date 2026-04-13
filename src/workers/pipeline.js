@@ -136,7 +136,12 @@ class Pipeline {
                 if (infraData) {
                   this.db.prepare('UPDATE drafts SET infranodus_data = ?, updated_at = datetime(\'now\') WHERE id = ?')
                     .run(JSON.stringify(infraData), draft.id);
-                  this.logger.info(MODULE, 'InfraNodus analysis complete for draft #' + draft.id);
+                  this.logger.info(MODULE, 'InfraNodus analysis complete for draft #' + draft.id +
+                    ' (' + (infraData.mainTopics || []).length + ' topics, ' +
+                    (infraData.missingEntities || []).length + ' entities)');
+                } else {
+                  this.logger.warn(MODULE, 'InfraNodus returned no data for draft #' + draft.id +
+                    ' — rewrite will proceed without entity context');
                 }
               } catch (infraErr) {
                 this.logger.warn(MODULE, 'InfraNodus analysis skipped for draft #' + draft.id + ': ' + infraErr.message);
@@ -361,8 +366,14 @@ class Pipeline {
           if (combinedText.length >= 200) {
             infraData = await this.infranodus.enhanceArticle(combinedText, null, rewriteController.signal);
             if (infraData) {
-              this.db.prepare('UPDATE drafts SET infranodus_data = ? WHERE id = ?')
+              this.db.prepare("UPDATE drafts SET infranodus_data = ?, updated_at = datetime('now') WHERE id = ?")
                 .run(JSON.stringify(infraData), primaryDraft.id);
+              this.logger.info(MODULE, 'Pre-rewrite InfraNodus analysis done for cluster #' + primaryDraft.id +
+                ' (' + (infraData.mainTopics || []).length + ' topics, ' +
+                (infraData.missingEntities || []).length + ' entities)');
+            } else {
+              this.logger.warn(MODULE, 'Pre-rewrite InfraNodus returned no data for cluster #' + primaryDraft.id +
+                ' — rewriting without entity context');
             }
           }
         } catch (infraErr) {
