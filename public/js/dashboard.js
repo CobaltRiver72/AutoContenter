@@ -4454,36 +4454,86 @@
       });
   }
 
+  // Parse InfraNodus bigram string "word1 <-> word2 [weight='N']"
+  // Returns { word1, word2, display, aiLabel } or null if not a bigram
+  function _parseBigram(str) {
+    var m = str.match(/^(.+?)\s*<->\s*(.+?)(?:\s*\[.*\])?$/);
+    if (!m) return null;
+    var w1 = m[1].trim().toLowerCase();
+    var w2 = m[2].trim().toLowerCase();
+    return {
+      word1: w1,
+      word2: w2,
+      display: w1 + ' + ' + w2,
+      aiLabel: '"' + w1 + '" and "' + w2 + '"'
+    };
+  }
+
+  // Check if a plain word/phrase is in text (case-insensitive)
+  function _inText(text, phrase) {
+    return text.indexOf(phrase.toLowerCase().replace(/[-_]/g, ' ')) !== -1;
+  }
+
   function renderEntityCoverage(d, plainText, coverageBody, draftId) {
-    // Collect all entities from infranodus data
-    var allEntities = [];
-    function addEntities(arr) {
+    // ── 1. Collect single-word/phrase topics ──────────────────────────────
+    var singlePresent = [];
+    var singleMissing = [];
+    var seen = {};
+
+    function checkSingle(arr) {
       if (!arr || !arr.length) return;
       arr.forEach(function (e) {
-        if (e && typeof e === 'string' && allEntities.indexOf(e) === -1) allEntities.push(e);
+        if (!e || typeof e !== 'string') return;
+        // Skip bigram-format strings — handled separately below
+        if (e.indexOf('<->') !== -1) return;
+        var key = e.toLowerCase();
+        if (seen[key]) return;
+        seen[key] = true;
+        if (_inText(plainText, e)) singlePresent.push(e);
+        else singleMissing.push(e);
       });
     }
-    addEntities(d.mainTopics);
-    addEntities(d.missingEntities);
-    addEntities(d.bigrams);
+    checkSingle(d.mainTopics);
+    checkSingle(d.missingEntities);
 
-    if (!allEntities.length) {
-      coverageBody.innerHTML = '<p class="aiedit-empty">No entities found in InfraNodus data. Run a deep analysis first.</p>';
+    // ── 2. Parse bigrams: "word1 <-> word2 [weight='N']" ──────────────────
+    // A bigram is "present" when BOTH words appear anywhere in the text.
+    var bigramPresent = [];
+    var bigramMissing = [];
+    var seenBigram = {};
+
+    function checkBigrams(arr) {
+      if (!arr || !arr.length) return;
+      arr.forEach(function (raw) {
+        if (!raw || typeof raw !== 'string') return;
+        var bg = _parseBigram(raw);
+        if (!bg) return;
+        var key = bg.word1 + '|' + bg.word2;
+        if (seenBigram[key]) return;
+        seenBigram[key] = true;
+        var bothPresent = _inText(plainText, bg.word1) && _inText(plainText, bg.word2);
+        if (bothPresent) bigramPresent.push(bg);
+        else bigramMissing.push(bg);
+      });
+    }
+    checkBigrams(d.bigrams);
+    // mainTopics / missingEntities may also contain bigram-format strings
+    checkBigrams(d.mainTopics);
+    checkBigrams(d.missingEntities);
+
+    var totalSingle = singlePresent.length + singleMissing.length;
+    var totalBigram = bigramPresent.length + bigramMissing.length;
+    var totalAll = totalSingle + totalBigram;
+
+    if (totalAll === 0) {
+      coverageBody.innerHTML = '<p class="aiedit-empty">No entities found in InfraNodus data. Run analysis in the InfraNodus tab first.</p>';
       return;
     }
 
-    var present = [];
-    var missing = [];
-    allEntities.forEach(function (entity) {
-      var needle = entity.toLowerCase().replace(/[-_]/g, ' ');
-      var found = plainText.indexOf(needle) !== -1;
-      if (found) present.push(entity);
-      else missing.push(entity);
-    });
-
-    var total = allEntities.length;
-    var ratio = total > 0 ? Math.round((present.length / total) * 100) : 0;
+    var presentAll = singlePresent.length + bigramPresent.length;
+    var ratio = Math.round((presentAll / totalAll) * 100);
     var barClass = ratio >= 70 ? '' : (ratio >= 40 ? 'warn' : 'low');
+    var ratioColor = ratio >= 70 ? '#22c55e' : (ratio >= 40 ? '#eab308' : '#ef4444');
 
     var html = '';
 
@@ -4491,43 +4541,55 @@
     html += '<div class="aiedit-coverage-summary">' +
       '<div class="aiedit-coverage-summary-label">' +
         '<span>Entity Coverage</span>' +
-        '<strong style="color:' + (ratio >= 70 ? '#22c55e' : ratio >= 40 ? '#eab308' : '#ef4444') + '">' + ratio + '%</strong>' +
+        '<strong style="color:' + ratioColor + '">' + ratio + '%</strong>' +
       '</div>' +
       '<div class="aiedit-coverage-bar-bg">' +
         '<div class="aiedit-coverage-bar-fill ' + barClass + '" style="width:' + ratio + '%"></div>' +
       '</div>' +
       '<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">' +
-        present.length + ' of ' + total + ' entities found in content' +
+        presentAll + ' of ' + totalAll + ' entities/concepts found in content' +
       '</div>' +
     '</div>';
 
-    // Present entities
-    if (present.length) {
+    // ── Present ──────────────────────────────────────────────────────────
+    if (singlePresent.length || bigramPresent.length) {
       html += '<div class="aiedit-entity-section">' +
-        '<div class="aiedit-entity-section-title">&#9989; In Content (' + present.length + ')</div>' +
-        '<div class="aiedit-entity-list">' +
-        present.map(function (e) {
-          return '<span class="aiedit-entity-tag present">&#10003; ' + escapeHtml(e) + '</span>';
-        }).join('') +
-        '</div></div>';
+        '<div class="aiedit-entity-section-title">&#9989; In Content (' + presentAll + ')</div>' +
+        '<div class="aiedit-entity-list">';
+      singlePresent.forEach(function (e) {
+        html += '<span class="aiedit-entity-tag present">&#10003; ' + escapeHtml(e) + '</span>';
+      });
+      bigramPresent.forEach(function (bg) {
+        html += '<span class="aiedit-entity-tag present" title="Concept pair both present">&#10003; ' + escapeHtml(bg.display) + '</span>';
+      });
+      html += '</div></div>';
     }
 
-    // Missing entities
-    if (missing.length) {
+    // ── Missing single entities ──────────────────────────────────────────
+    var missingCount = singleMissing.length + bigramMissing.length;
+    if (missingCount) {
       html += '<div class="aiedit-entity-section">' +
-        '<div class="aiedit-entity-section-title">&#10060; Missing (' + missing.length + ')</div>' +
-        '<div class="aiedit-entity-list">' +
-        missing.map(function (e) {
-          return '<span class="aiedit-entity-tag missing">' + escapeHtml(e) +
-            '<button class="aiedit-add-btn" title="Add this entity via AI" ' +
-              'data-click="addEntityToContent" data-entity="' + escapeHtml(e) + '" data-draft-id="' + draftId + '">' +
-              '+ Add</button>' +
-            '</span>';
-        }).join('') +
-        '</div>';
+        '<div class="aiedit-entity-section-title">&#10060; Missing (' + missingCount + ')</div>' +
+        '<div class="aiedit-entity-list">';
 
-      // Add-all missing button
-      if (missing.length > 1) {
+      singleMissing.forEach(function (e) {
+        html += '<span class="aiedit-entity-tag missing">' + escapeHtml(e) +
+          '<button class="aiedit-add-btn" title="Add via AI" ' +
+            'data-click="addEntityToContent" data-entity="' + escapeHtml(e) + '" data-draft-id="' + draftId + '">' +
+            '+ Add</button></span>';
+      });
+
+      bigramMissing.forEach(function (bg) {
+        html += '<span class="aiedit-entity-tag missing" title="Both words missing or not co-occurring">' +
+          escapeHtml(bg.display) +
+          '<button class="aiedit-add-btn" title="Add via AI" ' +
+            'data-click="addEntityToContent" data-entity="' + escapeHtml(bg.aiLabel) + '" data-draft-id="' + draftId + '">' +
+            '+ Add</button></span>';
+      });
+
+      html += '</div>';
+
+      if (missingCount > 1) {
         html += '<div class="aiedit-add-all-bar">' +
           '<span class="note">Use AI to naturally weave in all missing entities</span>' +
           '<button class="btn btn-xs btn-purple" data-click="addAllMissingEntities" data-draft-id="' + draftId + '">' +
