@@ -3549,3 +3549,217 @@ select:focus {
   }
   .batch-input { width: auto; flex: 1; }
 }
+
+/* ─── AI Edit Tab ──────────────────────────────────────────────────────── */
+.aiedit-tab-content {
+  padding: 0 !important;
+  overflow: hidden !important;
+  height: 100%;
+}
+.aiedit-layout {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+.aiedit-editor-col {
+  flex: 0 0 60%;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+.aiedit-coverage-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.aiedit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #111118;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.aiedit-toolbar-actions {
+  display: flex;
+  gap: 6px;
+}
+.aiedit-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.aiedit-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  outline: none;
+  min-height: 0;
+}
+.aiedit-content:empty::before {
+  content: "Load content using the toolbar above, or paste HTML directly here…";
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.aiedit-content h1, .aiedit-content h2, .aiedit-content h3 {
+  color: var(--text-primary);
+  margin: 12px 0 6px;
+}
+.aiedit-content p { margin-bottom: 10px; }
+.aiedit-content a { color: var(--accent); }
+.aiedit-content table { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
+.aiedit-content td, .aiedit-content th { border: 1px solid var(--border); padding: 6px 10px; font-size: 13px; }
+.aiedit-instruction-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #111118;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.aiedit-instruction-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 7px 10px;
+}
+.aiedit-instruction-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+.aiedit-patch-status {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #0d0d1a;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+/* Coverage panel */
+.aiedit-coverage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #111118;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.aiedit-coverage-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+.aiedit-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+/* Coverage summary bar */
+.aiedit-coverage-summary {
+  margin-bottom: 14px;
+}
+.aiedit-coverage-summary-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+.aiedit-coverage-bar-bg {
+  height: 8px;
+  background: #1e1e2e;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.aiedit-coverage-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  background: linear-gradient(90deg, #22c55e, #10b981);
+}
+.aiedit-coverage-bar-fill.warn { background: linear-gradient(90deg, #eab308, #f97316); }
+.aiedit-coverage-bar-fill.low  { background: linear-gradient(90deg, #ef4444, #f97316); }
+/* Entity list */
+.aiedit-entity-section { margin-bottom: 14px; }
+.aiedit-entity-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.aiedit-entity-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.aiedit-entity-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: default;
+}
+.aiedit-entity-tag.present {
+  background: rgba(34,197,94,0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.3);
+}
+.aiedit-entity-tag.missing {
+  background: rgba(239,68,68,0.12);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,0.25);
+}
+.aiedit-entity-tag .aiedit-add-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font-size: 12px;
+  padding: 0 2px;
+  opacity: 0.7;
+  line-height: 1;
+}
+.aiedit-entity-tag .aiedit-add-btn:hover { opacity: 1; }
+/* Add-all missing button */
+.aiedit-add-all-bar {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.aiedit-add-all-bar .note {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 1;
+}
+/* AI Edit working spinner */
+.aiedit-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(168,85,247,0.3);
+  border-top-color: #a855f7;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 5px;
+}

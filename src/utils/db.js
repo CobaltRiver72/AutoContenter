@@ -422,6 +422,18 @@ function runMigrations() {
       db.exec('ALTER TABLE drafts ADD COLUMN infranodus_data TEXT DEFAULT NULL');
     } catch (e) { /* already exists */ }
 
+    // InfraNodus analysis history — one row per analysis run so users can
+    // pull past data without it being overwritten by future runs.
+    db.exec(`CREATE TABLE IF NOT EXISTS infranodus_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      draft_id    INTEGER NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+      source      TEXT NOT NULL DEFAULT 'article',  -- 'article' | 'entity' | 'merge'
+      query       TEXT,                              -- entity keyword or article title
+      data_json   TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_infranodus_history_draft ON infranodus_history(draft_id, created_at DESC)');
+
     // Index for cluster lookups
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster ON drafts(cluster_id)');
 

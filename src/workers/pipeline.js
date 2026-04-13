@@ -345,8 +345,14 @@ class Pipeline {
           if (combinedText.length >= 200) {
             infraData = await this.infranodus.enhanceArticle(combinedText, { targetKeyword: primaryDraft.target_keyword || '' }, rewriteController.signal);
             if (infraData) {
+              var infraJsonPipe = JSON.stringify(infraData);
               this.db.prepare("UPDATE drafts SET infranodus_data = ?, updated_at = datetime('now') WHERE id = ?")
-                .run(JSON.stringify(infraData), primaryDraft.id);
+                .run(infraJsonPipe, primaryDraft.id);
+              // Append to analysis history (non-fatal)
+              try {
+                this.db.prepare("INSERT INTO infranodus_history (draft_id, source, query, data_json) VALUES (?, 'article', ?, ?)")
+                  .run(primaryDraft.id, primaryDraft.target_keyword || null, infraJsonPipe);
+              } catch (histErr) { /* ignore if table not yet migrated */ }
               this.logger.info(MODULE, 'Pre-rewrite InfraNodus analysis done for cluster #' + primaryDraft.id +
                 ' (' + (infraData.mainTopics || []).length + ' topics, ' +
                 (infraData.missingEntities || []).length + ' entities)');

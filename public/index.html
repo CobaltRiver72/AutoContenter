@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HDF AutoPub Dashboard</title>
-  <link rel="stylesheet" href="/css/dashboard.css?v=19">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20">
 </head>
 <body>
 
@@ -1111,6 +1111,7 @@
             <button class="editor-tab" data-panel="right" data-tab="html-editor">HTML Editor</button>
             <button class="editor-tab" data-panel="right" data-tab="preview">Preview</button>
             <button class="editor-tab" data-panel="right" data-tab="infranodus">&#128300; InfraNodus</button>
+            <button class="editor-tab" data-panel="right" data-tab="ai-edit">&#9999;&#65039; AI Edit</button>
           </div>
           <div class="editor-tab-content" id="tab-ai-output">
             <div id="ai-output-content" class="ai-output-content">
@@ -1124,6 +1125,36 @@
             <iframe id="preview-iframe" class="preview-iframe"></iframe>
           </div>
           <div class="editor-tab-content" id="tab-infranodus" style="display:none;"></div>
+          <div class="editor-tab-content aiedit-tab-content" id="tab-ai-edit" style="display:none;">
+            <div class="aiedit-layout">
+              <!-- Left: editable content area -->
+              <div class="aiedit-editor-col">
+                <div class="aiedit-toolbar">
+                  <span class="aiedit-label">Content Editor</span>
+                  <div class="aiedit-toolbar-actions">
+                    <button class="btn btn-xs btn-secondary" id="aiedit-load-btn" title="Load current AI output into editor">&#8593; Load from AI Output</button>
+                    <button class="btn btn-xs btn-secondary" id="aiedit-save-btn" title="Save back to HTML Editor">&#8595; Save to HTML Editor</button>
+                  </div>
+                </div>
+                <div id="aiedit-content" class="aiedit-content" contenteditable="true" spellcheck="false"></div>
+                <div class="aiedit-instruction-bar">
+                  <input type="text" id="aiedit-instruction" class="aiedit-instruction-input" placeholder="e.g. Add more detail about the price, use simpler language, add FAQ..." maxlength="500" />
+                  <button class="btn btn-sm btn-purple" id="aiedit-patch-btn">&#129302; AI Edit</button>
+                </div>
+                <div id="aiedit-patch-status" class="aiedit-patch-status" style="display:none;"></div>
+              </div>
+              <!-- Right: entity coverage panel -->
+              <div class="aiedit-coverage-col">
+                <div class="aiedit-coverage-header">
+                  <span class="aiedit-label">InfraNodus Entity Coverage</span>
+                  <button class="btn btn-xs btn-secondary" id="aiedit-check-btn">&#128269; Check Coverage</button>
+                </div>
+                <div id="aiedit-coverage-body" class="aiedit-coverage-body">
+                  <p class="aiedit-empty">Load content and click Check Coverage to see which InfraNodus entities appear in the article.</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <!-- Editor WP Error Log Drawer (above bottom bar) -->
@@ -1202,6 +1233,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=32"></script>
+  <script src="/js/dashboard.js?v=33"></script>
 </body>
 </html>

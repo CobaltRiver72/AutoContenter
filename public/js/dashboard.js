@@ -3873,6 +3873,9 @@
         // Reset tabs to defaults
         resetEditorTabs();
 
+        // Init AI Edit tab buttons (idempotent — runs each time editor opens)
+        initAiEditTab();
+
         // Show editor
         $('editor-overlay').style.display = 'flex';
       })
@@ -4304,6 +4307,282 @@
   window.__searchEntityInfra = searchEntityInfra;
   window.__applyEntityToDraft = applyEntityToDraft;
 
+  // ─── AI Edit Tab ───────────────────────────────────────────────────
+
+  // Holds the current draft id while editor is open (re-uses currentDraft)
+  function _aiEditDraftId() {
+    return currentDraft && currentDraft.id ? String(currentDraft.id) : null;
+  }
+
+  // Load HTML from AI Output tab or HTML Editor into the editor pane
+  function initAiEditTab() {
+    var loadBtn  = document.getElementById('aiedit-load-btn');
+    // Guard: only wire listeners once per DOM element lifetime
+    if (loadBtn && loadBtn.dataset.init) return;
+
+    var saveBtn  = document.getElementById('aiedit-save-btn');
+    var patchBtn = document.getElementById('aiedit-patch-btn');
+    var checkBtn = document.getElementById('aiedit-check-btn');
+    var instrInput = document.getElementById('aiedit-instruction');
+
+    if (loadBtn) { loadBtn.dataset.init = '1';
+      loadBtn.addEventListener('click', function () {
+        var htmlEditor = document.getElementById('html-code-editor');
+        var aiOut = document.getElementById('ai-output-content');
+        var content = document.getElementById('aiedit-content');
+        if (!content) return;
+        // Prefer HTML editor if it has content, else fall back to AI output
+        var src = (htmlEditor && htmlEditor.value.trim()) ? htmlEditor.value.trim()
+          : (aiOut ? aiOut.innerHTML : '');
+        if (!src) { showToast('No content loaded yet. Run AI Rewrite first.', 'warn'); return; }
+        content.innerHTML = src;
+        showToast('Content loaded into editor', 'info');
+        // Auto-check coverage after loading
+        checkEntityCoverage();
+      });
+    }
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function () {
+        var content = document.getElementById('aiedit-content');
+        var htmlEditor = document.getElementById('html-code-editor');
+        if (!content || !htmlEditor) return;
+        var html = content.innerHTML;
+        htmlEditor.value = html;
+        // Switch to HTML editor tab
+        var htmlTab = document.querySelector('.editor-tab[data-tab="html-editor"]');
+        if (htmlTab) htmlTab.click();
+        showToast('Saved to HTML Editor', 'success');
+      });
+    }
+
+    if (patchBtn) {
+      patchBtn.addEventListener('click', function () {
+        applyAIPatch();
+      });
+    }
+
+    if (instrInput) {
+      instrInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') applyAIPatch();
+      });
+    }
+
+    if (checkBtn) {
+      checkBtn.addEventListener('click', function () {
+        checkEntityCoverage();
+      });
+    }
+  }
+
+  function applyAIPatch() {
+    var draftId = _aiEditDraftId();
+    if (!draftId) { showToast('No draft open', 'error'); return; }
+
+    var content = document.getElementById('aiedit-content');
+    var instrInput = document.getElementById('aiedit-instruction');
+    var patchBtn = document.getElementById('aiedit-patch-btn');
+    var statusEl = document.getElementById('aiedit-patch-status');
+
+    if (!content || !instrInput) return;
+    var html = content.innerHTML.trim();
+    if (!html || html.length < 10) { showToast('Load content first', 'warn'); return; }
+    var instruction = instrInput.value.trim();
+    if (!instruction) { showToast('Enter an editing instruction first', 'warn'); return; }
+
+    if (patchBtn) { patchBtn.disabled = true; patchBtn.innerHTML = '<span class="aiedit-spinner"></span> Editing…'; }
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Sending to AI…'; }
+
+    fetchApi('/api/drafts/' + draftId + '/ai-patch', {
+      method: 'POST',
+      body: JSON.stringify({ html: html, instruction: instruction }),
+    })
+      .then(function (resp) {
+        if (resp && resp.success && resp.html) {
+          content.innerHTML = resp.html;
+          if (statusEl) statusEl.textContent = '✓ Edit applied. Check Coverage to see entity impact.';
+          instrInput.value = '';
+          showToast('AI edit applied', 'success');
+          // Re-check coverage after patch
+          checkEntityCoverage();
+        } else {
+          if (statusEl) statusEl.textContent = '✗ ' + ((resp && resp.error) || 'AI patch failed');
+          showToast((resp && resp.error) || 'AI patch failed', 'error');
+        }
+      })
+      .catch(function (err) {
+        if (statusEl) statusEl.textContent = '✗ ' + (err.message || String(err));
+        showToast('AI patch error: ' + (err.message || String(err)), 'error');
+      })
+      .finally(function () {
+        if (patchBtn) { patchBtn.disabled = false; patchBtn.innerHTML = '&#129302; AI Edit'; }
+      });
+  }
+
+  // ─── Entity Coverage Checker ───────────────────────────────────────
+
+  function checkEntityCoverage() {
+    var draftId = _aiEditDraftId();
+    var coverageBody = document.getElementById('aiedit-coverage-body');
+    if (!coverageBody) return;
+
+    // Get the content HTML
+    var content = document.getElementById('aiedit-content');
+    var html = content ? content.innerHTML : '';
+    if (!html || html.trim().length < 10) {
+      coverageBody.innerHTML = '<p class="aiedit-empty">Load content first using the toolbar above.</p>';
+      return;
+    }
+
+    // Strip tags for plain-text matching
+    var plainText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+
+    // Get infranodus data from the draft
+    if (!draftId) { coverageBody.innerHTML = '<p class="aiedit-empty">No draft loaded.</p>'; return; }
+
+    fetchApi('/api/drafts/' + draftId + '/infranodus')
+      .then(function (resp) {
+        var d = (resp && resp.infraData) || null;
+        if (!d) {
+          coverageBody.innerHTML = '<p class="aiedit-empty">No InfraNodus data for this draft yet. Run analysis in the InfraNodus tab first.</p>';
+          return;
+        }
+        renderEntityCoverage(d, plainText, coverageBody, draftId);
+      })
+      .catch(function (err) {
+        coverageBody.innerHTML = '<p class="aiedit-empty" style="color:#ef4444">Failed to load InfraNodus data: ' + escapeHtml(err.message || '') + '</p>';
+      });
+  }
+
+  function renderEntityCoverage(d, plainText, coverageBody, draftId) {
+    // Collect all entities from infranodus data
+    var allEntities = [];
+    function addEntities(arr) {
+      if (!arr || !arr.length) return;
+      arr.forEach(function (e) {
+        if (e && typeof e === 'string' && allEntities.indexOf(e) === -1) allEntities.push(e);
+      });
+    }
+    addEntities(d.mainTopics);
+    addEntities(d.missingEntities);
+    addEntities(d.bigrams);
+
+    if (!allEntities.length) {
+      coverageBody.innerHTML = '<p class="aiedit-empty">No entities found in InfraNodus data. Run a deep analysis first.</p>';
+      return;
+    }
+
+    var present = [];
+    var missing = [];
+    allEntities.forEach(function (entity) {
+      var needle = entity.toLowerCase().replace(/[-_]/g, ' ');
+      var found = plainText.indexOf(needle) !== -1;
+      if (found) present.push(entity);
+      else missing.push(entity);
+    });
+
+    var total = allEntities.length;
+    var ratio = total > 0 ? Math.round((present.length / total) * 100) : 0;
+    var barClass = ratio >= 70 ? '' : (ratio >= 40 ? 'warn' : 'low');
+
+    var html = '';
+
+    // Summary bar
+    html += '<div class="aiedit-coverage-summary">' +
+      '<div class="aiedit-coverage-summary-label">' +
+        '<span>Entity Coverage</span>' +
+        '<strong style="color:' + (ratio >= 70 ? '#22c55e' : ratio >= 40 ? '#eab308' : '#ef4444') + '">' + ratio + '%</strong>' +
+      '</div>' +
+      '<div class="aiedit-coverage-bar-bg">' +
+        '<div class="aiedit-coverage-bar-fill ' + barClass + '" style="width:' + ratio + '%"></div>' +
+      '</div>' +
+      '<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">' +
+        present.length + ' of ' + total + ' entities found in content' +
+      '</div>' +
+    '</div>';
+
+    // Present entities
+    if (present.length) {
+      html += '<div class="aiedit-entity-section">' +
+        '<div class="aiedit-entity-section-title">&#9989; In Content (' + present.length + ')</div>' +
+        '<div class="aiedit-entity-list">' +
+        present.map(function (e) {
+          return '<span class="aiedit-entity-tag present">&#10003; ' + escapeHtml(e) + '</span>';
+        }).join('') +
+        '</div></div>';
+    }
+
+    // Missing entities
+    if (missing.length) {
+      html += '<div class="aiedit-entity-section">' +
+        '<div class="aiedit-entity-section-title">&#10060; Missing (' + missing.length + ')</div>' +
+        '<div class="aiedit-entity-list">' +
+        missing.map(function (e) {
+          return '<span class="aiedit-entity-tag missing">' + escapeHtml(e) +
+            '<button class="aiedit-add-btn" title="Add this entity via AI" ' +
+              'data-click="addEntityToContent" data-entity="' + escapeHtml(e) + '" data-draft-id="' + draftId + '">' +
+              '+ Add</button>' +
+            '</span>';
+        }).join('') +
+        '</div>';
+
+      // Add-all missing button
+      if (missing.length > 1) {
+        html += '<div class="aiedit-add-all-bar">' +
+          '<span class="note">Use AI to naturally weave in all missing entities</span>' +
+          '<button class="btn btn-xs btn-purple" data-click="addAllMissingEntities" data-draft-id="' + draftId + '">' +
+            '&#129302; Add All Missing' +
+          '</button>' +
+        '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Target keyword + advice
+    if (d.targetKeyword || d.gapAdvice) {
+      html += '<div class="aiedit-entity-section" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">';
+      if (d.targetKeyword) {
+        html += '<div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Target keyword: <strong style="color:#a855f7">' + escapeHtml(d.targetKeyword) + '</strong></div>';
+      }
+      if (d.gapAdvice) {
+        html += '<div style="font-size:12px; color:var(--text-secondary); line-height:1.5;">' + escapeHtml(d.gapAdvice.slice(0, 200)) + (d.gapAdvice.length > 200 ? '…' : '') + '</div>';
+      }
+      html += '</div>';
+    }
+
+    coverageBody.innerHTML = html;
+  }
+
+  function addEntityToContent(entity, draftId) {
+    var instrInput = document.getElementById('aiedit-instruction');
+    if (!instrInput) return;
+    instrInput.value = 'Naturally weave in the entity "' + entity + '" into the article where it fits best.';
+    instrInput.focus();
+    showToast('Instruction set — click AI Edit to apply', 'info');
+  }
+
+  function addAllMissingEntities(draftId) {
+    // Find all missing entities from the coverage display
+    var missing = [];
+    document.querySelectorAll('.aiedit-entity-tag.missing').forEach(function (el) {
+      var addBtn = el.querySelector('.aiedit-add-btn');
+      if (addBtn && addBtn.dataset.entity) missing.push(addBtn.dataset.entity);
+    });
+    if (!missing.length) { showToast('No missing entities', 'info'); return; }
+    var instrInput = document.getElementById('aiedit-instruction');
+    if (!instrInput) return;
+    instrInput.value = 'Naturally weave these missing entities into the article where they fit best: ' + missing.join(', ');
+    instrInput.focus();
+    showToast('Instruction set for ' + missing.length + ' entities — click AI Edit to apply', 'info');
+  }
+
+  // Expose for dispatch table
+  window.__applyAIPatch = applyAIPatch;
+  window.__checkEntityCoverage = checkEntityCoverage;
+  window.__addEntityToContent = addEntityToContent;
+  window.__addAllMissingEntities = addAllMissingEntities;
+  window.__initAiEditTab = initAiEditTab;
+
   // ─── Batch Action Bar (Manual Cluster from Feed / Drafts) ─────────
   function _getBatchSelectionCount() {
     if (state.currentPage === 'feed') return selectedCount;
@@ -4526,6 +4805,7 @@
     'ai-output': 'tab-ai-output',
     'html-editor': 'tab-html-editor',
     preview: 'tab-preview',
+    'ai-edit': 'tab-ai-edit',
     infranodus: 'tab-infranodus'
   };
   var EDITOR_DEFAULT_TABS = { source: true, 'ai-output': true };
@@ -6341,6 +6621,8 @@
     'runInfraAnalysis':        function (el) { __runInfraAnalysis(Number(el.dataset.draftId)); },
     'searchEntityInfra':       function (el) { __searchEntityInfra(String(el.dataset.draftId)); },
     'applyEntityToDraft':      function (el) { __applyEntityToDraft(String(el.dataset.draftId)); },
+    'addEntityToContent':      function (el) { __addEntityToContent(el.dataset.entity, String(el.dataset.draftId)); },
+    'addAllMissingEntities':   function (el) { __addAllMissingEntities(String(el.dataset.draftId)); },
     'switchToInfraTab':        function () { __switchToInfraTab(); },
     'toggleSelectMode':        function () { __toggleSelectMode(); },
     'batchDeleteFailed':       function () { __batchDeleteFailed(); },
