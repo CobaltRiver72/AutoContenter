@@ -191,13 +191,16 @@ function buildPrompt(article, cluster, settings) {
       'Use this trending momentum — weave the trend topic into the headline and opening paragraph.\n\n';
   }
 
-  // InfraNodus entity analysis — graph-derived topics, missing entities, gaps
-  // to fill, and research questions. Populated when the pipeline runs the
-  // cluster through the InfraNodus module before calling the rewriter.
+  // InfraNodus entity analysis — injected into the AI prompt so the rewriter
+  // knows the topical landscape, SEO gaps, and what readers actually want.
+  // This block is populated only when the user clicks "Rewrite with AI" or
+  // the pipeline pre-rewrite step runs — never on autopilot extraction.
   var entityContext = '';
   if (s.infraData) {
     var infra = s.infraData;
     entityContext = '--- ENTITY ANALYSIS (from InfraNodus) ---\n';
+
+    // ── Article text analysis (always present) ────────────────────────
     if (infra.mainTopics && infra.mainTopics.length) {
       entityContext += 'Main Topics: ' + infra.mainTopics.join(', ') + '\n';
     }
@@ -211,11 +214,38 @@ function buildPrompt(article, cluster, settings) {
       entityContext += 'Questions readers may have: ' + infra.researchQuestions.slice(0, 3).join('; ') + '\n';
     }
     if (infra.advice) {
-      entityContext += 'Content Strategy: ' + infra.advice + '\n';
+      entityContext += 'Content Strategy (article analysis): ' + infra.advice + '\n';
+    }
+    if (infra.bigrams && infra.bigrams.length) {
+      entityContext += 'Key concept pairs: ' + infra.bigrams.slice(0, 8).join(', ') + '\n';
     }
     if (infra.graphSummary) {
       entityContext += 'Entity Relationships: ' + infra.graphSummary + '\n';
     }
+
+    // ── SEO / keyword intelligence (present when target_keyword is set) ─
+    if (infra.targetKeyword) {
+      entityContext += '\n[SEO intelligence for keyword: "' + infra.targetKeyword + '"]\n';
+    }
+    if (infra.rankingAdvice) {
+      entityContext += 'What currently ranks (competitive landscape): ' + infra.rankingAdvice + '\n';
+    }
+    if (infra.intentAdvice) {
+      entityContext += 'What readers are searching for (intent): ' + infra.intentAdvice + '\n';
+    }
+    if (infra.gapAdvice) {
+      entityContext += 'SEO content gap opportunity (write about this): ' + infra.gapAdvice + '\n';
+    }
+    if (infra.relatedQueries && infra.relatedQueries.length) {
+      entityContext += 'Related searches to address: ' + infra.relatedQueries.slice(0, 8).join(', ') + '\n';
+    }
+    if (infra.demandTopics && infra.demandTopics.length) {
+      entityContext += 'High-demand underserved topics to include: ' + infra.demandTopics.slice(0, 6).join(', ') + '\n';
+    }
+    if (infra.demandGaps && infra.demandGaps.length) {
+      entityContext += 'Demand gaps (topics people want but nobody covers well): ' + infra.demandGaps.join('; ') + '\n';
+    }
+
     entityContext += '--- END ENTITY ANALYSIS ---';
   }
 
