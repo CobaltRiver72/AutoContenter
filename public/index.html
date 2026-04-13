@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HDF AutoPub Dashboard</title>
-  <link rel="stylesheet" href="/css/dashboard.css?v=12">
+  <link rel="stylesheet" href="/css/dashboard.css?v=13">
 </head>
 <body>
 
@@ -1136,6 +1136,19 @@
           <p class="placeholder-text">Loading...</p>
         </div>
       </div>
+      <!-- InfraNodus Debug Drawer (above bottom bar) -->
+      <div id="editorInfraDebug" class="editor-infra-debug" style="display:none;">
+        <div class="editor-infra-debug-header">
+          <span class="infra-debug-title">&#128300; InfraNodus Debug</span>
+          <div class="infra-debug-actions">
+            <button class="btn btn-sm btn-secondary" id="editorInfraRefreshBtn">&#8635; Refresh</button>
+            <button class="btn btn-sm btn-secondary" id="editorInfraCloseBtn">Close</button>
+          </div>
+        </div>
+        <div id="editorInfraDebugContent" class="editor-infra-debug-content">
+          <p class="infra-debug-empty">Loading...</p>
+        </div>
+      </div>
       <div class="editor-bottombar">
         <button class="btn btn-secondary" id="editorSaveBtn">&#128190; Save Draft</button>
         <button class="btn btn-secondary" id="editorDownloadBtn">&#11015; Download HTML</button>
@@ -1143,6 +1156,7 @@
         <button class="btn btn-secondary" id="editorPreviewTabBtn">&#128065; Preview in New Tab</button>
         <button class="btn btn-success" id="editorPublishBtn">&#128640; Publish</button>
         <button class="btn btn-wp-log" id="editorWpLogBtn">&#128270; WP Log</button>
+        <button class="btn btn-infra-debug" id="editorInfraDebugBtn">&#128300; InfraNodus</button>
       </div>
     </div>
   </div>
@@ -1187,6 +1201,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=25"></script>
+  <script src="/js/dashboard.js?v=26"></script>
 </body>
 </html>

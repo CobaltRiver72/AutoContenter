@@ -5123,6 +5123,176 @@
     }
   }
 
+  // ─── InfraNodus Debug Panel ──────────────────────────────────────────────
+
+  function initInfraDebugPanel() {
+    var btn     = $('editorInfraDebugBtn');
+    var panel   = $('editorInfraDebug');
+    var refresh = $('editorInfraRefreshBtn');
+    var close   = $('editorInfraCloseBtn');
+
+    if (btn && panel) {
+      btn.onclick = function () {
+        var visible = panel.style.display !== 'none';
+        panel.style.display = visible ? 'none' : '';
+        if (!visible) renderInfraDebug();
+      };
+    }
+    if (refresh) { refresh.onclick = renderInfraDebug; }
+    if (close && panel) { close.onclick = function () { panel.style.display = 'none'; }; }
+  }
+
+  function renderInfraDebug() {
+    var content = $('editorInfraDebugContent');
+    if (!content) return;
+    content.innerHTML = '<p class="infra-debug-empty">Loading...</p>';
+
+    var draftId = currentDraftId;
+
+    // Fetch module health + draft analysis in parallel
+    Promise.all([
+      fetchApi('/api/health'),
+      draftId ? fetchApi('/api/drafts/' + draftId + '/infranodus') : Promise.resolve(null)
+    ]).then(function (results) {
+      var health = results[0];
+      var draftResult = results[1];
+
+      // Find InfraNodus module entry
+      var infraHealth = null;
+      var modules = health.modules || [];
+      for (var i = 0; i < modules.length; i++) {
+        if (modules[i].module === 'infranodus') { infraHealth = modules[i]; break; }
+      }
+
+      var infraData = draftResult && draftResult.infraData ? draftResult.infraData : null;
+      var aiModel   = draftResult ? draftResult.aiModel : null;
+
+      // ── Build issues list ─────────────────────────────────────────────────
+      var issues = [];
+
+      if (!infraHealth) {
+        issues.push({ type: 'error', icon: '✖', text: 'InfraNodus module not found in health check. Server may need restart.' });
+      } else {
+        if (!infraHealth.enabled) {
+          issues.push({ type: 'error', icon: '✖', text: 'Module is DISABLED. Go to Settings → InfraNodus → set INFRANODUS_ENABLED = true.' });
+        }
+        if (infraHealth.enabled && !infraHealth.ready) {
+          issues.push({ type: 'error', icon: '✖', text: 'Module is enabled but NOT ready. Check your API key and restart.' });
+        }
+        if (infraHealth.error) {
+          issues.push({ type: 'error', icon: '✖', text: 'Module error: ' + infraHealth.error });
+        }
+        if (infraHealth.enabled && infraHealth.ready && !infraHealth.lastActivity) {
+          issues.push({ type: 'warn', icon: '⚠', text: 'Module is ready but has never run an analysis. Open a draft and click "Run Analysis".' });
+        }
+      }
+
+      if (!draftId) {
+        issues.push({ type: 'info', icon: 'ℹ', text: 'No draft is open. Open a draft to see its analysis data.' });
+      } else if (!infraData) {
+        if (infraHealth && infraHealth.enabled && infraHealth.ready) {
+          issues.push({ type: 'warn', icon: '⚠', text: 'No analysis data for this draft yet. Click "Run Analysis" in the InfraNodus tab or wait for the pipeline to process it.' });
+        } else {
+          issues.push({ type: 'warn', icon: '⚠', text: 'No analysis data for this draft. Enable InfraNodus first, then run analysis.' });
+        }
+      } else {
+        var topicCount = (infraData.mainTopics || []).length;
+        var entityCount = (infraData.missingEntities || []).length;
+        if (topicCount === 0 && entityCount === 0) {
+          issues.push({ type: 'warn', icon: '⚠', text: 'Analysis ran but returned 0 topics and 0 entities. The article may be too short, or the API key may have quota issues.' });
+        } else {
+          issues.push({ type: 'ok', icon: '✔', text: 'Analysis looks good — ' + topicCount + ' topics and ' + entityCount + ' entities will enrich the next rewrite.' });
+        }
+        if (!infraData.advice) {
+          issues.push({ type: 'warn', icon: '⚠', text: 'No AI advice in last result. InfraNodus may not have returned aiAdvice[0].text — check your API key quota.' });
+        }
+      }
+
+      // ── Render ────────────────────────────────────────────────────────────
+      var h = '';
+
+      // Issues section (full width)
+      h += '<div class="infra-debug-section infra-debug-issues">';
+      h += '<div class="infra-debug-section-title">Issues Detected</div>';
+      if (issues.length === 0) {
+        h += '<div class="infra-issue issue-ok"><i class="infra-issue-icon">✔</i> No issues detected.</div>';
+      }
+      for (var j = 0; j < issues.length; j++) {
+        var iss = issues[j];
+        h += '<div class="infra-issue issue-' + iss.type + '">' +
+          '<i class="infra-issue-icon">' + iss.icon + '</i>' +
+          '<span>' + escapeHtml(iss.text) + '</span>' +
+          '</div>';
+      }
+      h += '</div>';
+
+      // Module health section
+      h += '<div class="infra-debug-section">';
+      h += '<div class="infra-debug-section-title">Module Health</div>';
+      if (infraHealth) {
+        var statusClass = infraHealth.status === 'connected' ? 'ok' : infraHealth.status === 'error' ? 'bad' : 'warn';
+        h += row('Status',       '<span class="dv ' + statusClass + '">' + escapeHtml(infraHealth.status || '?') + '</span>');
+        h += row('Enabled',      infraHealth.enabled  ? '<span class="dv ok">yes</span>'  : '<span class="dv bad">no</span>');
+        h += row('Ready',        infraHealth.ready    ? '<span class="dv ok">yes</span>'  : '<span class="dv bad">no</span>');
+        h += row('Analyses run', escapeHtml(String((infraHealth.stats && infraHealth.stats.analysesRun) || 0)));
+        h += row('Last activity', infraHealth.lastActivity ? escapeHtml(infraHealth.lastActivity.replace('T', ' ').slice(0, 19)) : '<span class="dv warn">never</span>');
+        if (infraHealth.error) {
+          h += row('Error', '<span class="dv bad">' + escapeHtml(infraHealth.error) + '</span>');
+        }
+      } else {
+        h += '<div class="infra-debug-row"><span class="dk">—</span><span class="dv bad">Not available</span></div>';
+      }
+      h += '</div>';
+
+      // Draft analysis section
+      h += '<div class="infra-debug-section">';
+      h += '<div class="infra-debug-section-title">This Draft\'s Analysis</div>';
+      if (!draftId) {
+        h += '<div class="infra-debug-row"><span class="dk">—</span><span class="dv warn">No draft open</span></div>';
+      } else if (!infraData) {
+        h += row('Has data', '<span class="dv bad">none</span>');
+        h += row('Draft ID', escapeHtml(String(draftId)));
+        if (aiModel) h += row('Last AI model', escapeHtml(aiModel));
+      } else {
+        h += row('Has data',   '<span class="dv ok">yes</span>');
+        h += row('Analyzed at', escapeHtml((infraData.analyzedAt || '?').replace('T', ' ').slice(0, 19)));
+        h += row('Chars sent', escapeHtml(String(infraData.charsSent || '?')));
+        h += row('Topics',     escapeHtml(String((infraData.mainTopics || []).length)));
+        h += row('Entities',   escapeHtml(String((infraData.missingEntities || []).length)));
+        h += row('Content gaps', escapeHtml(String((infraData.contentGaps || []).length)));
+        h += row('Research Qs', escapeHtml(String((infraData.researchQuestions || []).length)));
+        h += row('Advice',     infraData.advice    ? '<span class="dv ok">yes</span>' : '<span class="dv warn">none</span>');
+        h += row('Graph summary', infraData.graphSummary ? '<span class="dv ok">yes</span>' : '<span class="dv warn">none</span>');
+        if (aiModel) h += row('Used in rewrite', escapeHtml(aiModel));
+      }
+      h += '</div>';
+
+      // Raw topics (only if data exists)
+      if (infraData && (infraData.mainTopics || []).length > 0) {
+        h += '<div class="infra-debug-section">';
+        h += '<div class="infra-debug-section-title">Main Topics</div>';
+        h += '<div style="color:#c7d2fe;line-height:1.6;">' + (infraData.mainTopics || []).map(function(t){ return escapeHtml(t); }).join(', ') + '</div>';
+        h += '</div>';
+      }
+
+      // Advice snippet
+      if (infraData && infraData.advice) {
+        h += '<div class="infra-debug-section">';
+        h += '<div class="infra-debug-section-title">AI Advice Snippet</div>';
+        h += '<div style="color:#94a3b8;line-height:1.5;font-style:italic;">"' + escapeHtml(infraData.advice.slice(0, 300)) + (infraData.advice.length > 300 ? '…' : '') + '"</div>';
+        h += '</div>';
+      }
+
+      content.innerHTML = h;
+    }).catch(function (err) {
+      content.innerHTML = '<p class="infra-debug-empty" style="color:#f87171;">Failed to load: ' + escapeHtml(err.message || String(err)) + '</p>';
+    });
+
+    function row(label, valueHtml) {
+      return '<div class="infra-debug-row"><span class="dk">' + label + '</span><span class="dv">' + valueHtml + '</span></div>';
+    }
+  }
+
   // ─── Logs Page ──────────────────────────────────────────────────────────
 
   function loadLogs() {
@@ -5721,6 +5891,7 @@
     initRouter();
     initEditorButtons();
     initWpDiagButtons();
+    initInfraDebugPanel();
     initManualImport();
     // Pre-fetch OpenRouter models so the editor's model picker works even
     // before the user visits the Settings page. Cached server-side for 1h.
