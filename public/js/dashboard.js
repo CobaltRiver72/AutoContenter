@@ -4005,19 +4005,25 @@
       });
   }
 
+  var EDITOR_TAB_MAP = {
+    source: 'tab-source',
+    settings: 'tab-settings',
+    'ai-output': 'tab-ai-output',
+    'html-editor': 'tab-html-editor',
+    preview: 'tab-preview',
+    infranodus: 'tab-infranodus'
+  };
+  var EDITOR_DEFAULT_TABS = { source: true, 'ai-output': true };
+
   function resetEditorTabs() {
-    // Reset left tabs
     var leftTabs = document.querySelectorAll('.editor-left .editor-tab');
     for (var i = 0; i < leftTabs.length; i++) leftTabs[i].classList.toggle('active', leftTabs[i].getAttribute('data-tab') === 'source');
-    $('tab-source').style.display = '';
-    $('tab-settings').style.display = 'none';
-    // Reset right tabs
     var rightTabs = document.querySelectorAll('.editor-right .editor-tab');
     for (var j = 0; j < rightTabs.length; j++) rightTabs[j].classList.toggle('active', rightTabs[j].getAttribute('data-tab') === 'ai-output');
-    $('tab-ai-output').style.display = '';
-    $('tab-html-editor').style.display = 'none';
-    $('tab-preview').style.display = 'none';
-    $('tab-infranodus').style.display = 'none';
+    for (var key in EDITOR_TAB_MAP) {
+      var el = $(EDITOR_TAB_MAP[key]);
+      if (el) el.style.display = EDITOR_DEFAULT_TABS[key] ? '' : 'none';
+    }
   }
 
   function getStatusColor(status) {
@@ -4087,8 +4093,7 @@
     var contents = parent.querySelectorAll('.editor-tab-content');
     for (var j = 0; j < contents.length; j++) contents[j].style.display = 'none';
 
-    var tabMap = { source: 'tab-source', settings: 'tab-settings', 'ai-output': 'tab-ai-output', 'html-editor': 'tab-html-editor', preview: 'tab-preview', infranodus: 'tab-infranodus' };
-    var target = $(tabMap[tab]);
+    var target = $(EDITOR_TAB_MAP[tab]);
     if (target) target.style.display = '';
 
     if (tab === 'preview') {

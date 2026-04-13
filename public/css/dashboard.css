@@ -1705,10 +1705,10 @@ select:focus {
 }
 .editor-version-bar {
   padding: 8px 12px;
-  background: #1a1a1a;
-  border-bottom: 1px solid #333;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
   font-size: 12px;
-  color: #aaa;
+  color: var(--text-muted);
   display: flex;
   gap: 8px;
   align-items: center;
