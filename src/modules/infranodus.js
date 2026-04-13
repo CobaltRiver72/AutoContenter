@@ -1,5 +1,21 @@
 'use strict';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// InfraNodus integration — knowledge graph + AI advice for the rewriter prompt
+//
+// Authoritative reference (read this BEFORE editing):
+//   /INFRANODUS_API_REFERENCE.md  at the repo root.
+//
+// Key API rules learned the hard way:
+//   1. InfraNodus separates QUERY params (URL ?foo=bar) from BODY params (JSON).
+//      _callAPI() takes them as separate args; never mix them.
+//   2. AI advice text comes back as `aiAdvice[0].text` — NOT a flat `.advice` string.
+//   3. /api/v1/dotGraphFromText does NOT accept `doNotSave` (it's a pure transform).
+//   4. /api/v1/graphAndAdvice needs `requestMode` set or behavior is unspecified.
+//   5. `optimize: 'gaps'` (plural) is canonical across endpoints; the singular
+//      `'gap'` shown in the endpoint #2 docs is a documentation typo.
+// ─────────────────────────────────────────────────────────────────────────────
+
 var EventEmitter = require('events').EventEmitter;
 var crypto = require('crypto');
 var axios = require('axios');
@@ -7,8 +23,8 @@ var { sanitizeAxiosError } = require('../utils/safe-http');
 
 var MODULE = 'infranodus';
 var API_BASE = 'https://infranodus.com';
-var CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes in-memory (not DB — avoids write contention)
-var TEXT_LIMIT = 12000;             // raised from 5 000: captures full article context
+var CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — in-memory only, cleared on shutdown
+var TEXT_LIMIT = 12000;             // chars; raised from 5 000 to capture full articles
 
 class InfranodusAnalyzer extends EventEmitter {
   constructor(config, db, logger) {
@@ -24,7 +40,7 @@ class InfranodusAnalyzer extends EventEmitter {
     this.lastActivity = null;
     this.apiKey = null;
     this.stats = { analysesRun: 0 };
-    this._cache = new Map(); // keyed by sha256(text).slice(0,16); evicted on TTL or shutdown
+    this._cache = new Map(); // key: sha256(text).slice(0,16); value: { data, ts }
   }
 
   async init() {
@@ -70,9 +86,20 @@ class InfranodusAnalyzer extends EventEmitter {
     this._cache.set(key, { data: data, ts: Date.now() });
   }
 
-  // POST to an InfraNodus endpoint with 1 retry (5s delay) on transient failure.
-  // signal: optional AbortController.signal — aborted requests are not retried.
-  async _callAPI(endpoint, body, signal) {
+  /**
+   * POST to an InfraNodus endpoint with strict query/body separation.
+   *
+   * @param {string} endpoint     - e.g. '/api/v1/graphAndAdvice'
+   * @param {object} body         - JSON body parameters per InfraNodus body spec
+   * @param {object} queryParams  - URL query parameters per InfraNodus query spec
+   * @param {AbortSignal} [signal] - AbortController.signal for graceful shutdown
+   * @returns {Promise<object>}   response.data
+   *
+   * Single retry with 5 s delay on transient failure. Aborted requests are
+   * NOT retried. All errors are passed through sanitizeAxiosError() to scrub
+   * Bearer tokens before they reach logs.
+   */
+  async _callAPI(endpoint, body, queryParams, signal) {
     var options = {
       headers: {
         'Authorization': 'Bearer ' + this.apiKey,
@@ -80,6 +107,7 @@ class InfranodusAnalyzer extends EventEmitter {
       },
       timeout: 30000,
     };
+    if (queryParams) options.params = queryParams; // axios serializes to URL query string
     if (signal) options.signal = signal;
 
     for (var attempt = 1; attempt <= 2; attempt++) {
@@ -104,59 +132,123 @@ class InfranodusAnalyzer extends EventEmitter {
 
   // ─── Public analysis methods ─────────────────────────────────────────────
 
-  // Legacy: kept for backwards-compat callers (dashboard test-connection route).
+  /**
+   * Endpoint #1: POST /api/v1/graphAndStatements
+   * Lighter analysis (graph + topics + stats) without AI advice. Used by the
+   * dashboard's "test connection" route and by getEntityClusters/getContentGaps.
+   */
   async analyzeText(text, options) {
     if (!this.enabled || !this.ready) return null;
     options = options || {};
     try {
-      return await this._callAPI('/api/v1/graphAndStatements', {
-        text: text,
-        doNotSave: true,
-        addStats: true,
-        aiTopics: options.aiTopics !== false,
-        compactGraph: true,
-      });
+      return await this._callAPI(
+        '/api/v1/graphAndStatements',
+        // ─── body ─────────────────────────────────────
+        {
+          text: text,
+          aiTopics: options.aiTopics !== false,
+        },
+        // ─── query ────────────────────────────────────
+        {
+          doNotSave: true,
+          addStats: true,
+          compactGraph: true,
+          includeGraphSummary: true,
+          extendedGraphSummary: true,
+        }
+      );
     } catch (err) {
       this.logger.error(MODULE, 'analyzeText failed: ' + err.message);
       return null;
     }
   }
 
-  // Phase 2: Calls /api/v1/graphAndAdvice — graph + AI advice for the given optimise mode.
-  // optimizeMode: 'gaps' (default) | 'develop' | 'reinforce' | 'latent' | 'imagine' | 'optimize'
+  /**
+   * Endpoint #2: POST /api/v1/graphAndAdvice
+   * Text → graph + AI-generated advice via LLM.
+   *
+   * Configured to return EVERYTHING in one response: graph, stats, aiTopics,
+   * aiAdvice, graphSummary. enhanceArticle() relies on this single-call shape.
+   *
+   * @param {string} text
+   * @param {string} [optimizeMode] - 'gaps' (default) | 'develop' | 'reinforce' | 'imagine'
+   * @param {AbortSignal} [signal]
+   */
   async analyzeWithAdvice(text, optimizeMode, signal) {
     if (!this.enabled || !this.ready) return null;
     try {
-      return await this._callAPI('/api/v1/graphAndAdvice', {
-        text: text,
-        optimize: optimizeMode || 'gaps',
-        addStats: true,
-        aiTopics: true,
-        doNotSave: true,
-      }, signal);
+      return await this._callAPI(
+        '/api/v1/graphAndAdvice',
+        // ─── body ─────────────────────────────────────
+        {
+          text: text,
+          // 'summary' → graph-augmented summary; ideal for content-strategy
+          // injection into the rewriter prompt.
+          requestMode: 'summary',
+          // body-level toggle — enables AI topic extraction in the response
+          aiTopics: true,
+        },
+        // ─── query ────────────────────────────────────
+        {
+          doNotSave: true,
+          addStats: true,
+          optimize: optimizeMode || 'gaps',
+          includeGraph: true,
+          includeGraphSummary: true,
+          extendedGraphSummary: true,
+          gapDepth: 1, // one step deeper than default for richer gap detection
+        },
+        signal
+      );
     } catch (err) {
       this.logger.error(MODULE, 'analyzeWithAdvice failed: ' + err.message);
       return null;
     }
   }
 
-  // Phase 2: Calls /api/v1/dotGraphFromText — compact DOT graph + graphSummary string.
+  /**
+   * Endpoint #3: POST /api/v1/dotGraphFromText
+   * Compact DOT graph + graphSummary, designed for direct LLM prompt injection.
+   * Kept as a public helper — enhanceArticle() does NOT call this because
+   * graphAndAdvice already returns graphSummary when configured correctly.
+   *
+   * IMPORTANT: doNotSave is NOT a valid parameter for this endpoint (pure transform).
+   */
   async getCompactGraph(text, signal) {
     if (!this.enabled || !this.ready) return null;
     try {
-      return await this._callAPI('/api/v1/dotGraphFromText', {
-        text: text,
-        doNotSave: true,
-      }, signal);
+      return await this._callAPI(
+        '/api/v1/dotGraphFromText',
+        // ─── body ─────────────────────────────────────
+        {
+          text: text,
+          aiTopics: true, // unlocks clusterKeywords + allClusters in response
+        },
+        // ─── query (NO doNotSave here — not a valid param) ─
+        {
+          optimize: 'gaps',
+          includeGraph: false,
+          includeGraphSummary: true,
+          extendedGraphSummary: true,
+        },
+        signal
+      );
     } catch (err) {
       this.logger.error(MODULE, 'getCompactGraph failed: ' + err.message);
       return null;
     }
   }
 
-  // Main entry point for the pipeline (post-extraction B5 + pre-rewrite).
-  // Runs graphAndAdvice + dotGraphFromText in parallel; validates, caches, and
-  // returns a structured result ready for buildPrompt() injection.
+  /**
+   * Main pipeline entry point (post-extraction B5 + pre-rewrite).
+   *
+   * ONE call to graphAndAdvice returns everything we need:
+   *   - mainTopics, missingEntities, contentGaps, researchQuestions
+   *   - advice (from aiAdvice[0].text)
+   *   - graphSummary
+   *
+   * Cached by sha256(text) for 30 min — same text within a session is free.
+   */
   async enhanceArticle(articleText, options, signal) {
     if (!this.enabled) return null;
     if (!articleText || articleText.length < 200) return null;
@@ -172,55 +264,60 @@ class InfranodusAnalyzer extends EventEmitter {
     options = options || {};
 
     try {
-      // Both calls in parallel — each has its own retry inside _callAPI.
-      var results = await Promise.all([
-        this.analyzeWithAdvice(text, options.optimize || 'gaps', signal),
-        this.getCompactGraph(text, signal),
-      ]);
+      var result = await this.analyzeWithAdvice(
+        text,
+        options.optimize || 'gaps',
+        signal
+      );
 
-      var adviceResult = results[0];
-      var dotResult    = results[1];
+      if (!result) return null;
 
-      // Validate response shapes — never trust raw API output.
-      var mainTopics       = [];
-      var missingEntities  = [];
-      var contentGaps      = [];
-      var researchQuestions = [];
-      var advice           = null;
-      var graphSummary     = null;
+      // ─── Defensive response parsing ─────────────────────────────────────
+      // graphAndAdvice may place fields at root OR nested in result.graph.
+      // We check both locations for every field we care about.
 
-      if (adviceResult) {
-        // graphAndAdvice mirrors graphAndStatements structure + adds `advice`.
-        var aiTopics = adviceResult.aiTopics || {};
-        mainTopics        = Array.isArray(aiTopics.mainTopics)       ? aiTopics.mainTopics.slice(0, 10)       : [];
-        contentGaps       = Array.isArray(aiTopics.contentGaps)      ? aiTopics.contentGaps.slice(0, 5)       : [];
-        researchQuestions = Array.isArray(aiTopics.researchQuestions) ? aiTopics.researchQuestions.slice(0, 3) : [];
+      // 1) AI advice text — array form, NOT a flat .advice string
+      var advice = null;
+      if (Array.isArray(result.aiAdvice) && result.aiAdvice.length > 0) {
+        var firstAdvice = result.aiAdvice[0];
+        if (firstAdvice && typeof firstAdvice.text === 'string' && firstAdvice.text.length > 0) {
+          advice = firstAdvice.text.slice(0, 2000);
+        }
+      }
 
-        // missingEntities derived from bridge concepts spanning structural gaps
-        if (adviceResult.stats && Array.isArray(adviceResult.stats.gaps)) {
-          for (var i = 0; i < adviceResult.stats.gaps.length; i++) {
-            var gap = adviceResult.stats.gaps[i];
-            if (Array.isArray(gap.bridgeConcepts)) {
-              for (var j = 0; j < gap.bridgeConcepts.length; j++) {
-                if (missingEntities.indexOf(gap.bridgeConcepts[j]) === -1) {
-                  missingEntities.push(gap.bridgeConcepts[j]);
-                }
+      // 2) Graph summary — at root or nested in result.graph
+      var graphSummary = null;
+      if (typeof result.graphSummary === 'string' && result.graphSummary.length > 0) {
+        graphSummary = result.graphSummary.slice(0, 1000);
+      } else if (result.graph && typeof result.graph.graphSummary === 'string' && result.graph.graphSummary.length > 0) {
+        graphSummary = result.graph.graphSummary.slice(0, 1000);
+      }
+
+      // 3) AI-extracted topics — at root or nested
+      var aiTopicsData = result.aiTopics || (result.graph && result.graph.aiTopics) || {};
+      var mainTopics        = Array.isArray(aiTopicsData.mainTopics)        ? aiTopicsData.mainTopics.slice(0, 10)        : [];
+      var contentGaps       = Array.isArray(aiTopicsData.contentGaps)       ? aiTopicsData.contentGaps.slice(0, 5)        : [];
+      var researchQuestions = Array.isArray(aiTopicsData.researchQuestions) ? aiTopicsData.researchQuestions.slice(0, 3) : [];
+
+      // 4) Stats with bridge concepts (= entities the article mentions but
+      //    never connects) — at root or nested
+      var statsData = result.stats || (result.graph && result.graph.stats) || {};
+      var missingEntities = [];
+      if (Array.isArray(statsData.gaps)) {
+        for (var i = 0; i < statsData.gaps.length; i++) {
+          var gap = statsData.gaps[i];
+          if (gap && Array.isArray(gap.bridgeConcepts)) {
+            for (var j = 0; j < gap.bridgeConcepts.length; j++) {
+              if (missingEntities.indexOf(gap.bridgeConcepts[j]) === -1) {
+                missingEntities.push(gap.bridgeConcepts[j]);
               }
             }
           }
-          missingEntities = missingEntities.slice(0, 10);
         }
-
-        if (typeof adviceResult.advice === 'string') {
-          advice = adviceResult.advice.slice(0, 2000);
-        }
+        missingEntities = missingEntities.slice(0, 10);
       }
 
-      if (dotResult && typeof dotResult.graphSummary === 'string') {
-        graphSummary = dotResult.graphSummary.slice(0, 1000);
-      }
-
-      var result = {
+      var enhancement = {
         mainTopics:        mainTopics,
         missingEntities:   missingEntities,
         contentGaps:       contentGaps,
@@ -231,9 +328,9 @@ class InfranodusAnalyzer extends EventEmitter {
         charsSent:         text.length,
       };
 
-      this._setCache(cacheKey, result);
+      this._setCache(cacheKey, enhancement);
       this.lastActivity = new Date().toISOString();
-      return result;
+      return enhancement;
 
     } catch (err) {
       this.logger.error(MODULE, 'enhanceArticle failed: ' + sanitizeAxiosError(err).message);
