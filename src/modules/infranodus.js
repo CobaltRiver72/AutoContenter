@@ -375,16 +375,20 @@ class InfranodusAnalyzer extends EventEmitter {
   }
 
   /**
-   * Entity-level deep search: fetch AI advice, related search queries, and
-   * topical analysis for a single entity word or phrase.
+   * Entity-level deep search — runs 7 InfraNodus API calls in parallel and
+   * returns everything the API can tell us about an entity / keyword.
    *
-   * Runs three calls in parallel:
-   *   #10 googleSearchResultsAiAdvice → AI advice on what Google ranks for this entity
-   *   #11 googleSearchIntentGraph     → related search queries / search intent
-   *   #1  graphAndStatements(entity)  → topics/entities/gaps from the entity term itself
+   * Parallel calls:
+   *   #10 googleSearchResultsAiAdvice  → AI advice on what Google currently ranks
+   *   #11 googleSearchIntentGraph      → related search queries / reader intent
+   *   #12 googleSearchIntentAiAdvice   → AI advice on what readers want to know
+   *   #13 googleSearchVsIntentGraph    → supply-vs-demand gap graph
+   *   #14 googleSearchVsIntentAiAdvice → AI advice on supply/demand gaps
+   *   #3  dotGraphFromText(entity)     → bigrams + topic cluster descriptions
+   *   #1  graphAndStatements(entity)   → topics / bridge concepts / gaps
    *
-   * IMPORTANT: Google search endpoints (#10, #11) default doNotSave to FALSE.
-   * Always pass doNotSave: true in queryParams for these endpoints.
+   * IMPORTANT: Google search endpoints (#10–#14) default doNotSave to FALSE.
+   * Always pass doNotSave: true in queryParams.
    *
    * @param {string} entity  - single word or short phrase
    * @param {object} [opts]
@@ -396,157 +400,213 @@ class InfranodusAnalyzer extends EventEmitter {
 
     var q = entity.trim().slice(0, 200);
     opts = opts || {};
+    var country  = opts.importCountry  || 'US';
+    var language = opts.importLanguage || 'EN';
     var self = this;
 
     try {
       var results = await Promise.all([
+
         // #10 — AI advice on what Google currently ranks for this entity
         this._callAPI(
           '/api/v1/import/googleSearchResultsAiAdvice',
-          {
-            searchQuery: q,
-            aiTopics: true,
-            requestMode: 'summary',
-            importCountry: opts.importCountry || 'US',
-            importLanguage: opts.importLanguage || 'EN',
-          },
-          {
-            doNotSave: true,
-            addStats: true,
-            optimize: 'gaps',
-            includeGraphSummary: true,
-            extendedGraphSummary: true,
-          },
+          { searchQuery: q, aiTopics: true, requestMode: 'summary', importCountry: country, importLanguage: language },
+          { doNotSave: true, addStats: true, optimize: 'gaps', includeGraphSummary: true, extendedGraphSummary: true },
           signal
-        ).catch(function (e) {
-          self.logger.warn(MODULE, 'googleSearchResultsAiAdvice failed: ' + e.message);
-          return null;
-        }),
+        ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchResultsAiAdvice: ' + e.message); return null; }),
 
         // #11 — related search queries / reader search intent graph
         this._callAPI(
           '/api/v1/import/googleSearchIntentGraph',
-          {
-            searchQuery: q,
-            aiTopics: true,
-            keywordsSource: 'related',
-            importCountry: opts.importCountry || 'US',
-            importLanguage: opts.importLanguage || 'EN',
-          },
-          {
-            doNotSave: true,
-            addStats: true,
-            includeGraphSummary: true,
-            extendedGraphSummary: true,
-          },
+          { searchQuery: q, aiTopics: true, keywordsSource: 'related', importCountry: country, importLanguage: language },
+          { doNotSave: true, addStats: true, includeGraphSummary: true, extendedGraphSummary: true },
           signal
-        ).catch(function (e) {
-          self.logger.warn(MODULE, 'googleSearchIntentGraph failed: ' + e.message);
-          return null;
+        ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchIntentGraph: ' + e.message); return null; }),
+
+        // #12 — AI advice on what readers want to know (intent-focused)
+        this._callAPI(
+          '/api/v1/import/googleSearchIntentAiAdvice',
+          { searchQuery: q, aiTopics: true, requestMode: 'summary', keywordsSource: 'related', importCountry: country, importLanguage: language },
+          { doNotSave: true, addStats: true, optimize: 'gaps', includeGraphSummary: true, extendedGraphSummary: true },
+          signal
+        ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchIntentAiAdvice: ' + e.message); return null; }),
+
+        // #13 — supply-vs-demand: what people search for vs. what's published
+        this._callAPI(
+          '/api/v1/import/googleSearchVsIntentGraph',
+          { searchQuery: q, aiTopics: true },
+          { doNotSave: true, addStats: true, compareMode: 'difference', includeGraphSummary: true, extendedGraphSummary: true },
+          signal
+        ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchVsIntentGraph: ' + e.message); return null; }),
+
+        // #14 — AI advice on the supply/demand gap (highest-value SEO insight)
+        this._callAPI(
+          '/api/v1/import/googleSearchVsIntentAiAdvice',
+          { searchQuery: q, aiTopics: true, requestMode: 'summary', keywordsSource: 'related' },
+          { doNotSave: true, addStats: true, compareMode: 'difference', optimize: 'gaps', includeGraphSummary: true, extendedGraphSummary: true },
+          signal
+        ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchVsIntentAiAdvice: ' + e.message); return null; }),
+
+        // #3 — compact graph of the entity term: bigrams + cluster descriptions
+        // NOTE: doNotSave is NOT a valid param for dotGraphFromText (pure transform)
+        this._callAPI(
+          '/api/v1/dotGraphFromText',
+          { text: q, aiTopics: true },
+          { optimize: 'gaps', includeGraph: false, includeGraphSummary: true, extendedGraphSummary: true },
+          signal
+        ).catch(function (e) { self.logger.warn(MODULE, 'dotGraphFromText(entity): ' + e.message); return null; }),
+
+        // #1 — text analysis of the entity term for topics/bridge concepts/gaps
+        this.analyzeText(q, { aiTopics: true }).catch(function (e) {
+          self.logger.warn(MODULE, 'analyzeText(entity): ' + e.message); return null;
         }),
 
-        // #1 — text analysis of the entity term itself for topics/gaps/bridge concepts
-        this.analyzeText(q, { aiTopics: true }).catch(function (e) {
-          self.logger.warn(MODULE, 'analyzeText(entity) failed: ' + e.message);
-          return null;
-        }),
       ]);
 
-      var adviceResult = results[0]; // #10 AI advice on Google results
-      var intentResult = results[1]; // #11 search intent graph
-      var stmtResult   = results[2]; // #1 text analysis
+      var rankingAdviceResult  = results[0]; // #10
+      var intentGraphResult    = results[1]; // #11
+      var intentAdviceResult   = results[2]; // #12
+      var vsIntentGraphResult  = results[3]; // #13
+      var gapAdviceResult      = results[4]; // #14
+      var dotResult            = results[5]; // #3
+      var stmtResult           = results[6]; // #1
 
-      if (!adviceResult && !intentResult && !stmtResult) return null;
-
-      // ─── AI advice from #10 ───────────────────────────────────────────
-      var advice = null;
-      if (adviceResult && Array.isArray(adviceResult.aiAdvice) && adviceResult.aiAdvice.length > 0) {
-        var firstAdvice = adviceResult.aiAdvice[0];
-        if (firstAdvice && typeof firstAdvice.text === 'string' && firstAdvice.text.length > 0) {
-          advice = firstAdvice.text.slice(0, 3000);
-        }
+      if (!rankingAdviceResult && !intentGraphResult && !intentAdviceResult &&
+          !vsIntentGraphResult && !gapAdviceResult && !dotResult && !stmtResult) {
+        return null;
       }
 
-      // ─── graphSummary — prefer adviceResult, fall back to others ──────
-      var graphSummary = null;
-      var summaryOrder = [adviceResult, intentResult, stmtResult];
-      for (var si = 0; si < summaryOrder.length; si++) {
-        var sc = summaryOrder[si];
-        if (!sc) continue;
-        if (typeof sc.graphSummary === 'string' && sc.graphSummary.length > 0) {
-          graphSummary = sc.graphSummary.slice(0, 1000);
-          break;
-        }
-        if (sc.graph && typeof sc.graph.graphSummary === 'string' && sc.graph.graphSummary.length > 0) {
-          graphSummary = sc.graph.graphSummary.slice(0, 1000);
-          break;
-        }
+      // ─── Helper: extract first aiAdvice text from a result ────────────
+      function _extractAdvice(r, maxLen) {
+        if (!r || !Array.isArray(r.aiAdvice) || !r.aiAdvice.length) return null;
+        var t = r.aiAdvice[0];
+        return (t && typeof t.text === 'string' && t.text.length > 0) ? t.text.slice(0, maxLen || 3000) : null;
       }
 
-      // ─── AI topics + gaps from stmtResult (#1) ───────────────────────
-      var aiTopicsData = {};
-      if (stmtResult) {
-        aiTopicsData = stmtResult.aiTopics || (stmtResult.graph && stmtResult.graph.aiTopics) || {};
+      // ─── Helper: extract aiTopics object from various response shapes ──
+      function _extractTopicsData(r) {
+        if (!r) return {};
+        return r.aiTopics || (r.graph && r.graph.aiTopics) || {};
       }
-      var mainTopics        = Array.isArray(aiTopicsData.mainTopics)        ? aiTopicsData.mainTopics.slice(0, 10)       : [];
-      var contentGaps       = Array.isArray(aiTopicsData.contentGaps)       ? aiTopicsData.contentGaps.slice(0, 5)       : [];
-      var researchQuestions = Array.isArray(aiTopicsData.researchQuestions) ? aiTopicsData.researchQuestions.slice(0, 5) : [];
 
-      // ─── Bridge concepts (entities in gaps) from stmtResult ──────────
-      var statsData = stmtResult ? (stmtResult.stats || (stmtResult.graph && stmtResult.graph.stats) || {}) : {};
-      var missingEntities = [];
-      if (Array.isArray(statsData.gaps)) {
-        for (var i = 0; i < statsData.gaps.length; i++) {
-          var gap = statsData.gaps[i];
-          if (gap && Array.isArray(gap.bridgeConcepts)) {
-            for (var j = 0; j < gap.bridgeConcepts.length; j++) {
-              if (missingEntities.indexOf(gap.bridgeConcepts[j]) === -1) {
-                missingEntities.push(gap.bridgeConcepts[j]);
+      // ─── Helper: extract graphSummary from various shapes ─────────────
+      function _extractSummary(r) {
+        if (!r) return null;
+        if (typeof r.graphSummary === 'string' && r.graphSummary.length > 0) return r.graphSummary.slice(0, 1000);
+        if (r.graph && typeof r.graph.graphSummary === 'string' && r.graph.graphSummary.length > 0) return r.graph.graphSummary.slice(0, 1000);
+        return null;
+      }
+
+      // ─── Helper: extract bridge concepts from statsData.gaps ──────────
+      function _extractBridges(r) {
+        var statsData = r ? (r.stats || (r.graph && r.graph.stats) || {}) : {};
+        var out = [];
+        if (Array.isArray(statsData.gaps)) {
+          for (var gi = 0; gi < statsData.gaps.length; gi++) {
+            var gp = statsData.gaps[gi];
+            if (gp && Array.isArray(gp.bridgeConcepts)) {
+              for (var bi = 0; bi < gp.bridgeConcepts.length; bi++) {
+                if (out.indexOf(gp.bridgeConcepts[bi]) === -1) out.push(gp.bridgeConcepts[bi]);
               }
             }
           }
         }
-        missingEntities = missingEntities.slice(0, 10);
+        return out.slice(0, 10);
       }
 
-      // ─── Related search queries from intentResult (#11) ──────────────
-      // #11 response is same shape as #1 (statements + graph at root)
-      var relatedQueries = [];
-      if (intentResult) {
-        var intentTopics = intentResult.aiTopics || (intentResult.graph && intentResult.graph.aiTopics) || {};
-        if (Array.isArray(intentTopics.mainTopics) && intentTopics.mainTopics.length) {
-          relatedQueries = intentTopics.mainTopics.slice(0, 10);
+      // ─── Helper: extract mainTopics from intent/graph results ─────────
+      function _extractMainTopics(r, max) {
+        var td = _extractTopicsData(r);
+        if (Array.isArray(td.mainTopics) && td.mainTopics.length) return td.mainTopics.slice(0, max || 10);
+        // Fallback to raw statements
+        var stmts = (r && r.statements) ||
+                    (r && r.entriesAndGraphOfContext && r.entriesAndGraphOfContext.statements) || [];
+        var out = [];
+        for (var si = 0; si < stmts.length && out.length < (max || 10); si++) {
+          var c = stmts[si] && stmts[si].content;
+          if (c && out.indexOf(c) === -1) out.push(c);
         }
-        // Fall back to raw statements if aiTopics is empty
-        if (!relatedQueries.length) {
-          var stmts = intentResult.statements ||
-                      (intentResult.entriesAndGraphOfContext && intentResult.entriesAndGraphOfContext.statements) || [];
-          for (var k = 0; k < stmts.length && relatedQueries.length < 10; k++) {
-            var s = stmts[k];
-            var content = (s && s.content) ? s.content : null;
-            if (content && relatedQueries.indexOf(content) === -1) {
-              relatedQueries.push(content);
+        return out;
+      }
+
+      // ─── 1. Three AI advice texts ──────────────────────────────────────
+      var rankingAdvice = _extractAdvice(rankingAdviceResult, 3000); // what ranks
+      var intentAdvice  = _extractAdvice(intentAdviceResult,  3000); // what readers want
+      var gapAdvice     = _extractAdvice(gapAdviceResult,     3000); // supply/demand gap
+
+      // ─── 2. graphSummary — best available ─────────────────────────────
+      var graphSummary = _extractSummary(dotResult) ||
+                         _extractSummary(rankingAdviceResult) ||
+                         _extractSummary(stmtResult) ||
+                         _extractSummary(intentGraphResult) ||
+                         null;
+
+      // ─── 3. Topics from #1 (entity text analysis) ─────────────────────
+      var stmtTopics    = _extractTopicsData(stmtResult);
+      var mainTopics        = Array.isArray(stmtTopics.mainTopics)        ? stmtTopics.mainTopics.slice(0, 10)       : [];
+      var contentGaps       = Array.isArray(stmtTopics.contentGaps)       ? stmtTopics.contentGaps.slice(0, 5)       : [];
+      var researchQuestions = Array.isArray(stmtTopics.researchQuestions) ? stmtTopics.researchQuestions.slice(0, 5) : [];
+      var missingEntities   = _extractBridges(stmtResult);
+
+      // ─── 4. Related search queries from #11 ───────────────────────────
+      var relatedQueries = _extractMainTopics(intentGraphResult, 12);
+
+      // ─── 5. High-demand topics from #13 (supply/demand gap) ───────────
+      var demandTopics = _extractMainTopics(vsIntentGraphResult, 12);
+      var demandTopicsData = _extractTopicsData(vsIntentGraphResult);
+      var demandGaps = Array.isArray(demandTopicsData.contentGaps) ? demandTopicsData.contentGaps.slice(0, 5) : [];
+
+      // ─── 6. Bigrams + cluster descriptions from #3 ────────────────────
+      var bigrams = [];
+      var clusterDescriptions = [];
+      if (dotResult) {
+        if (Array.isArray(dotResult.bigrams)) {
+          bigrams = dotResult.bigrams.slice(0, 15);
+        }
+        if (Array.isArray(dotResult.allClusters)) {
+          for (var ci = 0; ci < dotResult.allClusters.length; ci++) {
+            var cl = dotResult.allClusters[ci];
+            if (cl && typeof cl.text === 'string' && cl.text.trim()) {
+              clusterDescriptions.push(cl.text.trim());
             }
           }
+        }
+        if (!clusterDescriptions.length && typeof dotResult.clusterKeywords === 'string' && dotResult.clusterKeywords.trim()) {
+          clusterDescriptions = [dotResult.clusterKeywords.trim()];
         }
       }
 
       var searchResult = {
-        entity:            q,
-        advice:            advice,
-        mainTopics:        mainTopics,
-        missingEntities:   missingEntities,
-        contentGaps:       contentGaps,
-        researchQuestions: researchQuestions,
-        relatedQueries:    relatedQueries,
-        graphSummary:      graphSummary,
-        analyzedAt:        new Date().toISOString(),
+        entity:               q,
+        // Three AI advice texts
+        rankingAdvice:        rankingAdvice,
+        intentAdvice:         intentAdvice,
+        gapAdvice:            gapAdvice,
+        // Topic data
+        mainTopics:           mainTopics,
+        missingEntities:      missingEntities,
+        contentGaps:          contentGaps,
+        researchQuestions:    researchQuestions,
+        // Search query data
+        relatedQueries:       relatedQueries,
+        // Supply/demand data
+        demandTopics:         demandTopics,
+        demandGaps:           demandGaps,
+        // Concept graph data
+        bigrams:              bigrams,
+        clusterDescriptions:  clusterDescriptions,
+        graphSummary:         graphSummary,
+        analyzedAt:           new Date().toISOString(),
       };
 
       this.logger.info(MODULE,
         'searchEntity "' + q + '" — topics:' + mainTopics.length +
         ' related:' + relatedQueries.length +
-        ' advice:' + (advice ? 'yes' : 'no')
+        ' demand:' + demandTopics.length +
+        ' bigrams:' + bigrams.length +
+        ' rankingAdvice:' + (rankingAdvice ? 'yes' : 'no') +
+        ' intentAdvice:' + (intentAdvice ? 'yes' : 'no') +
+        ' gapAdvice:' + (gapAdvice ? 'yes' : 'no')
       );
 
       return searchResult;

@@ -3805,7 +3805,11 @@
       return;
     }
 
-    results.innerHTML = '<div class="infra-loading">&#128269; Searching InfraNodus for <strong>' + escapeHtml(entity) + '</strong>...</div>';
+    results.innerHTML =
+      '<div class="infra-entity-loading">' +
+        '<div class="infra-entity-loading-spinner"></div>' +
+        '<span>Running 7 InfraNodus API calls for <strong>' + escapeHtml(entity) + '</strong>&#8230;</span>' +
+      '</div>';
     if (btn) { btn.disabled = true; btn.textContent = 'Fetching...'; }
 
     fetchApi('/api/infranodus/entity-search', {
@@ -3819,20 +3823,42 @@
           return;
         }
         var d = resp.data;
-        var html = '<div class="infra-entity-result-header">Results for: <strong>' + escapeHtml(d.entity) + '</strong></div>';
+        var html = '<div class="infra-entity-result-header">Deep analysis for: <strong>' + escapeHtml(d.entity) + '</strong></div>';
 
-        if (d.advice) {
-          html += '<div class="infra-section"><h4>AI Advice (from Google results)</h4>' +
-            '<div class="infra-entity-advice">' + escapeHtml(d.advice) + '</div></div>';
+        // ── BLOCK 1: Three AI Advice panels side by side ──────────────────
+        var hasAdvice = d.rankingAdvice || d.intentAdvice || d.gapAdvice;
+        if (hasAdvice) {
+          html += '<div class="infra-advice-grid">';
+          if (d.rankingAdvice) {
+            html += '<div class="infra-advice-card infra-advice-ranking">' +
+              '<div class="infra-advice-card-title">&#128200; What Currently Ranks</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.rankingAdvice) + '</div>' +
+            '</div>';
+          }
+          if (d.intentAdvice) {
+            html += '<div class="infra-advice-card infra-advice-intent">' +
+              '<div class="infra-advice-card-title">&#128269; What Readers Want</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.intentAdvice) + '</div>' +
+            '</div>';
+          }
+          if (d.gapAdvice) {
+            html += '<div class="infra-advice-card infra-advice-gap">' +
+              '<div class="infra-advice-card-title">&#127919; Content Opportunity Gap</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.gapAdvice) + '</div>' +
+            '</div>';
+          }
+          html += '</div>';
         }
 
+        // ── BLOCK 2: Graph Summary ────────────────────────────────────────
         if (d.graphSummary) {
-          html += '<div class="infra-section"><h4>Graph Summary</h4>' +
+          html += '<div class="infra-section"><h4>Knowledge Graph Summary</h4>' +
             '<div class="infra-entity-summary">' + escapeHtml(d.graphSummary) + '</div></div>';
         }
 
+        // ── BLOCK 3: Tags row — topics + related queries + demand topics ──
         if (d.mainTopics && d.mainTopics.length) {
-          html += '<div class="infra-section"><h4>Main Topics</h4><div class="infra-tags">';
+          html += '<div class="infra-section"><h4>Main Topics (from entity analysis)</h4><div class="infra-tags">';
           d.mainTopics.forEach(function (t) {
             html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>';
           });
@@ -3840,38 +3866,76 @@
         }
 
         if (d.relatedQueries && d.relatedQueries.length) {
-          html += '<div class="infra-section"><h4>Related Search Queries</h4><div class="infra-tags">';
+          html += '<div class="infra-section"><h4>Related Search Queries (reader intent)</h4><div class="infra-tags">';
           d.relatedQueries.forEach(function (q) {
             html += '<span class="infra-tag infra-tag-query">' + escapeHtml(q) + '</span>';
           });
           html += '</div></div>';
         }
 
+        if (d.demandTopics && d.demandTopics.length) {
+          html += '<div class="infra-section"><h4>High-Demand Topics (searched but underserved)</h4><div class="infra-tags">';
+          d.demandTopics.forEach(function (t) {
+            html += '<span class="infra-tag infra-tag-demand">' + escapeHtml(t) + '</span>';
+          });
+          html += '</div></div>';
+        }
+
         if (d.missingEntities && d.missingEntities.length) {
-          html += '<div class="infra-section"><h4>Bridge Concepts (Missing Entities)</h4><div class="infra-tags">';
+          html += '<div class="infra-section"><h4>Bridge Concepts (entities in knowledge gaps)</h4><div class="infra-tags">';
           d.missingEntities.forEach(function (e) {
             html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>';
           });
           html += '</div></div>';
         }
 
-        if (d.contentGaps && d.contentGaps.length) {
-          html += '<div class="infra-section"><h4>Content Gaps</h4><ul class="infra-gaps">';
-          d.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
-          html += '</ul></div>';
+        // ── BLOCK 4: Lists — gaps, questions, demand gaps ─────────────────
+        var hasLists = (d.contentGaps && d.contentGaps.length) ||
+                       (d.demandGaps && d.demandGaps.length) ||
+                       (d.researchQuestions && d.researchQuestions.length);
+        if (hasLists) {
+          html += '<div class="infra-entity-lists">';
+          if (d.contentGaps && d.contentGaps.length) {
+            html += '<div class="infra-list-block"><h4>Content Gaps</h4><ul class="infra-gaps">';
+            d.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+            html += '</ul></div>';
+          }
+          if (d.demandGaps && d.demandGaps.length) {
+            html += '<div class="infra-list-block"><h4>Demand Gaps (supply vs. demand)</h4><ul class="infra-gaps infra-gaps-demand">';
+            d.demandGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+            html += '</ul></div>';
+          }
+          if (d.researchQuestions && d.researchQuestions.length) {
+            html += '<div class="infra-list-block"><h4>Research Questions</h4><ul class="infra-questions">';
+            d.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
+            html += '</ul></div>';
+          }
+          html += '</div>';
         }
 
-        if (d.researchQuestions && d.researchQuestions.length) {
-          html += '<div class="infra-section"><h4>Research Questions</h4><ul class="infra-questions">';
-          d.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
-          html += '</ul></div>';
+        // ── BLOCK 5: Bigrams + Cluster Descriptions ───────────────────────
+        if (d.bigrams && d.bigrams.length) {
+          html += '<div class="infra-section"><h4>Top Co-occurring Concepts (bigrams)</h4><div class="infra-bigrams">';
+          d.bigrams.forEach(function (b) {
+            html += '<span class="infra-bigram">' + escapeHtml(b) + '</span>';
+          });
+          html += '</div></div>';
         }
 
-        if (!d.advice && !d.mainTopics.length && !d.relatedQueries.length) {
-          html += '<p class="infra-empty">No meaningful data returned. Try a broader search term.</p>';
+        if (d.clusterDescriptions && d.clusterDescriptions.length) {
+          html += '<div class="infra-section"><h4>Topic Cluster Descriptions</h4>';
+          d.clusterDescriptions.forEach(function (c, i) {
+            html += '<div class="infra-cluster-desc"><span class="infra-cluster-num">C' + (i + 1) + '</span>' + escapeHtml(c) + '</div>';
+          });
+          html += '</div>';
         }
 
-        html += '<div class="infra-entity-meta">Analyzed at: ' + escapeHtml(d.analyzedAt || '') + '</div>';
+        // ── Empty fallback ────────────────────────────────────────────────
+        if (!hasAdvice && !d.mainTopics.length && !d.relatedQueries.length) {
+          html += '<p class="infra-empty">No meaningful data returned. Try a broader or different search term.</p>';
+        }
+
+        html += '<div class="infra-entity-meta">&#9203; ' + escapeHtml(d.analyzedAt || '') + ' &nbsp;&#183;&nbsp; 7 API calls in parallel</div>';
         results.innerHTML = html;
       })
       .catch(function (err) {
