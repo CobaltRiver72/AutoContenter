@@ -210,6 +210,12 @@ function buildPrompt(article, cluster, settings) {
     if (infra.researchQuestions && infra.researchQuestions.length) {
       entityContext += 'Questions readers may have: ' + infra.researchQuestions.slice(0, 3).join('; ') + '\n';
     }
+    if (infra.advice) {
+      entityContext += 'Content Strategy: ' + infra.advice + '\n';
+    }
+    if (infra.graphSummary) {
+      entityContext += 'Entity Relationships: ' + infra.graphSummary + '\n';
+    }
     entityContext += '--- END ENTITY ANALYSIS ---';
   }
 
