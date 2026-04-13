@@ -236,6 +236,27 @@ module.exports = function(db) {
     }
   });
 
+  // GET /api/public/lottery/today — today's draw status for the live results widget
+  router.get('/lottery/today', function(req, res) {
+    try {
+      var today = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      var rows = db.prepare(
+        'SELECT draw_time, draw_name, status, image_url, wp_post_id, wp_post_url ' +
+        'FROM lottery_results WHERE draw_date = ? ORDER BY draw_time ASC'
+      ).all(today);
+
+      var draws = { '1pm': null, '6pm': null, '8pm': null };
+      for (var i = 0; i < rows.length; i++) {
+        draws[rows[i].draw_time] = rows[i];
+      }
+
+      res.json({ ok: true, date: today, draws: draws, ts: Date.now() });
+    } catch (e) {
+      logger.error('public', 'lottery/today error', e);
+      res.status(500).json({ ok: false, error: 'internal' });
+    }
+  });
+
   // GET /api/public/state-cities?state=Maharashtra&module=metals&metal=gold
   // GET /api/public/state-cities?state=Maharashtra&module=fuel
   router.get('/state-cities', function(req, res) {

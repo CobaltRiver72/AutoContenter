@@ -3007,6 +3007,22 @@ select:focus {
 .infra-error { color: var(--red); font-size: 13px; }
 .infra-empty { color: #666; font-size: 13px; margin-bottom: 8px; }
 
+/* InfraNodus status bar — shown in Settings tab above Rewrite button */
+.infra-status-bar { margin-bottom: 10px; }
+.infra-status-bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.infra-status-ready { background: #0d2b1a; border: 1px solid #1a5c38; color: #7dffb3; }
+.infra-status-empty { background: #1e1e1e; border: 1px solid #333; color: #888; }
+.infra-status-bar-inner .btn { flex-shrink: 0; }
+
 /* ─── Batch action bar ─────────────────────────────────────────────────── */
 .batch-action-bar {
   position: fixed;

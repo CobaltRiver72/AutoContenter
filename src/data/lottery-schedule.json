@@ -1,0 +1,41 @@
+{
+  "1pm": {
+    "prefix": "MN",
+    "label": "1:00 PM",
+    "draws": {
+      "0": "Dear Yamuna Sunday",
+      "1": "Dear Dwarka Monday",
+      "2": "Dear Godavari Tuesday",
+      "3": "Dear Indus Wednesday",
+      "4": "Dear Mahandi Thursday",
+      "5": "Dear Meghna Friday",
+      "6": "Dear Narmada Saturday"
+    }
+  },
+  "6pm": {
+    "prefix": "DN",
+    "label": "6:00 PM",
+    "draws": {
+      "0": "Dear Vixen Sunday",
+      "1": "Dear Blitzen Monday",
+      "2": "Dear Comet Tuesday",
+      "3": "Dear Cupid Wednesday",
+      "4": "Dear Dancer Thursday",
+      "5": "Dear Dasher Friday",
+      "6": "Dear Donner Saturday"
+    }
+  },
+  "8pm": {
+    "prefix": "EN",
+    "label": "8:00 PM",
+    "draws": {
+      "0": "Dear Toucan Sunday",
+      "1": "Dear Finch Monday",
+      "2": "Dear Goose Tuesday",
+      "3": "Dear Pelican Wednesday",
+      "4": "Dear Sandpiper Thursday",
+      "5": "Dear SeaGull Friday",
+      "6": "Dear Stork Saturday"
+    }
+  }
+}

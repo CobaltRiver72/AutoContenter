@@ -4682,6 +4682,151 @@ function createApiRouter(deps) {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LOTTERY ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // GET /api/lottery/summary — today's three draw slots status
+  router.get('/lottery/summary', function(req, res) {
+    try {
+      var lottery = req.app.locals.modules.lottery;
+      if (!lottery) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      res.json({ ok: true, data: lottery.getTodaySummary() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/lottery/results?date=YYYY-MM-DD
+  router.get('/lottery/results', function(req, res) {
+    try {
+      var config = getConfig();
+      var db = req.app.locals.modules.lottery && req.app.locals.modules.lottery.db;
+      if (!db) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      var date = req.query.date || new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      var rows = db.prepare('SELECT * FROM lottery_results WHERE draw_date = ? ORDER BY draw_time ASC').all(date);
+      res.json({ ok: true, data: rows, date: date });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/lottery/recent?limit=N
+  router.get('/lottery/recent', function(req, res) {
+    try {
+      var lottery = req.app.locals.modules.lottery;
+      if (!lottery) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      var limit = Math.min(parseInt(req.query.limit) || 30, 100);
+      res.json({ ok: true, data: lottery.getRecentResults(limit) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/lottery/fetch — manual fetch for all draw slots today
+  router.post('/lottery/fetch', async function(req, res) {
+    try {
+      var lottery = req.app.locals.modules.lottery;
+      if (!lottery) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      var date = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      var results = {};
+      for (var slot of ['1pm', '6pm', '8pm']) {
+        try {
+          results[slot] = await lottery.runFetch(slot, date, true);
+        } catch (e) {
+          results[slot] = false;
+        }
+      }
+      res.json({ ok: true, date: date, results: results });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/lottery/fetch/:drawTime — manual fetch for one draw slot
+  router.post('/lottery/fetch/:drawTime', async function(req, res) {
+    try {
+      var lottery = req.app.locals.modules.lottery;
+      if (!lottery) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      var drawTime = req.params.drawTime;
+      if (!['1pm', '6pm', '8pm'].includes(drawTime)) {
+        return res.status(400).json({ ok: false, error: 'drawTime must be 1pm, 6pm, or 8pm' });
+      }
+      var date = req.body.date || new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      var ok = await lottery.runFetch(drawTime, date, true);
+      res.json({ ok: ok, drawTime: drawTime, date: date });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/lottery/generate-posts — (re)generate WP posts for today's fetched results
+  router.post('/lottery/generate-posts', async function(req, res) {
+    try {
+      var lottery = req.app.locals.modules.lottery;
+      var lotteryPosts = req.app.locals.modules.lotteryPosts;
+      if (!lottery || !lotteryPosts) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      var date = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      var results = lottery.getResultsByDate(date).filter(function(r) { return r.status !== 'pending'; });
+      var created = 0; var updated = 0; var failed = 0;
+      for (var r of results) {
+        try {
+          var wpResult = await lotteryPosts.generateDrawPost(r);
+          if (wpResult) {
+            if (wpResult.action === 'created') created++;
+            else updated++;
+          }
+        } catch (e) {
+          failed++;
+        }
+      }
+      res.json({ ok: true, date: date, created: created, updated: updated, failed: failed });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/lottery/logs?limit=N
+  router.get('/lottery/logs', function(req, res) {
+    try {
+      var db = req.app.locals.modules.lottery && req.app.locals.modules.lottery.db;
+      if (!db) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      var limit = Math.min(parseInt(req.query.limit) || 50, 200);
+      var rows = db.prepare(
+        "SELECT * FROM fetch_log WHERE module = 'lottery' ORDER BY created_at DESC LIMIT ?"
+      ).all(limit);
+      res.json({ ok: true, data: rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/lottery/wp-log — wp_posts_log entries for lottery module
+  router.get('/lottery/wp-log', function(req, res) {
+    try {
+      var db = req.app.locals.modules.lottery && req.app.locals.modules.lottery.db;
+      if (!db) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      var limit = Math.min(parseInt(req.query.limit) || 50, 200);
+      var rows = db.prepare(
+        "SELECT * FROM wp_posts_log WHERE module = 'lottery' ORDER BY created_at DESC LIMIT ?"
+      ).all(limit);
+      res.json({ ok: true, data: rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/lottery/schedule — return draw schedule JSON
+  router.get('/lottery/schedule', function(req, res) {
+    try {
+      var lottery = req.app.locals.modules.lottery;
+      if (!lottery) return res.json({ ok: false, error: 'Lottery module not loaded' });
+      res.json({ ok: true, data: lottery.getSchedule() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   return router;
 }
 

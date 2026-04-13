@@ -34,9 +34,11 @@ var { ContentExtractor } = require('./modules/extractor');
 var { InfranodusAnalyzer } = require('./modules/infranodus');
 var { FuelModule } = require('./modules/fuel');
 var { MetalsModule } = require('./modules/metals');
+var { LotteryModule } = require('./modules/lottery');
 var { WPPublisher } = require('./modules/wp-publisher');
 var { FuelPostCreator } = require('./modules/fuel-posts');
 var { MetalsPostCreator } = require('./modules/metals-posts');
+var { LotteryPostCreator } = require('./modules/lottery-posts');
 var { setupSession, checkAuth, verifyCsrf } = require('./routes/auth');
 var createApiRouter = require('./routes/api');
 var createDashboardRouter = require('./routes/dashboard');
@@ -52,6 +54,7 @@ var infranodus = new InfranodusAnalyzer(config, db, logger);
 var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus);
 var fuel = new FuelModule(config, db, logger);
 var metals = new MetalsModule(config, db, logger);
+var lottery = new LotteryModule(config, db, logger);
 
 // ─── 6. Clustering queue (debounce rapid SSE events) ──────────────────────
 var _clusteringQueue = [];
@@ -200,14 +203,17 @@ async function boot() {
   await infranodus.init();
   await fuel.init();
   await metals.init();
+  await lottery.init();
 
   // ─── WP Publisher + Post Creators ───────────────────────────────────────
   var wpPub = new WPPublisher(config, db, logger);
   await wpPub.init();
   var fuelPosts = new FuelPostCreator(fuel, wpPub, db, logger);
   var metalsPosts = new MetalsPostCreator(metals, wpPub, db, logger);
+  var lotteryPosts = new LotteryPostCreator(lottery, wpPub, db, logger);
   fuel.setPostCreator(fuelPosts);
   metals.setPostCreator(metalsPosts);
+  lottery.setPostCreator(lotteryPosts);
 
   logger.info('index', 'All downstream modules ready. Starting firehose...');
   // Firehose opens SSE — replay articles flow into listeners above
@@ -224,8 +230,8 @@ async function boot() {
     firehose: firehose, trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
     scheduler: scheduler, infranodus: infranodus,
-    fuel: fuel, metals: metals,
-    wpPublisher: wpPub, fuelPosts: fuelPosts, metalsPosts: metalsPosts,
+    fuel: fuel, metals: metals, lottery: lottery,
+    wpPublisher: wpPub, fuelPosts: fuelPosts, metalsPosts: metalsPosts, lotteryPosts: lotteryPosts,
   };
 
   // Trust Hostinger reverse proxy
@@ -341,7 +347,7 @@ async function boot() {
     logger.info('index', 'Express server listening on port ' + PORT);
 
     // Log module health summary
-    var modules = [firehose, trends, buffer, similarity, extractor, rewriter, publisher, infranodus, fuel, metals];
+    var modules = [firehose, trends, buffer, similarity, extractor, rewriter, publisher, infranodus, fuel, metals, lottery];
     for (var i = 0; i < modules.length; i++) {
       var h = modules[i].getHealth();
       logger.info('index', h.module + ': ' + h.status);
@@ -410,7 +416,7 @@ async function boot() {
     clearInterval(memoryWatchdog);
 
     // Shutdown modules
-    var shutdownList = [firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals];
+    var shutdownList = [firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
     for (var i = 0; i < shutdownList.length; i++) {
       try {
         if (shutdownList[i].shutdown) shutdownList[i].shutdown();

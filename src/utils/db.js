@@ -556,6 +556,32 @@ function runMigrations() {
         message TEXT NOT NULL,
         created_at TEXT DEFAULT (datetime('now'))
       );
+
+      -- ═══════════════════════════════════════════════════════════════════
+      -- LOTTERY MODULE TABLES
+      -- ═══════════════════════════════════════════════════════════════════
+
+      CREATE TABLE IF NOT EXISTS lottery_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        draw_date TEXT NOT NULL,
+        draw_time TEXT NOT NULL,
+        draw_name TEXT,
+        source TEXT DEFAULT 'sambad',
+        pdf_url TEXT,
+        wp_attachment_id INTEGER,
+        image_url TEXT,
+        wp_post_id INTEGER,
+        wp_post_url TEXT,
+        status TEXT DEFAULT 'pending',
+        retry_count INTEGER DEFAULT 0,
+        error_message TEXT,
+        fetched_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(draw_date, draw_time)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_lottery_date ON lottery_results(draw_date);
+      CREATE INDEX IF NOT EXISTS idx_lottery_status ON lottery_results(status);
+      CREATE INDEX IF NOT EXISTS idx_lottery_date_time ON lottery_results(draw_date, draw_time);
     `);
 
     // ═══════════════════════════════════════════════════════════════════

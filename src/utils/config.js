@@ -252,6 +252,7 @@ function seedSettingsFromEnv(db) {
     'WP_URL', 'WP_SITE_URL', 'WP_USERNAME', 'WP_APP_PASSWORD',
     'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS',
     'INFRANODUS_API_KEY', 'JINA_API_KEY',
+    'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
   ];
 
   // Use upsert so .env rotations always override stored DB values (C5)

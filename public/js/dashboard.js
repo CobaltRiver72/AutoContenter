@@ -3595,27 +3595,20 @@
             });
         }
 
-        // ─── InfraNodus Entity Analysis Panel ────────────────────
-        var existingInfraPanel = document.querySelector('.infra-panel');
-        if (existingInfraPanel && existingInfraPanel.parentNode) {
-          existingInfraPanel.parentNode.removeChild(existingInfraPanel);
-        }
-        var infraPanel = document.createElement('div');
-        infraPanel.className = 'infra-panel';
-        infraPanel.id = 'infra-panel-' + draftId;
-        infraPanel.style.display = 'none';
-        infraPanel.innerHTML =
-          '<div class="infra-header" onclick="window.__toggleInfraPanel(' + draftId + ')">' +
-            '<span class="infra-icon">&#128300;</span>' +
-            '<span>InfraNodus Entity Analysis</span>' +
-            '<span class="infra-badge" id="infra-badge-' + draftId + '"></span>' +
-          '</div>' +
-          '<div class="infra-body" id="infra-body-' + draftId + '">' +
-            '<div class="infra-loading">Fetching analysis...</div>' +
-          '</div>';
-        var sourceContentElForInfra = $('source-content');
-        if (sourceContentElForInfra && sourceContentElForInfra.parentElement) {
-          sourceContentElForInfra.parentElement.appendChild(infraPanel);
+        // ─── InfraNodus Entity Analysis Tab ─────────────────────
+        var infraTab = $('tab-infranodus');
+        if (infraTab) {
+          infraTab.innerHTML =
+            '<div class="infra-panel" id="infra-panel-' + draftId + '">' +
+              '<div class="infra-header">' +
+                '<span class="infra-icon">&#128300;</span>' +
+                '<span>InfraNodus Entity Analysis</span>' +
+                '<span class="infra-badge" id="infra-badge-' + draftId + '"></span>' +
+              '</div>' +
+              '<div class="infra-body" id="infra-body-' + draftId + '">' +
+                '<div class="infra-loading">Fetching analysis...</div>' +
+              '</div>' +
+            '</div>';
         }
         loadInfraData(draftId);
 
@@ -3678,91 +3671,101 @@
 
   // ─── InfraNodus Entity Analysis Panel ─────────────────────────────
   function loadInfraData(draftId) {
-    var panel = document.getElementById('infra-panel-' + draftId);
     var body = document.getElementById('infra-body-' + draftId);
     var badge = document.getElementById('infra-badge-' + draftId);
-    if (!panel || !body) return;
+    if (!body) return;
 
     fetchApi('/api/drafts/' + draftId + '/infranodus')
       .then(function (data) {
         if (!data.hasInfraData) {
-          if (badge) {
-            badge.textContent = 'No data';
-            badge.className = 'infra-badge infra-badge-empty';
-          }
+          if (badge) { badge.textContent = 'No data'; badge.className = 'infra-badge infra-badge-empty'; }
           body.innerHTML =
-            '<p class="infra-empty">No InfraNodus analysis available for this draft.</p>' +
-            '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">' +
-            'Run Analysis Now</button>';
-          panel.style.display = 'block';
+            '<p class="infra-empty">No InfraNodus analysis for this draft yet.</p>' +
+            '<p class="infra-empty" style="font-size:12px;color:#555;">The pipeline runs analysis automatically when InfraNodus is enabled. You can also trigger it manually.</p>' +
+            '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">&#128300; Run Analysis Now</button>';
+          _updateInfraStatusBar(null);
           return;
         }
 
         var infra = data.infraData || {};
+        var topicCount = (infra.mainTopics || []).length;
+        var entityCount = (infra.missingEntities || []).length;
+
         if (badge) {
-          badge.textContent = (infra.mainTopics ? infra.mainTopics.length : 0) + ' topics';
+          badge.textContent = topicCount + ' topics · ' + entityCount + ' entities';
           badge.className = 'infra-badge infra-badge-active';
         }
 
         var html = '';
-
         if (infra.mainTopics && infra.mainTopics.length) {
-          html += '<div class="infra-section"><h4>Main Topics (What InfraNodus Found)</h4><div class="infra-tags">';
+          html += '<div class="infra-section"><h4>Main Topics Identified</h4><div class="infra-tags">';
           infra.mainTopics.forEach(function (t) {
             html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>';
           });
           html += '</div></div>';
         }
-
         if (infra.missingEntities && infra.missingEntities.length) {
-          html += '<div class="infra-section"><h4>Entities AI Should Cover</h4><div class="infra-tags">';
+          html += '<div class="infra-section"><h4>Entities the AI Was Told to Cover</h4><div class="infra-tags">';
           infra.missingEntities.forEach(function (e) {
             html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>';
           });
           html += '</div></div>';
         }
-
         if (infra.contentGaps && infra.contentGaps.length) {
           html += '<div class="infra-section"><h4>Content Gaps (Bridging Opportunities)</h4><ul class="infra-gaps">';
-          infra.contentGaps.forEach(function (g) {
-            html += '<li>' + escapeHtml(g) + '</li>';
-          });
+          infra.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
           html += '</ul></div>';
         }
-
         if (infra.researchQuestions && infra.researchQuestions.length) {
-          html += '<div class="infra-section"><h4>Research Questions for Depth</h4><ul class="infra-questions">';
-          infra.researchQuestions.forEach(function (q) {
-            html += '<li>' + escapeHtml(q) + '</li>';
-          });
+          html += '<div class="infra-section"><h4>Research Questions Passed to AI</h4><ul class="infra-questions">';
+          infra.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
           html += '</ul></div>';
         }
-
         html += '<div class="infra-section infra-meta">' +
-          '<span>AI Model: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
-          '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">' +
-          'Re-run Analysis</button></div>';
+          '<span>Used in rewrite: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
+          '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">&#128300; Re-run</button>' +
+          '</div>';
 
         body.innerHTML = html;
-        panel.style.display = 'block';
+        _updateInfraStatusBar(infra);
       })
       .catch(function (err) {
         body.innerHTML = '<p class="infra-error">Failed to load: ' + escapeHtml(err.message || String(err)) + '</p>';
-        panel.style.display = 'block';
+        _updateInfraStatusBar(null);
       });
   }
 
-  function toggleInfraPanel(draftId) {
-    var body = document.getElementById('infra-body-' + draftId);
-    if (body) {
-      body.style.display = body.style.display === 'none' ? 'block' : 'none';
+  function _updateInfraStatusBar(infra) {
+    var bar = $('infra-status-bar');
+    if (!bar) return;
+    if (!infra || !(infra.mainTopics || []).length) {
+      bar.style.display = 'block';
+      bar.innerHTML =
+        '<div class="infra-status-bar-inner infra-status-empty">' +
+          '<span>&#128300; No InfraNodus analysis — AI will rewrite without entity context.</span>' +
+          '<button class="btn btn-xs btn-outline" onclick="window.__switchToInfraTab()">Run Analysis</button>' +
+        '</div>';
+    } else {
+      var t = (infra.mainTopics || []).length;
+      var e = (infra.missingEntities || []).length;
+      bar.style.display = 'block';
+      bar.innerHTML =
+        '<div class="infra-status-bar-inner infra-status-ready">' +
+          '<span>&#128300; InfraNodus ready — <strong>' + t + ' topics</strong>, <strong>' + e + ' entities</strong> will enrich this rewrite.</span>' +
+          '<button class="btn btn-xs btn-outline" onclick="window.__switchToInfraTab()">View</button>' +
+        '</div>';
     }
+  }
+
+  function toggleInfraPanel(draftId) {
+    // No-op: InfraNodus is now a full tab, nothing to toggle.
+    // Kept for backward-compat with any lingering onclick references.
   }
 
   function runInfraAnalysis(draftId) {
     var body = document.getElementById('infra-body-' + draftId);
     if (!body) return;
-    body.innerHTML = '<div class="infra-loading">Running InfraNodus analysis...</div>';
+    body.innerHTML = '<div class="infra-loading">&#128300; Running InfraNodus analysis...</div>';
 
     fetchApi('/api/drafts/' + draftId + '/analyze', { method: 'POST' })
       .then(function (data) {
@@ -3776,6 +3779,11 @@
         body.innerHTML = '<p class="infra-error">' + escapeHtml(err.message || String(err)) + '</p>';
       });
   }
+
+  window.__switchToInfraTab = function () {
+    var btn = document.querySelector('.editor-tab[data-panel="right"][data-tab="infranodus"]');
+    if (btn) btn.click();
+  };
 
   window.__loadInfraData = loadInfraData;
   window.__toggleInfraPanel = toggleInfraPanel;
