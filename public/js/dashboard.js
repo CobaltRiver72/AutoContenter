@@ -5042,23 +5042,27 @@
       ? 'Naturally weave in the concept pair ' + entity + ' into the article where they appear together meaningfully.'
       : 'Naturally weave the entity "' + entity + '" into the article where it fits best without disrupting the flow.';
     instrInput.value = instr;
-    instrInput.focus();
-    showToast('Instruction set — click AI Edit to apply', 'info');
+    // Auto-apply immediately
+    applyAIPatch();
   }
 
   function addAllMissingEntities(draftId) {
-    // Find all missing entities from the coverage display
+    // Collect every missing entity from the coverage panel
     var missing = [];
     document.querySelectorAll('.aiedit-entity-tag.missing').forEach(function (el) {
       var addBtn = el.querySelector('.aiedit-add-btn');
       if (addBtn && addBtn.dataset.entity) missing.push(addBtn.dataset.entity);
     });
-    if (!missing.length) { showToast('No missing entities', 'info'); return; }
+    if (!missing.length) { showToast('No missing entities found', 'info'); return; }
+
     var instrInput = document.getElementById('aiedit-instruction');
     if (!instrInput) return;
-    instrInput.value = 'Naturally weave these missing entities into the article where they fit best: ' + missing.join(', ');
-    instrInput.focus();
-    showToast('Instruction set for ' + missing.length + ' entities — click AI Edit to apply', 'info');
+
+    // Build a single instruction covering all missing entities
+    instrInput.value = 'Naturally weave ALL of these missing entities into the article — each where it fits best without disrupting flow: ' + missing.join(', ');
+
+    // Apply immediately — no manual "AI Edit" click needed
+    applyAIPatch();
   }
 
   // Expose for dispatch table
