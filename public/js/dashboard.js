@@ -1299,7 +1299,7 @@
       '<div class="article-card-top">' +
         '<div class="article-card-content">' +
           '<div class="article-title">' +
-            '<a href="' + escapeHtml(article.url || '#') + '" target="_blank" rel="noopener" onclick="event.stopPropagation();">' +
+            '<a href="' + escapeHtml(article.url || '#') + '" target="_blank" rel="noopener" data-click="stopOnly">' +
               escapeHtml(truncate(article.title || article.url || 'Untitled', 120)) +
             '</a>' +
           '</div>' +
@@ -1543,8 +1543,8 @@
         '<div style="color:#10b981;font-weight:bold;font-size:14px;">' + count + ' articles added!</div>' +
         '<div style="color:#888;font-size:12px;margin-top:4px;">Content extraction started in background.</div>' +
       '</div>' +
-      '<button class="btn btn-sm" style="background:#10b981;color:#fff;border:none;white-space:nowrap;" onclick="window.__goToPublished();this.parentElement.remove();">Go to Published</button>' +
-      '<button style="background:none;border:none;color:#666;cursor:pointer;font-size:18px;padding:4px;" onclick="this.parentElement.remove();">&times;</button>';
+      '<button class="btn btn-sm" style="background:#10b981;color:#fff;border:none;white-space:nowrap;" data-click="goToPublishedAndDismiss">Go to Published</button>' +
+      '<button style="background:none;border:none;color:#666;cursor:pointer;font-size:18px;padding:4px;" data-click="dismissParent">&times;</button>';
     document.body.appendChild(toast);
     setTimeout(function () { if (toast.parentElement) toast.remove(); }, 10000);
   }
@@ -1649,8 +1649,8 @@
             '<td class="rule-query">' + escapeHtml(r.value || '--') + '</td>' +
             '<td>' + (r.quality !== false ? 'Yes' : 'No') + '</td>' +
             '<td class="rule-actions">' +
-              '<button class="btn btn-sm btn-secondary" onclick="window.__editRule(\'' + escapeHtml(String(r.id)) + '\',\'' + escapeHtml((r.tag || '').replace(/'/g, "\\'")) + '\',\'' + escapeHtml((r.value || '').replace(/'/g, "\\'")) + '\',' + (r.quality !== false) + ')">Edit</button>' +
-              '<button class="btn btn-sm btn-danger" onclick="window.__deleteRule(\'' + escapeHtml(String(r.id)) + '\')">Delete</button>' +
+              '<button class="btn btn-sm btn-secondary" data-click="editRule" data-id="' + esc(String(r.id)) + '" data-tag="' + esc(r.tag || '') + '" data-value="' + esc(r.value || '') + '" data-quality="' + (r.quality !== false ? '1' : '0') + '">Edit</button>' +
+              '<button class="btn btn-sm btn-danger" data-click="deleteRule" data-id="' + esc(String(r.id)) + '">Delete</button>' +
             '</td>' +
           '</tr>';
         }
@@ -2024,7 +2024,7 @@
 
       html +=
         '<div class="cluster-card" data-cluster-id="' + c.id + '">' +
-          '<div class="cluster-header" onclick="window.__toggleCluster(' + c.id + ')">' +
+          '<div class="cluster-header" data-click="toggleCluster" data-cluster-id="' + c.id + '">' +
             '<span class="cluster-expand" id="expand-' + c.id + '">&#9654;</span>' +
             '<div class="cluster-info">' +
               '<div class="cluster-topic">' + escapeHtml(c.topic || 'Cluster #' + c.id) + '</div>' +
@@ -2037,9 +2037,9 @@
             '</div>' +
             '<div class="cluster-actions">' +
               '<span class="badge ' + statusClass + '">' + escapeHtml(c.status || 'detected') + '</span>' +
-              (canPublish ? '<button class="btn btn-sm btn-success" onclick="event.stopPropagation(); window.__publishCluster(' + c.id + ')">Publish</button>' : '') +
-              (canSkip ? '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); window.__skipCluster(' + c.id + ')">Skip</button>' : '') +
-              ((c.status === 'queued' || c.status === 'published') ? '<button class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" onclick="event.stopPropagation(); window.__goToPublished()">&#128221; View Drafts</button>' : '') +
+              (canPublish ? '<button class="btn btn-sm btn-success" data-click="publishCluster" data-cluster-id="' + c.id + '">Publish</button>' : '') +
+              (canSkip ? '<button class="btn btn-sm btn-secondary" data-click="skipCluster" data-cluster-id="' + c.id + '">Skip</button>' : '') +
+              ((c.status === 'queued' || c.status === 'published') ? '<button class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;" data-click="goToPublished">&#128221; View Drafts</button>' : '') +
             '</div>' +
           '</div>' +
           '<div class="cluster-body" id="cluster-body-' + c.id + '">' +
@@ -2216,8 +2216,8 @@
         '<td>' + rewrittenAt + '</td>' +
         '<td>' + mode + '</td>' +
         '<td>' +
-          '<button class="btn btn-sm btn-primary" onclick="window.__publishReady(' + d.id + ')">Publish Now</button> ' +
-          '<button class="btn btn-sm" onclick="window.__openEditor(' + d.id + ')">Preview</button>' +
+          '<button class="btn btn-sm btn-primary" data-click="publishReady" data-draft-id="' + d.id + '">Publish Now</button> ' +
+          '<button class="btn btn-sm" data-click="openEditor" data-draft-id="' + d.id + '">Preview</button>' +
         '</td>' +
       '</tr>';
     }
@@ -2360,7 +2360,7 @@
         '<td>' + (d.retry_count || 0) + '</td>' +
         '<td>' + failedAt + '</td>' +
         '<td>' +
-          '<button class="btn btn-sm btn-warning" onclick="window.__retryFailedDraft(' + d.id + ')">' + retryLabel + '</button>' +
+          '<button class="btn btn-sm btn-warning" data-click="retryFailedDraft" data-draft-id="' + d.id + '">' + retryLabel + '</button>' +
         '</td>' +
       '</tr>';
     }
@@ -2540,7 +2540,7 @@
 
         // ─── Row 3: Action Buttons ───────────────────────────────
         '<div class="batch-actions-bar">' +
-          '<button id="select-mode-btn" class="action-btn action-btn-select" onclick="window.__toggleSelectMode()">' +
+          '<button id="select-mode-btn" class="action-btn action-btn-select" data-click="toggleSelectMode">' +
             '&#9745; Select' +
           '</button>' +
           '<button class="action-btn action-btn-primary" id="batchExtractBtn">' +
@@ -2555,7 +2555,7 @@
               '<span class="action-btn-badge action-btn-badge-red">' + counts.failed + '</span>' +
             '</button>' : '') +
           (counts.failed > 0 ?
-            '<button class="action-btn action-btn-delete" onclick="window.__batchDeleteFailed()">' +
+            '<button class="action-btn action-btn-delete" data-click="batchDeleteFailed">' +
               '<span class="action-btn-icon">&#128465;</span>' +
               '<span class="action-btn-text">Delete Failed</span>' +
               '<span class="action-btn-badge action-btn-badge-red">' + counts.failed + '</span>' +
@@ -2570,7 +2570,7 @@
             '<span class="action-btn-icon">&#128247;</span>' +
             '<span class="action-btn-text">Fetch Images</span>' +
           '</button>' +
-          '<button type="button" class="action-btn btn-import-urls" id="btn-manual-import" onclick="window.__openManualImportModal()">' +
+          '<button type="button" class="action-btn btn-import-urls" id="btn-manual-import" data-click="openManualImportModal">' +
             '<span class="action-btn-icon">&#128229;</span>' +
             '<span class="action-btn-text">Import URLs</span>' +
           '</button>' +
@@ -2611,9 +2611,9 @@
       '<div id="multi-select-bar" class="multi-select-bar">' +
         '<div class="multi-select-bar-inner">' +
           '<span class="select-count-label"><span class="select-count">0</span> selected</span>' +
-          '<button class="action-btn action-btn-select-all" onclick="window.__selectAllDrafts()">Select All</button>' +
-          '<button class="action-btn action-btn-deselect" onclick="window.__deselectAllDrafts()">Deselect All</button>' +
-          '<button class="action-btn action-btn-danger" onclick="window.__deleteSelectedDrafts()">&#128465; Delete Selected</button>' +
+          '<button class="action-btn action-btn-select-all" data-click="selectAllDrafts">Select All</button>' +
+          '<button class="action-btn action-btn-deselect" data-click="deselectAllDrafts">Deselect All</button>' +
+          '<button class="action-btn action-btn-danger" data-click="deleteSelectedDrafts">&#128465; Delete Selected</button>' +
         '</div>' +
       '</div>';
 
@@ -2927,7 +2927,7 @@
           '<span class="cluster-status-pill" style="background:' + clusterStatusColor + '">' + clusterStatusLabel + '</span>' +
           '<span class="cluster-article-count">' + total + ' source' + (total !== 1 ? 's' : '') + '</span>' +
           wpLinkHTML +
-          '<button class="cluster-delete-btn" onclick="window.__deleteCluster(' + clusterId + ', event)" title="Delete this cluster and all its drafts">&#128465;</button>' +
+          '<button class="cluster-delete-btn" data-click="deleteCluster" data-cluster-id="' + clusterId + '" title="Delete this cluster and all its drafts">&#128465;</button>' +
         '</div>' +
         '<h3 class="cluster-header-title">' + escapeHtml(primaryTitle) + '</h3>' +
         progressHTML +
@@ -3002,26 +3002,26 @@
 
     var actionsHTML = '';
     if (draft.status === 'fetching') {
-      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry</button>';
+      actionsHTML += '<button class="btn btn-xs btn-secondary" data-click="retryExtract" data-draft-id="' + draft.id + '">&#8635; Retry</button>';
     }
     if (isPrimary && (draft.status === 'draft' || draft.status === 'failed')) {
-      actionsHTML += '<button class="btn btn-xs btn-purple" onclick="window.__triggerRewrite(' + draft.id + ')">&#129302; Rewrite</button>';
+      actionsHTML += '<button class="btn btn-xs btn-purple" data-click="triggerRewrite" data-draft-id="' + draft.id + '">&#129302; Rewrite</button>';
     }
     if (isPrimary && draft.status !== 'fetching' && draft.status !== 'rewriting') {
-      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__openEditor(' + draft.id + ')">&#9998; Edit</button>';
+      actionsHTML += '<button class="btn btn-xs btn-secondary" data-click="openEditor" data-draft-id="' + draft.id + '">&#9998; Edit</button>';
     }
     if (isPrimary && (draft.status === 'ready' || draft.status === 'published')) {
-      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__previewDraftHTML(' + draft.id + ')">&#128065; Preview</button>';
+      actionsHTML += '<button class="btn btn-xs btn-secondary" data-click="previewDraftHTML" data-draft-id="' + draft.id + '">&#128065; Preview</button>';
     }
     if (isPrimary && draft.status === 'ready') {
-      actionsHTML += '<button class="btn btn-xs btn-green" onclick="window.__openEditor(' + draft.id + ')">&#128640; Publish</button>';
+      actionsHTML += '<button class="btn btn-xs btn-green" data-click="openEditor" data-draft-id="' + draft.id + '">&#128640; Publish</button>';
     }
     if (draft.status === 'failed') {
-      actionsHTML += '<button class="btn btn-xs btn-secondary" onclick="window.__retryDraft(' + draft.id + ')">&#8635; Retry</button>';
+      actionsHTML += '<button class="btn btn-xs btn-secondary" data-click="retryDraft" data-draft-id="' + draft.id + '">&#8635; Retry</button>';
     }
     // Always show delete (except for published)
     if (draft.status !== 'published') {
-      actionsHTML += '<button class="btn btn-xs btn-outline-danger" onclick="window.__deleteDraft(' + draft.id + ')" title="Delete draft">&#128465;</button>';
+      actionsHTML += '<button class="btn btn-xs btn-outline-danger" data-click="deleteDraft" data-draft-id="' + draft.id + '" title="Delete draft">&#128465;</button>';
     }
 
     var errorHTML = '';
@@ -3037,7 +3037,7 @@
     return '<div class="' + cardClass + '" data-id="' + draft.id + '" data-status="' + escapeHtml(draft.status) + '" data-mode="' + escapeHtml(draft.mode || '') + '">' +
       (draft.status !== 'published' ?
         '<input type="checkbox" class="draft-select-checkbox" data-draft-id="' + draft.id + '" ' +
-          'onclick="window.__toggleDraftSelect(' + draft.id + ', event)" ' +
+          'data-click="toggleDraftSelect" data-draft-id="' + draft.id + '" ' +
           'style="' + (_selectModeActive ? '' : 'display:none') + '" ' +
           (_selectedDraftIds[draft.id] ? 'checked' : '') +
         '/>'
@@ -3053,7 +3053,7 @@
           '<div class="compact-thumb" style="float:right;margin-left:8px">' +
             '<img src="' + escapeHtml(draft.featured_image) + '" ' +
               'style="width:60px;height:45px;border-radius:4px;object-fit:cover" ' +
-              'onerror="this.parentElement.style.display=\'none\'" />' +
+              'data-error="hideParent" />' +
           '</div>' : '') +
         '<div class="compact-title">' +
           (draft.mode === 'manual_import' ? '<span class="badge-manual-import" title="Manually imported">&#128229; MANUAL IMPORT</span>' : '') +
@@ -3082,38 +3082,38 @@
     var actionsHTML = '';
 
     if (draft.status === 'fetching') {
-      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry</button>';
+      actionsHTML += '<button class="btn btn-sm btn-secondary" data-click="retryExtract" data-draft-id="' + draft.id + '">&#8635; Retry</button>';
     }
     if (draft.status !== 'fetching' && (draft.extraction_status === 'failed' || draft.is_partial)) {
-      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryExtract(' + draft.id + ')">&#8635; Retry Extract</button>';
+      actionsHTML += '<button class="btn btn-sm btn-secondary" data-click="retryExtract" data-draft-id="' + draft.id + '">&#8635; Retry Extract</button>';
     }
     if (draft.status !== 'fetching' && draft.status !== 'rewriting') {
-      actionsHTML += '<button class="btn btn-sm btn-primary" onclick="window.__openEditor(' + draft.id + ')">&#9998; Edit Draft</button>';
+      actionsHTML += '<button class="btn btn-sm btn-primary" data-click="openEditor" data-draft-id="' + draft.id + '">&#9998; Edit Draft</button>';
     }
     if (draft.status === 'failed' && !draft.failed_permanent) {
-      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__retryDraft(' + draft.id + ')">&#8635; Reset &amp; Retry</button>';
+      actionsHTML += '<button class="btn btn-sm btn-secondary" data-click="retryDraft" data-draft-id="' + draft.id + '">&#8635; Reset &amp; Retry</button>';
     }
     if (draft.status === 'draft' || draft.status === 'failed') {
-      actionsHTML += '<button class="btn btn-sm btn-purple" onclick="window.__triggerRewrite(' + draft.id + ')">&#129302; Rewrite</button>';
+      actionsHTML += '<button class="btn btn-sm btn-purple" data-click="triggerRewrite" data-draft-id="' + draft.id + '">&#129302; Rewrite</button>';
     }
     if (draft.status === 'rewriting') {
       actionsHTML += '<button class="btn btn-sm btn-secondary" disabled>&#9203; Rewriting...</button>';
     }
     if (draft.status === 'ready' || draft.status === 'published') {
-      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__previewDraftHTML(' + draft.id + ')">&#128065; Preview</button>';
-      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__downloadDraftHTML(' + draft.id + ')">&#11015; Download</button>';
+      actionsHTML += '<button class="btn btn-sm btn-secondary" data-click="previewDraftHTML" data-draft-id="' + draft.id + '">&#128065; Preview</button>';
+      actionsHTML += '<button class="btn btn-sm btn-secondary" data-click="downloadDraftHTML" data-draft-id="' + draft.id + '">&#11015; Download</button>';
     }
     if (draft.status === 'ready') {
-      actionsHTML += '<button class="btn btn-sm btn-green" onclick="window.__openEditor(' + draft.id + ')">&#128640; Publish</button>';
+      actionsHTML += '<button class="btn btn-sm btn-green" data-click="openEditor" data-draft-id="' + draft.id + '">&#128640; Publish</button>';
     }
     if (draft.status === 'published') {
-      actionsHTML += '<button class="btn btn-sm btn-secondary" onclick="window.__openEditor(' + draft.id + ')">' + (draft.wp_post_id ? '&#8635; Update on WP' : '&#8635; Re-Publish') + '</button>';
+      actionsHTML += '<button class="btn btn-sm btn-secondary" data-click="openEditor" data-draft-id="' + draft.id + '">' + (draft.wp_post_id ? '&#8635; Update on WP' : '&#8635; Re-Publish') + '</button>';
     }
-    actionsHTML += '<button class="btn btn-sm btn-danger" onclick="window.__deleteDraft(' + draft.id + ')">&#128465;</button>';
+    actionsHTML += '<button class="btn btn-sm btn-danger" data-click="deleteDraft" data-draft-id="' + draft.id + '">&#128465;</button>';
 
     var imageHTML = '';
     if (draft.featured_image) {
-      imageHTML = '<div class="draft-card-image"><img src="' + escapeHtml(draft.featured_image) + '" alt="" onerror="this.parentElement.style.display=\'none\'"></div>';
+      imageHTML = '<div class="draft-card-image"><img src="' + escapeHtml(draft.featured_image) + '" alt="" data-error="hideParent"></div>';
     }
 
     var manualImportBadge = (draft.mode === 'manual_import')
@@ -3479,7 +3479,7 @@
         var featImgHTML = '';
         if (draft.featured_image) {
           featImgHTML = '<div class="editor-featured-image">' +
-            '<img src="' + escapeHtml(draft.featured_image) + '" alt="Featured image" onerror="this.style.display=\'none\'">' +
+            '<img src="' + escapeHtml(draft.featured_image) + '" alt="Featured image" data-error="hideSelf">' +
             '</div>';
         }
         featImgHTML += '<div class="editor-featured-url">' +
@@ -3520,7 +3520,7 @@
           sourcesPanel.id = 'cluster-sources-panel';
           sourcesPanel.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:16px;';
           sourcesPanel.innerHTML =
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer" onclick="this.parentElement.querySelector(\'.cluster-editor-sources\').style.display = this.parentElement.querySelector(\'.cluster-editor-sources\').style.display === \'none\' ? \'\' : \'none\'; this.querySelector(\'.toggle-arrow\').textContent = this.parentElement.querySelector(\'.cluster-editor-sources\').style.display === \'none\' ? \'\\u25B8\' : \'\\u25BE\'">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer" data-click="toggleClusterSources">' +
               '<span class="toggle-arrow" style="font-size:14px">\u25B8</span>' +
               '<strong style="color:var(--accent)">Cluster #' + draft.cluster_id + ' Sources</strong>' +
               '<span style="color:var(--text-muted);font-size:12px">(loading...)</span>' +
@@ -3569,7 +3569,7 @@
                       '<div style="margin-bottom:8px">' +
                         '<img src="' + escapeHtml(sd.featured_image) + '" ' +
                           'style="max-width:120px;max-height:80px;border-radius:6px;object-fit:cover" ' +
-                          'onerror="this.style.display=\'none\'" />' +
+                          'data-error="hideSelf" />' +
                       '</div>' : '') +
                     '<div style="font-weight:600;font-size:13px;margin-bottom:4px;color:var(--text-primary)">' +
                       '<a href="' + escapeHtml(sd.source_url || '#') + '" target="_blank" style="color:var(--accent);text-decoration:none">' +
@@ -3578,7 +3578,7 @@
                     '</div>' +
                     (sdContent ?
                       '<div class="source-article-content" style="font-size:12px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap;max-height:120px;overflow:hidden;position:relative;cursor:pointer" ' +
-                        'onclick="var el=this;if(el.style.maxHeight===\'120px\'){el.style.maxHeight=\'none\';el.querySelector(\'.expand-label\').textContent=\'\\u25B2 Collapse\'}else{el.style.maxHeight=\'120px\';var n=el.textContent.length;var lbl=n>=10000?Math.round(n/1000)+\'k chars\':n>=1000?(n/1000).toFixed(1)+\'k chars\':n+\' chars\';el.querySelector(\'.expand-label\').textContent=\'\\u25BC Show full content (\'+lbl+\')\'}">' +
+                        'data-click="toggleExpandContent">' +
                         escapeHtml(sdContent) +
                         '<div class="expand-label" style="position:sticky;bottom:0;left:0;right:0;text-align:center;padding:4px;background:linear-gradient(transparent,var(--bg-card) 40%);color:var(--accent);font-size:11px;font-weight:600">' +
                           '\u25BC Show full content (' + formatCharCount(sdContent.length) + ')' +
@@ -3682,7 +3682,7 @@
           body.innerHTML =
             '<p class="infra-empty">No InfraNodus analysis for this draft yet.</p>' +
             '<p class="infra-empty" style="font-size:12px;color:#555;">The pipeline runs analysis automatically when InfraNodus is enabled. You can also trigger it manually.</p>' +
-            '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">&#128300; Run Analysis Now</button>';
+            '<button class="btn btn-sm btn-outline" data-click="runInfraAnalysis" data-draft-id="' + draftId + '">&#128300; Run Analysis Now</button>';
           _updateInfraStatusBar(null);
           return;
         }
@@ -3723,7 +3723,7 @@
         }
         html += '<div class="infra-section infra-meta">' +
           '<span>Used in rewrite: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
-          '<button class="btn btn-sm btn-outline" onclick="window.__runInfraAnalysis(' + draftId + ')">&#128300; Re-run</button>' +
+          '<button class="btn btn-sm btn-outline" data-click="runInfraAnalysis" data-draft-id="' + draftId + '">&#128300; Re-run</button>' +
           '</div>';
 
         body.innerHTML = html;
@@ -3743,7 +3743,7 @@
       bar.innerHTML =
         '<div class="infra-status-bar-inner infra-status-empty">' +
           '<span>&#128300; No InfraNodus analysis — AI will rewrite without entity context.</span>' +
-          '<button class="btn btn-xs btn-outline" onclick="window.__switchToInfraTab()">Run Analysis</button>' +
+          '<button class="btn btn-xs btn-outline" data-click="switchToInfraTab">Run Analysis</button>' +
         '</div>';
     } else {
       var t = (infra.mainTopics || []).length;
@@ -3752,7 +3752,7 @@
       bar.innerHTML =
         '<div class="infra-status-bar-inner infra-status-ready">' +
           '<span>&#128300; InfraNodus ready — <strong>' + t + ' topics</strong>, <strong>' + e + ' entities</strong> will enrich this rewrite.</span>' +
-          '<button class="btn btn-xs btn-outline" onclick="window.__switchToInfraTab()">View</button>' +
+          '<button class="btn btn-xs btn-outline" data-click="switchToInfraTab">View</button>' +
         '</div>';
     }
   }
@@ -3800,7 +3800,7 @@
     var count = _getBatchSelectionCount();
     var bar = document.getElementById('batch-action-bar');
     var isOnDraftsPage = state.currentPage === 'published';
-    var btnAction = isOnDraftsPage ? 'window.__mergeIntoCluster()' : 'window.__createManualCluster()';
+    var btnAction = isOnDraftsPage ? 'mergeIntoCluster' : 'createManualCluster';
     var btnLabel = isOnDraftsPage ? 'Merge into Cluster' : 'Create Cluster';
     var label = isOnDraftsPage ? 'drafts selected' : 'articles selected';
 
@@ -3814,8 +3814,8 @@
       bar.innerHTML =
         '<span id="batch-count">' + count + ' ' + label + '</span>' +
         '<input type="text" id="batch-cluster-topic" placeholder="Cluster topic (optional)" class="batch-input" />' +
-        '<button class="btn btn-primary btn-sm" onclick="' + btnAction + '">' + btnLabel + '</button>' +
-        '<button class="btn btn-outline btn-sm" onclick="window.__clearBatchSelection()">Clear</button>';
+        '<button class="btn btn-primary btn-sm" data-click="' + btnAction + '">' + btnLabel + '</button>' +
+        '<button class="btn btn-outline btn-sm" data-click="clearBatchSelection">Clear</button>';
       bar.style.display = 'flex';
     } else if (bar) {
       bar.style.display = 'none';
@@ -5383,7 +5383,10 @@
       });
   }
 
-  // Expose modal handlers globally so onclick="" attributes can find them
+  // Legacy window aliases — still referenced from dev tooling and a few
+  // internal call sites. The delegated CLICK_ACTIONS registry calls the
+  // inner functions directly via closure, so these are not needed for the
+  // dashboard UI itself.
   window.__openManualImportModal = __openManualImportModal;
   window.__closeManualImportModal = __closeManualImportModal;
   window.__submitManualImport = __submitManualImport;
@@ -5413,8 +5416,7 @@
 
   // ─── Per-city fetch ──────────────────────────────────────────────────────
 
-  async function fetchSingleFuelCity(cityName) {
-    var btn = event && event.target;
+  async function fetchSingleFuelCity(cityName, btn) {
     if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
     try {
       var res = await fetch('/api/fuel/fetch-city', {
@@ -5436,8 +5438,7 @@
     }
   }
 
-  async function fetchSingleMetalsCity(cityName) {
-    var btn = event && event.target;
+  async function fetchSingleMetalsCity(cityName, btn) {
     if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
     try {
       var res = await fetch('/api/metals/fetch-city', {
@@ -5461,8 +5462,7 @@
 
   // ─── Test fetch (quick validation) ─────────────────────────────────────
 
-  async function testFuelFetch() {
-    var btn = event && event.target;
+  async function testFuelFetch(btn) {
     if (btn) { btn.disabled = true; btn.textContent = '🧪 Testing...'; }
     try {
       var res = await fetch('/api/fuel/fetch-test', { method: 'POST' });
@@ -5480,8 +5480,7 @@
     finally { if (btn) { btn.disabled = false; btn.textContent = '🧪 Test (5 cities)'; } }
   }
 
-  async function testMetalsFetch() {
-    var btn = event && event.target;
+  async function testMetalsFetch(btn) {
     if (btn) { btn.disabled = true; btn.textContent = '🧪 Testing...'; }
     try {
       var res = await fetch('/api/metals/fetch-test', { method: 'POST' });
@@ -5520,8 +5519,10 @@
     } catch (e) { el.textContent = '❌ ' + e.message; }
   }
 
-  // ─── Global onclick= exposure ────────────────────────────────────────────
-  // All functions called from HTML onclick/oninput/onchange must be on window.
+  // ─── Legacy window aliases ──────────────────────────────────────────────
+  // Kept for parity with older integrations / dev-console use. The
+  // delegated event registry dispatches directly to the closures inside
+  // this IIFE, so dashboard HTML no longer relies on window.* lookups.
 
   window.saveFuelMetalsSettings  = saveFuelMetalsSettings;
   window.saveWPPublishingSettings = saveWPPublishingSettings;
@@ -5543,9 +5544,174 @@
   window.testMetalsFetch         = testMetalsFetch;
   window.runDiagnostics          = runDiagnostics;
 
+  // ─── Delegated events (CSP-safe replacement for inline on*= handlers) ───
+  // Helmet CSP sets `script-src-attr 'none'` (H8), which blocks every
+  // inline `on*=` attribute. DOM events route through three delegated
+  // listeners that look up `data-click` / `data-input` / `data-change`
+  // on the closest ancestor and dispatch to a registry entry. Each entry
+  // reads its own `data-*` args off the element. `error` events are
+  // captured separately (they don't bubble).
+
+  var CLICK_ACTIONS = {
+    'testFuelApi':             function () { testFuelApi(); },
+    'testMetalsApi':           function () { testMetalsApi(); },
+    'saveFuelMetalsSettings':  function () { saveFuelMetalsSettings(); },
+    'testWPConnection':        function () { testWPConnection(); },
+    'saveWPPublishingSettings':function () { saveWPPublishingSettings(); },
+    'switchImportTab':         function (el) { switchImportTab(el.dataset.tab); },
+    'runImport':               function (el) { runImport(el.dataset.module, el.dataset.format, el.dataset.dry === '1'); },
+    'runDiagnostics':          function () { runDiagnostics(); },
+    'loadSourcesPage':         function () { loadSourcesPage(); },
+    'sortSourcesTable':        function (el) { sortSourcesTable(el.dataset.col); },
+    'testFuelFetch':           function (el) { testFuelFetch(el); },
+    'triggerFuelFetch':        function () { triggerFuelFetch(); },
+    'triggerFuelPosts':        function () { triggerFuelPosts(); },
+    'loadFuelPage':            function () { loadFuelPage(); },
+    'switchFuelTab':           function (el) { switchFuelTab(el.dataset.tab); },
+    'toggleFuelCity':          function (el) { toggleFuelCity(el.dataset.city, Number(el.dataset.enable)); },
+    'fetchSingleFuelCity':     function (el) { fetchSingleFuelCity(el.dataset.city, el); },
+    'startEditFuelPrice':      function (el) {
+      var ds = el.dataset;
+      startEditFuelPrice(ds.city, ds.state, Number(ds.petrol), Number(ds.diesel), ds.date);
+    },
+    'saveEditFuelPrice':       function (el) { saveEditFuelPrice(el.dataset.city, el.dataset.date); },
+    'testMetalsFetch':         function (el) { testMetalsFetch(el); },
+    'triggerMetalsFetch':      function (el) { triggerMetalsFetch(el); },
+    'triggerMetalsPosts':      function () { triggerMetalsPosts(); },
+    'loadMetalsPage':          function () { loadMetalsPage(); },
+    'switchMetal':             function (el) { switchMetal(el.dataset.metal); },
+    'switchMetalsTab':         function (el) { switchMetalsTab(el.dataset.tab); },
+    'toggleMetalsCity':        function (el) { toggleMetalsCity(el.dataset.city, Number(el.dataset.enable)); },
+    'fetchSingleMetalsCity':   function (el) { fetchSingleMetalsCity(el.dataset.city, el); },
+    'startEditMetalsPrice':    function (el) { startEditMetalsPrice(el.dataset.city, el.dataset.metal); },
+    'saveEditMetalsPrice':     function (el) { saveEditMetalsPrice(el.dataset.city, el.dataset.metal, el.dataset.date); },
+    'loadMetalsCitiesExtended':function () { loadMetalsCitiesExtended(); },
+    'regeneratePost':          function (el) {
+      var ds = el.dataset;
+      regeneratePost(ds.module, ds.itemType, ds.postType, ds.itemName);
+    },
+    'openManualImportModal':   function () { __openManualImportModal(); },
+    'closeManualImportModal':  function () { __closeManualImportModal(); },
+    'submitManualImport':      function () { __submitManualImport(); },
+    'editRule':                function (el) {
+      var ds = el.dataset;
+      __editRule(ds.id, ds.tag, ds.value, ds.quality === '1');
+    },
+    'deleteRule':              function (el) { __deleteRule(el.dataset.id); },
+    'toggleCluster':           function (el) { __toggleCluster(Number(el.dataset.clusterId)); },
+    'publishCluster':          function (el, e) { e.stopPropagation(); __publishCluster(Number(el.dataset.clusterId)); },
+    'skipCluster':             function (el, e) { e.stopPropagation(); __skipCluster(Number(el.dataset.clusterId)); },
+    'deleteCluster':           function (el, e) { e.stopPropagation(); __deleteCluster(Number(el.dataset.clusterId), e); },
+    'goToPublished':           function (el, e) { if (e) e.stopPropagation(); __goToPublished(); },
+    'goToPublishedAndDismiss': function (el) { __goToPublished(); if (el.parentElement) el.parentElement.remove(); },
+    'toggleClusterSources':    function (el) { toggleClusterSources(el); },
+    'toggleExpandContent':     function (el) { toggleExpandContent(el); },
+    'publishReady':            function (el) { __publishReady(Number(el.dataset.draftId)); },
+    'openEditor':              function (el) { __openEditor(Number(el.dataset.draftId)); },
+    'retryFailedDraft':        function (el) { __retryFailedDraft(Number(el.dataset.draftId)); },
+    'retryExtract':            function (el) { __retryExtract(Number(el.dataset.draftId)); },
+    'triggerRewrite':          function (el) { __triggerRewrite(Number(el.dataset.draftId)); },
+    'previewDraftHTML':        function (el) { __previewDraftHTML(Number(el.dataset.draftId)); },
+    'retryDraft':              function (el) { __retryDraft(Number(el.dataset.draftId)); },
+    'deleteDraft':             function (el) { __deleteDraft(Number(el.dataset.draftId)); },
+    'downloadDraftHTML':       function (el) { __downloadDraftHTML(Number(el.dataset.draftId)); },
+    'toggleDraftSelect':       function (el, e) { __toggleDraftSelect(Number(el.dataset.draftId), e); },
+    'runInfraAnalysis':        function (el) { __runInfraAnalysis(Number(el.dataset.draftId)); },
+    'switchToInfraTab':        function () { __switchToInfraTab(); },
+    'toggleSelectMode':        function () { __toggleSelectMode(); },
+    'batchDeleteFailed':       function () { __batchDeleteFailed(); },
+    'selectAllDrafts':         function () { __selectAllDrafts(); },
+    'deselectAllDrafts':       function () { __deselectAllDrafts(); },
+    'deleteSelectedDrafts':    function () { __deleteSelectedDrafts(); },
+    'clearBatchSelection':     function () { __clearBatchSelection(); },
+    'mergeIntoCluster':        function () { __mergeIntoCluster(); },
+    'createManualCluster':     function () { __createManualCluster(); },
+    'dismissParent':           function (el) { if (el.parentElement) el.parentElement.remove(); },
+    'stopOnly':                function (el, e) { e.stopPropagation(); }
+  };
+
+  var INPUT_ACTIONS = {
+    'filterSourcesTable':       function (el) { filterSourcesTable(el.value); },
+    'filterFuelCities':         function () { filterFuelCities(); },
+    'filterMetalsCities':       function () { filterMetalsCities(); },
+    'loadFuelPosts':            function () { loadFuelPosts(); },
+    'loadMetalsPosts':          function () { loadMetalsPosts(); },
+    'updateManualImportCount':  function () { __updateManualImportCount(); }
+  };
+
+  var CHANGE_ACTIONS = {
+    'filterFuelCities':   function () { filterFuelCities(); },
+    'filterMetalsCities': function () { filterMetalsCities(); },
+    'loadFuelPosts':      function () { loadFuelPosts(); },
+    'loadMetalsPosts':    function () { loadMetalsPosts(); }
+  };
+
+  var ERROR_ACTIONS = {
+    'hideSelf':   function (el) { el.style.display = 'none'; },
+    'hideParent': function (el) { if (el.parentElement) el.parentElement.style.display = 'none'; }
+  };
+
+  function _dispatchEvent(registry, attr) {
+    return function (e) {
+      var el = e.target && e.target.closest && e.target.closest('[' + attr + ']');
+      if (!el) return;
+      var handler = registry[el.getAttribute(attr)];
+      if (handler) handler(el, e);
+    };
+  }
+
+  function bindDelegatedEvents() {
+    document.addEventListener('click',  _dispatchEvent(CLICK_ACTIONS,  'data-click'));
+    document.addEventListener('input',  _dispatchEvent(INPUT_ACTIONS,  'data-input'));
+    document.addEventListener('change', _dispatchEvent(CHANGE_ACTIONS, 'data-change'));
+    // error events don't bubble — observe in the capture phase so a single
+    // document listener still sees per-element failures (e.g. broken img).
+    document.addEventListener('error', function (e) {
+      var el = e.target;
+      if (!el || !el.getAttribute) return;
+      var action = el.getAttribute('data-error');
+      if (!action) return;
+      var handler = ERROR_ACTIONS[action];
+      if (handler) handler(el, e);
+    }, true);
+  }
+
+  // Extracted from an inline onclick that toggled the cluster-editor
+  // sources pane and rotated its caret.
+  function toggleClusterSources(headerEl) {
+    if (!headerEl || !headerEl.parentElement) return;
+    var pane = headerEl.parentElement.querySelector('.cluster-editor-sources');
+    var arrow = headerEl.querySelector('.toggle-arrow');
+    if (!pane || !arrow) return;
+    var hidden = pane.style.display === 'none';
+    pane.style.display = hidden ? '' : 'none';
+    arrow.textContent = hidden ? '\u25BE' : '\u25B8';
+  }
+
+  // Extracted from an inline onclick that expanded/collapsed a clipped
+  // source-article block inside the cluster sources pane.
+  function toggleExpandContent(el) {
+    if (!el) return;
+    var label = el.querySelector('.expand-label');
+    if (el.style.maxHeight === '120px' || el.style.maxHeight === '') {
+      el.style.maxHeight = 'none';
+      if (label) label.textContent = '\u25B2 Collapse';
+      return;
+    }
+    el.style.maxHeight = '120px';
+    if (label) {
+      var n = el.textContent.length;
+      var lbl = n >= 10000 ? Math.round(n / 1000) + 'k chars'
+              : n >= 1000 ? (n / 1000).toFixed(1) + 'k chars'
+              : n + ' chars';
+      label.textContent = '\u25BC Show full content (' + lbl + ')';
+    }
+  }
+
   // ─── Init ───────────────────────────────────────────────────────────────
 
   function init() {
+    bindDelegatedEvents();
     initSidebar();
     initRouter();
     initEditorButtons();
@@ -5641,10 +5807,10 @@
         '<td class="col-diesel" style="color:' + dColor + '">' + (c.diesel ? '₹' + Number(c.diesel).toFixed(2) : '—') + '</td>' +
         '<td><span style="font-size:11px;background:var(--bg3);padding:2px 6px;border-radius:4px;">' + (c.source || '—') + '</span></td>' +
         '<td style="font-size:12px;color:#888">' + (pd || '—') + '</td>' +
-        '<td><button class="btn-icon" onclick="toggleFuelCity(\'' + cityEsc.replace(/'/g, "\\'") + '\',' + (enabled ? '0' : '1') + ')" title="Toggle enabled">' + (enabled ? '✅' : '❌') + '</button></td>' +
+        '<td><button class="btn-icon" data-click="toggleFuelCity" data-city="' + cityEsc + '" data-enable="' + (enabled ? '0' : '1') + '" title="Toggle enabled">' + (enabled ? '✅' : '❌') + '</button></td>' +
         '<td class="col-actions">' +
-          '<button class="btn-icon" title="Fetch this city" onclick="fetchSingleFuelCity(\'' + cityEsc.replace(/'/g, "\\'") + '\')">⚡</button>' +
-          '<button class="btn-icon" title="Edit prices" onclick="startEditFuelPrice(\'' + cityEsc.replace(/'/g, "\\'") + '\',\'' + stateEsc.replace(/'/g, "\\'") + '\',' + p + ',' + d + ',\'' + pd + '\')">✏️</button>' +
+          '<button class="btn-icon" title="Fetch this city" data-click="fetchSingleFuelCity" data-city="' + cityEsc + '">⚡</button>' +
+          '<button class="btn-icon" title="Edit prices" data-click="startEditFuelPrice" data-city="' + cityEsc + '" data-state="' + stateEsc + '" data-petrol="' + p + '" data-diesel="' + d + '" data-date="' + pd + '">✏️</button>' +
         '</td></tr>';
     }).join('');
   }
@@ -5806,8 +5972,7 @@
     }).catch(function() {});
   }
 
-  async function triggerMetalsFetch() {
-    var btn = event && event.target;
+  async function triggerMetalsFetch(btn) {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Fetching...'; }
     try {
       var res = await fetch('/api/metals/fetch', { method: 'POST' });
@@ -6017,7 +6182,7 @@
         '<td class="text-muted text-sm" title="' + esc(p.created_at) + '">' + timeAgo(p.created_at) + '</td>' +
         '<td>' +
           (p.wp_url ? '<a href="' + esc(p.wp_url) + '" target="_blank" class="btn-icon" title="Open WP">🔗</a>' : '') +
-          '<button class="btn-icon" title="Regenerate" onclick="regeneratePost(\'' + esc(module) + '\',\'' + esc(p.item_type) + '\',\'' + esc(p.post_type) + '\',\'' + esc(p.item_name).replace(/'/g, "\\'") + '\')">🔄</button>' +
+          '<button class="btn-icon" title="Regenerate" data-click="regeneratePost" data-module="' + esc(module) + '" data-item-type="' + esc(p.item_type) + '" data-post-type="' + esc(p.post_type) + '" data-item-name="' + esc(p.item_name) + '">🔄</button>' +
         '</td></tr>';
     }).join('');
   }
@@ -6064,7 +6229,7 @@
 
   function switchFuelTab(tab) {
     document.querySelectorAll('#fuel-tabs .tab').forEach(function(b) { b.classList.remove('active'); });
-    var activeBtn = document.querySelector('#fuel-tabs [data-tab="fuel-tab-' + tab + '"]');
+    var activeBtn = document.querySelector('#fuel-tabs [data-tab="' + tab + '"]');
     if (activeBtn) activeBtn.classList.add('active');
     document.querySelectorAll('#page-fuel .tab-content').forEach(function(el) { el.style.display = 'none'; });
     var tabEl = document.getElementById('fuel-tab-' + tab);
@@ -6173,7 +6338,7 @@
 
   function switchMetalsTab(tab) {
     document.querySelectorAll('#metals-tabs .tab').forEach(function(b) { b.classList.remove('active'); });
-    var activeBtn = document.querySelector('#metals-tabs [data-tab="metals-tab-' + tab + '"]');
+    var activeBtn = document.querySelector('#metals-tabs [data-tab="' + tab + '"]');
     if (activeBtn) activeBtn.classList.add('active');
     document.querySelectorAll('#page-metals .tab-content').forEach(function(el) { el.style.display = 'none'; });
     var tabEl = document.getElementById('metals-tab-' + tab);
@@ -6258,10 +6423,10 @@
         '<td>' + esc(c.state) + '</td>' +
         '<td>' + priceDisplay + '</td>' +
         '<td><span class="text-sm text-muted">' + esc(c.source || '—') + '</span></td>' +
-        '<td><button class="btn-icon" onclick="toggleMetalsCity(\'' + esc(c.city_name) + '\',' + (c.is_active ? '0' : '1') + ')" title="Toggle active">' + activeToggle + '</button></td>' +
+        '<td><button class="btn-icon" data-click="toggleMetalsCity" data-city="' + esc(c.city_name) + '" data-enable="' + (c.is_active ? '0' : '1') + '" title="Toggle active">' + activeToggle + '</button></td>' +
         '<td>' +
-          '<button class="btn-icon" title="Fetch this city" onclick="fetchSingleMetalsCity(\'' + esc(c.city_name).replace(/'/g, "\\'") + '\')">⚡</button>' +
-          '<button class="btn-icon" title="Edit prices" onclick="startEditMetalsPrice(\'' + esc(c.city_name).replace(/'/g, "\\'") + '\',\'' + metal + '\')">✏️</button>' +
+          '<button class="btn-icon" title="Fetch this city" data-click="fetchSingleMetalsCity" data-city="' + esc(c.city_name) + '">⚡</button>' +
+          '<button class="btn-icon" title="Edit prices" data-click="startEditMetalsPrice" data-city="' + esc(c.city_name) + '" data-metal="' + metal + '">✏️</button>' +
         '</td></tr>';
     }).join('');
   }
@@ -6335,8 +6500,8 @@
     row.querySelector('.col-petrol').innerHTML = '<input type="number" step="0.01" min="30" max="300" value="' + (petrol || '') + '" class="edit-input" id="efp-' + city + '">';
     row.querySelector('.col-diesel').innerHTML = '<input type="number" step="0.01" min="20" max="300" value="' + (diesel || '') + '" class="edit-input" id="efd-' + city + '">';
     row.querySelector('.col-actions').innerHTML =
-      '<button class="btn-icon text-green" onclick="saveEditFuelPrice(\'' + city.replace(/'/g, "\\'") + '\',\'' + priceDate + '\')" title="Save">💾</button>' +
-      '<button class="btn-icon text-red" onclick="loadFuelPage()" title="Cancel">✖</button>';
+      '<button class="btn-icon text-green" data-click="saveEditFuelPrice" data-city="' + escapeHtml(city) + '" data-date="' + priceDate + '" title="Save">💾</button>' +
+      '<button class="btn-icon text-red" data-click="loadFuelPage" title="Cancel">✖</button>';
   }
   window.startEditFuelPrice = startEditFuelPrice;
 
@@ -6380,8 +6545,8 @@
       actionsCell.innerHTML =
         '<input type="number" step="0.01" class="edit-input" placeholder="24K" id="em24-' + city + '" style="width:60px">' +
         '<input type="number" step="0.01" class="edit-input" placeholder="1g" id="em1g-' + city + '" style="width:55px;margin-left:4px">' +
-        '<button class="btn-icon text-green" onclick="saveEditMetalsPrice(\'' + city.replace(/'/g, "\\'") + '\',\'' + metal + '\',\'' + today + '\')" title="Save">💾</button>' +
-        '<button class="btn-icon text-red" onclick="loadMetalsCitiesExtended()" title="Cancel">✖</button>';
+        '<button class="btn-icon text-green" data-click="saveEditMetalsPrice" data-city="' + escapeHtml(city) + '" data-metal="' + metal + '" data-date="' + today + '" title="Save">💾</button>' +
+        '<button class="btn-icon text-red" data-click="loadMetalsCitiesExtended" title="Cancel">✖</button>';
     }
   }
   window.startEditMetalsPrice = startEditMetalsPrice;

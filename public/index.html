@@ -434,7 +434,7 @@
               <label class="settings-label">RapidAPI Key</label>
               <div style="display:flex; gap:8px;">
                 <input type="password" id="fuel-rapidapi-key" placeholder="Your RapidAPI key for fuel prices" style="flex:1;" />
-                <button class="btn btn-sm btn-secondary" onclick="testFuelApi()">Ping</button>
+                <button class="btn btn-sm btn-secondary" data-click="testFuelApi">Ping</button>
               </div>
               <small id="fuel-key-status" style="color:#888; font-size:11px; display:block; margin-top:4px;"></small>
             </div>
@@ -445,12 +445,12 @@
               <label class="settings-label">RapidAPI Key</label>
               <div style="display:flex; gap:8px;">
                 <input type="password" id="metals-rapidapi-key" placeholder="Your RapidAPI key for metals prices" style="flex:1;" />
-                <button class="btn btn-sm btn-secondary" onclick="testMetalsApi()">Ping</button>
+                <button class="btn btn-sm btn-secondary" data-click="testMetalsApi">Ping</button>
               </div>
               <small id="metals-key-status" style="color:#888; font-size:11px; display:block; margin-top:4px;"></small>
             </div>
           </div>
-          <button class="btn btn-purple btn-full" id="saveFuelMetalsSettingsBtn" style="margin-top:15px;" onclick="saveFuelMetalsSettings()">Save Fuel & Metals Keys</button>
+          <button class="btn btn-purple btn-full" id="saveFuelMetalsSettingsBtn" style="margin-top:15px;" data-click="saveFuelMetalsSettings">Save Fuel & Metals Keys</button>
         </div>
 
         <!-- WordPress Publishing (Fuel/Metals) -->
@@ -471,8 +471,8 @@
               <input type="password" id="wp-pub-password" placeholder="xxxx xxxx xxxx xxxx" />
             </div>
             <div style="display:flex;gap:8px;margin-top:12px;">
-              <button class="btn btn-sm btn-secondary" onclick="testWPConnection()">🔗 Test Connection</button>
-              <button class="btn btn-purple" onclick="saveWPPublishingSettings()">💾 Save</button>
+              <button class="btn btn-sm btn-secondary" data-click="testWPConnection">🔗 Test Connection</button>
+              <button class="btn btn-purple" data-click="saveWPPublishingSettings">💾 Save</button>
             </div>
             <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
           </div>
@@ -486,11 +486,11 @@
 
             <!-- Tab switcher -->
             <div style="display:flex;gap:4px;margin-bottom:16px;background:rgba(255,255,255,0.06);padding:4px;border-radius:8px;width:fit-content;">
-              <button onclick="switchImportTab('csv')" id="importTabCsv"
+              <button data-click="switchImportTab" data-tab="csv" id="importTabCsv"
                       style="padding:6px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer;background:rgba(255,255,255,0.12);color:#fff;font-weight:600;">
                 CSV
               </button>
-              <button onclick="switchImportTab('json')" id="importTabJson"
+              <button data-click="switchImportTab" data-tab="json" id="importTabJson"
                       style="padding:6px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer;background:transparent;color:#888;font-weight:500;">
                 JSON
               </button>
@@ -504,8 +504,8 @@
                 <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: <code style="color:#9ca3af;">city, state, petrol, diesel, price_date, source</code></div>
                 <input type="file" id="fuelCsvFile" accept=".csv" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
                 <div style="display:flex;gap:6px;">
-                  <button onclick="runImport('fuel','csv',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
-                  <button onclick="runImport('fuel','csv',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                  <button data-click="runImport" data-module="fuel" data-format="csv" data-dry="1" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button data-click="runImport" data-module="fuel" data-format="csv" data-dry="0" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
                 </div>
               </div>
 
@@ -514,8 +514,8 @@
                 <div style="font-size:12px;color:#888;margin-bottom:10px;">Columns: <code style="color:#9ca3af;">city, metal_type, price_24k, price_22k, price_18k, price_1g, price_date</code></div>
                 <input type="file" id="metalsCsvFile" accept=".csv" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
                 <div style="display:flex;gap:6px;">
-                  <button onclick="runImport('metals','csv',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
-                  <button onclick="runImport('metals','csv',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                  <button data-click="runImport" data-module="metals" data-format="csv" data-dry="1" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button data-click="runImport" data-module="metals" data-format="csv" data-dry="0" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
                 </div>
               </div>
 
@@ -530,8 +530,8 @@
                 <div style="font-size:11px;color:#6b7280;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:6px;margin-bottom:10px;font-family:monospace;overflow:auto;white-space:nowrap;">[{"city":"Delhi","petrol":96.72,"diesel":89.62,"price_date":"2025-01-15"}]</div>
                 <input type="file" id="fuelJsonFile" accept=".json" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
                 <div style="display:flex;gap:6px;">
-                  <button onclick="runImport('fuel','json',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
-                  <button onclick="runImport('fuel','json',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                  <button data-click="runImport" data-module="fuel" data-format="json" data-dry="1" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button data-click="runImport" data-module="fuel" data-format="json" data-dry="0" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
                 </div>
               </div>
 
@@ -541,8 +541,8 @@
                 <div style="font-size:11px;color:#6b7280;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:6px;margin-bottom:10px;font-family:monospace;overflow:auto;white-space:nowrap;">[{"city":"Delhi","metal_type":"gold","price_24k":7245.50,"price_22k":6641.67,"price_date":"2025-01-15"}]</div>
                 <input type="file" id="metalsJsonFile" accept=".json" style="font-size:12px;width:100%;margin-bottom:8px;color:#ccc;">
                 <div style="display:flex;gap:6px;">
-                  <button onclick="runImport('metals','json',true)" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
-                  <button onclick="runImport('metals','json',false)" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
+                  <button data-click="runImport" data-module="metals" data-format="json" data-dry="1" style="flex:1;padding:6px;font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;color:#ccc;">Dry Run</button>
+                  <button data-click="runImport" data-module="metals" data-format="json" data-dry="0" style="flex:1;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Import</button>
                 </div>
               </div>
 
@@ -556,7 +556,7 @@
         <div class="card" style="margin-bottom:20px;">
           <div class="card-title">Pipeline Diagnostics</div>
           <p style="color:#888;font-size:13px;margin-bottom:12px;">Quick check of all system requirements — API keys, cities, modules, credentials.</p>
-          <button class="btn btn-secondary" onclick="runDiagnostics()">🔍 Run Diagnostics</button>
+          <button class="btn btn-secondary" data-click="runDiagnostics">🔍 Run Diagnostics</button>
           <div id="diagnostics-result" style="margin-top:10px;"></div>
         </div>
 
@@ -654,7 +654,7 @@
         <div class="page-header">
           <h2 class="page-title">Sources Analytics</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-ghost" id="sourcesRefreshBtn" onclick="loadSourcesPage()">↻ Refresh</button>
+            <button class="btn btn-sm btn-ghost" id="sourcesRefreshBtn" data-click="loadSourcesPage">↻ Refresh</button>
           </div>
         </div>
 
@@ -684,20 +684,20 @@
             <span>All Domains</span>
             <input type="text" id="sources-domain-search" placeholder="Filter domains..."
               style="padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg2); color:var(--text); font-size:13px; width:220px;"
-              oninput="filterSourcesTable(this.value)">
+              data-input="filterSourcesTable">
           </div>
           <div style="overflow-x:auto;">
             <table class="data-table" id="sources-domain-table">
               <thead>
                 <tr>
-                  <th onclick="sortSourcesTable('domain')">Domain ↕</th>
-                  <th onclick="sortSourcesTable('total')">Articles ↕</th>
+                  <th data-click="sortSourcesTable" data-col="domain">Domain ↕</th>
+                  <th data-click="sortSourcesTable" data-col="total">Articles ↕</th>
                   <th>🇬🇧 EN</th>
                   <th>🇮🇳 HI</th>
-                  <th onclick="sortSourcesTable('cluster_rate')">Cluster % ↕</th>
-                  <th onclick="sortSourcesTable('draft_rate')">Draft % ↕</th>
+                  <th data-click="sortSourcesTable" data-col="cluster_rate">Cluster % ↕</th>
+                  <th data-click="sortSourcesTable" data-col="draft_rate">Draft % ↕</th>
                   <th>Categories</th>
-                  <th onclick="sortSourcesTable('last_seen')">Last Seen ↕</th>
+                  <th data-click="sortSourcesTable" data-col="last_seen">Last Seen ↕</th>
                   <th>7-day trend</th>
                 </tr>
               </thead>
@@ -727,10 +727,10 @@
         <div class="page-header">
           <h2 class="page-title">Fuel Price Tracker</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-outline" onclick="testFuelFetch()">🧪 Test (5 cities)</button>
-            <button class="btn btn-sm btn-purple" id="fuelFetchBtn" onclick="triggerFuelFetch()">⚡ Fetch All Prices</button>
-            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="fuelPostsBtn" onclick="triggerFuelPosts()">📝 Generate Posts</button>
-            <button class="btn btn-sm btn-ghost" onclick="loadFuelPage()">↻ Refresh</button>
+            <button class="btn btn-sm btn-outline" data-click="testFuelFetch">🧪 Test (5 cities)</button>
+            <button class="btn btn-sm btn-purple" id="fuelFetchBtn" data-click="triggerFuelFetch">⚡ Fetch All Prices</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="fuelPostsBtn" data-click="triggerFuelPosts">📝 Generate Posts</button>
+            <button class="btn btn-sm btn-ghost" data-click="loadFuelPage">↻ Refresh</button>
           </div>
         </div>
 
@@ -745,11 +745,11 @@
 
         <!-- Tab Navigation -->
         <div class="page-tabs" id="fuel-tabs">
-          <button class="tab active" data-tab="fuel-tab-overview" onclick="switchFuelTab('overview')">📊 Overview</button>
-          <button class="tab" data-tab="fuel-tab-cities" onclick="switchFuelTab('cities')">🏙️ Cities</button>
-          <button class="tab" data-tab="fuel-tab-posts" onclick="switchFuelTab('posts')">📝 Posts</button>
-          <button class="tab" data-tab="fuel-tab-logs" onclick="switchFuelTab('logs')">📋 Fetch Log</button>
-          <button class="tab" data-tab="fuel-tab-quality" onclick="switchFuelTab('quality')">🔍 Data Quality</button>
+          <button class="tab active" data-tab="overview" data-click="switchFuelTab">📊 Overview</button>
+          <button class="tab" data-tab="cities" data-click="switchFuelTab">🏙️ Cities</button>
+          <button class="tab" data-tab="posts" data-click="switchFuelTab">📝 Posts</button>
+          <button class="tab" data-tab="logs" data-click="switchFuelTab">📋 Fetch Log</button>
+          <button class="tab" data-tab="quality" data-click="switchFuelTab">🔍 Data Quality</button>
         </div>
 
         <!-- Tab 1: Overview -->
@@ -784,10 +784,10 @@
         <!-- Tab 2: Cities -->
         <div id="fuel-tab-cities" class="tab-content" style="display:none">
           <div class="filter-row">
-            <select id="fuel-state-filter" onchange="filterFuelCities()">
+            <select id="fuel-state-filter" data-change="filterFuelCities">
               <option value="">All States</option>
             </select>
-            <input type="text" id="fuel-city-search" placeholder="Search city..." oninput="filterFuelCities()">
+            <input type="text" id="fuel-city-search" placeholder="Search city..." data-input="filterFuelCities">
           </div>
           <div style="overflow-x:auto;max-height:600px;overflow-y:auto;">
             <table class="data-table">
@@ -805,24 +805,24 @@
             <div class="stat-card"><div class="stat-value" id="fuel-posts-failed">—</div><div class="stat-label">Failed</div></div>
           </div>
           <div class="filter-row">
-            <select id="fuel-posts-type-filter" onchange="loadFuelPosts()">
+            <select id="fuel-posts-type-filter" data-change="loadFuelPosts">
               <option value="">All Types</option>
               <option value="petrol">Petrol</option>
               <option value="diesel">Diesel</option>
             </select>
-            <select id="fuel-posts-tier-filter" onchange="loadFuelPosts()">
+            <select id="fuel-posts-tier-filter" data-change="loadFuelPosts">
               <option value="">All Tiers</option>
               <option value="city">City</option>
               <option value="state">State</option>
               <option value="national">National</option>
             </select>
-            <select id="fuel-posts-status-filter" onchange="loadFuelPosts()">
+            <select id="fuel-posts-status-filter" data-change="loadFuelPosts">
               <option value="">All Actions</option>
               <option value="created">Created</option>
               <option value="updated">Updated</option>
               <option value="failed">Failed</option>
             </select>
-            <input id="fuel-posts-search" placeholder="Search name..." oninput="loadFuelPosts()">
+            <input id="fuel-posts-search" placeholder="Search name..." data-input="loadFuelPosts">
           </div>
           <div style="overflow-x:auto;">
             <table class="data-table">
@@ -872,18 +872,18 @@
         <div class="page-header">
           <h2 class="page-title">Metals Price Tracker</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-outline" onclick="testMetalsFetch()">🧪 Test (Gold)</button>
-            <button class="btn btn-sm btn-purple" onclick="triggerMetalsFetch()">⚡ Fetch All Prices</button>
-            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="metalsPostsBtn" onclick="triggerMetalsPosts()">📝 Generate Posts</button>
-            <button class="btn btn-sm btn-ghost" onclick="loadMetalsPage()">↻ Refresh</button>
+            <button class="btn btn-sm btn-outline" data-click="testMetalsFetch">🧪 Test (Gold)</button>
+            <button class="btn btn-sm btn-purple" data-click="triggerMetalsFetch">⚡ Fetch All Prices</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="metalsPostsBtn" data-click="triggerMetalsPosts">📝 Generate Posts</button>
+            <button class="btn btn-sm btn-ghost" data-click="loadMetalsPage">↻ Refresh</button>
           </div>
         </div>
 
         <!-- Metal type selector -->
         <div style="display:flex;gap:8px;margin-bottom:12px;">
-          <button class="btn btn-sm" id="metal-btn-gold" onclick="switchMetal('gold')" style="background:#f59e0b;color:#000;">Gold</button>
-          <button class="btn btn-sm btn-ghost" id="metal-btn-silver" onclick="switchMetal('silver')">Silver</button>
-          <button class="btn btn-sm btn-ghost" id="metal-btn-platinum" onclick="switchMetal('platinum')">Platinum</button>
+          <button class="btn btn-sm" id="metal-btn-gold" data-click="switchMetal" data-metal="gold" style="background:#f59e0b;color:#000;">Gold</button>
+          <button class="btn btn-sm btn-ghost" id="metal-btn-silver" data-click="switchMetal" data-metal="silver">Silver</button>
+          <button class="btn btn-sm btn-ghost" id="metal-btn-platinum" data-click="switchMetal" data-metal="platinum">Platinum</button>
         </div>
 
         <!-- Summary cards -->
@@ -897,11 +897,11 @@
 
         <!-- Tab Navigation -->
         <div class="page-tabs" id="metals-tabs">
-          <button class="tab active" data-tab="metals-tab-overview" onclick="switchMetalsTab('overview')">📊 Overview</button>
-          <button class="tab" data-tab="metals-tab-cities" onclick="switchMetalsTab('cities')">🏙️ Cities</button>
-          <button class="tab" data-tab="metals-tab-posts" onclick="switchMetalsTab('posts')">📝 Posts</button>
-          <button class="tab" data-tab="metals-tab-logs" onclick="switchMetalsTab('logs')">📋 Fetch Log</button>
-          <button class="tab" data-tab="metals-tab-quality" onclick="switchMetalsTab('quality')">🔍 Data Quality</button>
+          <button class="tab active" data-tab="overview" data-click="switchMetalsTab">📊 Overview</button>
+          <button class="tab" data-tab="cities" data-click="switchMetalsTab">🏙️ Cities</button>
+          <button class="tab" data-tab="posts" data-click="switchMetalsTab">📝 Posts</button>
+          <button class="tab" data-tab="logs" data-click="switchMetalsTab">📋 Fetch Log</button>
+          <button class="tab" data-tab="quality" data-click="switchMetalsTab">🔍 Data Quality</button>
         </div>
 
         <!-- Tab 1: Overview -->
@@ -936,10 +936,10 @@
         <!-- Tab 2: Cities -->
         <div id="metals-tab-cities" class="tab-content" style="display:none">
           <div class="filter-row">
-            <select id="metals-state-filter" onchange="filterMetalsCities()">
+            <select id="metals-state-filter" data-change="filterMetalsCities">
               <option value="">All States</option>
             </select>
-            <input type="text" id="metals-city-search" placeholder="Search city..." oninput="filterMetalsCities()">
+            <input type="text" id="metals-city-search" placeholder="Search city..." data-input="filterMetalsCities">
           </div>
           <div style="overflow-x:auto;max-height:600px;overflow-y:auto;">
             <table class="data-table">
@@ -957,25 +957,25 @@
             <div class="stat-card"><div class="stat-value" id="metals-posts-failed">—</div><div class="stat-label">Failed</div></div>
           </div>
           <div class="filter-row">
-            <select id="metals-posts-type-filter" onchange="loadMetalsPosts()">
+            <select id="metals-posts-type-filter" data-change="loadMetalsPosts">
               <option value="">All Metals</option>
               <option value="gold">Gold</option>
               <option value="silver">Silver</option>
               <option value="platinum">Platinum</option>
             </select>
-            <select id="metals-posts-tier-filter" onchange="loadMetalsPosts()">
+            <select id="metals-posts-tier-filter" data-change="loadMetalsPosts">
               <option value="">All Tiers</option>
               <option value="city">City</option>
               <option value="state">State</option>
               <option value="national">National</option>
             </select>
-            <select id="metals-posts-status-filter" onchange="loadMetalsPosts()">
+            <select id="metals-posts-status-filter" data-change="loadMetalsPosts">
               <option value="">All Actions</option>
               <option value="created">Created</option>
               <option value="updated">Updated</option>
               <option value="failed">Failed</option>
             </select>
-            <input id="metals-posts-search" placeholder="Search name..." oninput="loadMetalsPosts()">
+            <input id="metals-posts-search" placeholder="Search name..." data-input="loadMetalsPosts">
           </div>
           <div style="overflow-x:auto;">
             <table class="data-table">
@@ -1152,11 +1152,11 @@
 
   <!-- Manual URL Import Modal -->
   <div id="manual-import-modal" class="manual-import-modal hidden" role="dialog" aria-labelledby="manual-import-title">
-    <div class="manual-import-backdrop" onclick="window.__closeManualImportModal()"></div>
+    <div class="manual-import-backdrop" data-click="closeManualImportModal"></div>
     <div class="manual-import-content">
       <div class="manual-import-header">
         <h2 id="manual-import-title">Import URLs Manually</h2>
-        <button type="button" class="manual-import-close" onclick="window.__closeManualImportModal()" aria-label="Close">&times;</button>
+        <button type="button" class="manual-import-close" data-click="closeManualImportModal" aria-label="Close">&times;</button>
       </div>
       <div class="manual-import-body">
         <p class="manual-import-description">
@@ -1170,7 +1170,7 @@
           id="manual-import-urls"
           rows="12"
           placeholder="https://example.com/article-1&#10;https://example.com/article-2&#10;https://another-site.com/news"
-          oninput="window.__updateManualImportCount()"
+          data-input="updateManualImportCount"
         ></textarea>
         <div class="manual-import-info">
           <span id="manual-import-count">0 valid URLs detected</span>
@@ -1179,14 +1179,14 @@
         <div id="manual-import-result" class="manual-import-result hidden"></div>
       </div>
       <div class="manual-import-footer">
-        <button type="button" class="btn btn-secondary" onclick="window.__closeManualImportModal()">Cancel</button>
-        <button type="button" id="manual-import-submit" class="btn btn-primary" onclick="window.__submitManualImport()">
+        <button type="button" class="btn btn-secondary" data-click="closeManualImportModal">Cancel</button>
+        <button type="button" id="manual-import-submit" class="btn btn-primary" data-click="submitManualImport">
           Import URLs
         </button>
       </div>
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=22"></script>
+  <script src="/js/dashboard.js?v=23"></script>
 </body>
 </html>
