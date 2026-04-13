@@ -4103,7 +4103,7 @@ function createApiRouter(deps) {
               .then(function (result) { return { wpPostId: result.wpPostId, wpPostUrl: result.wpPostUrl, wpImageId: result.wpImageId || null, isUpdate: false }; });
           }
 
-          publishPromise.then(function (result) {
+          function _savePublishResult(result, wasDeleted) {
             publishUrl = result.wpPostUrl || '';
             db.prepare(
               "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, " +
@@ -4116,10 +4116,33 @@ function createApiRouter(deps) {
             if (draft.cluster_id) {
               try { db.prepare("UPDATE clusters SET status = 'published', published_at = datetime('now') WHERE id = ?").run(draft.cluster_id); } catch (e) { /* ignore */ }
             }
-            var action = result.isUpdate ? 'updated' : 'published';
-            logger.info('api', 'Draft ' + id + ' ' + action + ' to WordPress: ' + publishUrl + (result.wpImageId ? ' (image: ' + result.wpImageId + ')' : ''));
-            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null, isUpdate: result.isUpdate });
+            var action = wasDeleted ? 're-published (old post was deleted)' : (result.isUpdate ? 'updated' : 'published');
+            logger.info('api', 'Draft ' + id + ' ' + action + ' to WordPress: ' + publishUrl);
+            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null, isUpdate: result.isUpdate, wasDeleted: wasDeleted || false });
+          }
+
+          publishPromise.then(function (result) {
+            _savePublishResult(result, false);
           }).catch(function (err) {
+            // If we were trying to UPDATE and WP returned 404, the post was deleted.
+            // Auto-fallback: clear stale wp_post_id and create a brand-new post.
+            var is404 = existingWpPostId && err.wpErrors &&
+              err.wpErrors.some(function (e) { return e.status === 404; });
+            if (is404) {
+              logger.info('api', 'Draft ' + id + ': WP post ' + existingWpPostId + ' returned 404 (deleted/trashed) — re-publishing as new post');
+              try { db.prepare('UPDATE drafts SET wp_post_id = NULL, wp_post_url = NULL WHERE id = ?').run(id); } catch (e) { /* ignore */ }
+              return publisherMod.publish(rewrittenArticle, draftCluster, db)
+                .then(function (freshResult) {
+                  _savePublishResult({ wpPostId: freshResult.wpPostId, wpPostUrl: freshResult.wpPostUrl, wpImageId: freshResult.wpImageId || null, isUpdate: false }, true);
+                })
+                .catch(function (err2) {
+                  var safe2 = sanitizeAxiosError(err2);
+                  var msg2 = 'WP re-publish (after 404 on post ' + existingWpPostId + ') failed: ' + (safe2.message || 'Unknown');
+                  logger.error('api', msg2);
+                  try { db.prepare("INSERT INTO logs (level, module, message, created_at) VALUES ('error', 'publisher', ?, datetime('now'))").run(msg2); } catch (le) { /* ignore */ }
+                  res.status(500).json({ success: false, error: 'The WordPress post was deleted. Re-publish attempt failed: ' + (safe2.message || 'Unknown') });
+                });
+            }
             var safeWp3 = sanitizeAxiosError(err);
             var statusCode = safeWp3.status;
             var wpError = safeWp3.data || '';

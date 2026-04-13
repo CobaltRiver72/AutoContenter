@@ -2457,18 +2457,26 @@
     }
   }
 
+  var _publishInFlight = {};
   window.__publishReady = function (draftId) {
+    if (_publishInFlight[draftId]) return;
     if (!confirm('Publish this article to WordPress now?')) return;
+    _publishInFlight[draftId] = true;
     fetchApi('/api/drafts/' + draftId + '/publish', { method: 'POST' })
       .then(function (data) {
+        delete _publishInFlight[draftId];
         if (data.success) {
-          showToast('Published successfully!', 'success');
+          var msg = data.wasDeleted
+            ? 'WP post was deleted — re-published as new post!'
+            : 'Published successfully!';
+          showToast(msg, 'success');
           loadReady();
         } else {
           showToast('Publish failed: ' + (data.error || 'Unknown error'), 'error');
         }
       })
       .catch(function (err) {
+        delete _publishInFlight[draftId];
         showToast('Publish failed: ' + err.message, 'error');
       });
   };
@@ -5491,13 +5499,27 @@
 
     var publishBtn = $('editorPublishBtn');
     if (publishBtn) {
+      // Set initial label based on whether draft is already on WP
+      if (currentDraft && currentDraft.wp_post_id) {
+        publishBtn.innerHTML = '&#8635; Update on WP';
+      } else {
+        publishBtn.innerHTML = '&#128640; Publish';
+      }
+
       publishBtn.onclick = function () {
+        if (publishBtn.disabled) return;
         if (!currentDraftId) return;
         var platform = $('setting-platform').value;
         var html = $('html-code-editor').value;
         if (!html) { showToast('No HTML content to publish', 'error'); return; }
-        if (!confirm('Publish this draft to ' + platform + '?')) return;
+        var isUpdate = !!(currentDraft && currentDraft.wp_post_id);
+        var confirmMsg = isUpdate
+          ? 'Update the existing WordPress post with new content?'
+          : 'Publish this draft to ' + platform + '?';
+        if (!confirm(confirmMsg)) return;
 
+        publishBtn.disabled = true;
+        publishBtn.textContent = isUpdate ? 'Updating...' : 'Publishing...';
         $('editor-status').textContent = 'PUBLISHING...';
         $('editor-status').style.background = '#f59e0b';
 
@@ -5509,18 +5531,24 @@
           body: { platform: platform, html: html }
         })
           .then(function (data) {
+            publishBtn.disabled = false;
             if (data.success) {
               $('editor-status').textContent = 'PUBLISHED';
               $('editor-status').style.background = '#22c55e';
-              showToast('Published!' + (data.url ? ' URL: ' + data.url : ''), 'success');
-              // Hide error log on success
+              publishBtn.innerHTML = '&#8635; Update on WP';
+              // Update currentDraft so next click shows correct label
+              if (currentDraft) currentDraft.wp_post_id = data.wpPostId || currentDraft.wp_post_id;
+              var msg = data.wasDeleted
+                ? 'WP post was deleted — re-published as new post!' + (data.url ? ' ' + data.url : '')
+                : (data.isUpdate ? 'Updated on WordPress!' : 'Published!') + (data.url ? ' ' + data.url : '');
+              showToast(msg, 'success');
               var logPanel = $('editorWpLog');
               if (logPanel) logPanel.style.display = 'none';
             } else {
+              publishBtn.innerHTML = isUpdate ? '&#8635; Update on WP' : '&#128640; Publish';
               showToast('Publish failed: ' + (data.error || 'Unknown'), 'error');
               $('editor-status').textContent = 'READY';
               $('editor-status').style.background = '#22c55e';
-              // Auto-show WP error log on failure
               var logPanel = $('editorWpLog');
               if (logPanel) {
                 logPanel.style.display = '';
@@ -5529,10 +5557,11 @@
             }
           })
           .catch(function (err) {
+            publishBtn.disabled = false;
+            publishBtn.innerHTML = isUpdate ? '&#8635; Update on WP' : '&#128640; Publish';
             showToast('Publish error: ' + err.message, 'error');
             $('editor-status').textContent = 'READY';
             $('editor-status').style.background = '#22c55e';
-            // Auto-show WP error log on network error
             var logPanel = $('editorWpLog');
             if (logPanel) {
               logPanel.style.display = '';
