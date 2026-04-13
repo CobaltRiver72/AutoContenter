@@ -3301,6 +3301,137 @@ select:focus {
   margin-top: 2px;
 }
 
+/* ─── Knowledge Graph Summary (parsed structured view) ──────────────────── */
+.gs-plain {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.6;
+  font-style: italic;
+  padding: 8px 0;
+}
+.gs-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+.gs-section { display: flex; flex-direction: column; gap: 8px; }
+.gs-section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+}
+.gs-icon { font-style: normal; }
+
+/* Concept tags with metric badges */
+.gs-concepts { display: flex; flex-wrap: wrap; gap: 6px; }
+.gs-concept {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #1a2035;
+  border: 1px solid #2d3a5e;
+  border-radius: 5px;
+  padding: 3px 8px 3px 8px;
+}
+.gs-concept-name {
+  font-size: 12.5px;
+  color: #a5b4fc;
+  font-weight: 500;
+}
+.gs-concept-metric {
+  font-size: 9.5px;
+  background: #0f1629;
+  color: #4b5563;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+}
+.gs-metric-bw { color: #6366f1; }
+
+/* Topical Gaps & Gateways tags */
+.gs-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.gs-tag {
+  font-size: 11.5px;
+  border-radius: 4px;
+  padding: 2px 9px;
+}
+.gs-tag-gap      { background: #2a1a2a; color: #e879f9; border: 1px solid #4a1a4a; }
+.gs-tag-gateway  { background: #1a2a1a; color: #86efac; border: 1px solid #1a4a1a; }
+
+/* Relations */
+.gs-relations { display: flex; flex-wrap: wrap; gap: 6px; }
+.gs-relation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.gs-rel-node {
+  font-size: 12px;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+.gs-arrow {
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.gs-arrow-bi  { color: #818cf8; }
+.gs-arrow-fwd { color: #34d399; }
+.gs-arrow-rev { color: #fb923c; }
+
+/* Diversity stats */
+.gs-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+}
+.gs-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #111827;
+  border-radius: 5px;
+  padding: 6px 9px;
+}
+.gs-stat-key {
+  font-size: 10px;
+  color: #4b5563;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gs-stat-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+.gs-val-ok   { color: #4ade80; }
+.gs-val-warn { color: #f59e0b; }
+.gs-stat-badges {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+.gs-stat-badge {
+  font-size: 10.5px;
+  background: #1e2535;
+  color: #64748b;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
 /* InfraNodus status bar — shown in Settings tab above Rewrite button */
 .infra-status-bar { margin-bottom: 10px; }
 .infra-status-bar-inner {

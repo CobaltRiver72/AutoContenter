@@ -164,6 +164,210 @@
   }
 
   /**
+   * Render an InfraNodus graphSummary string as structured, readable HTML.
+   *
+   * The extendedGraphSummary format is XML-like:
+   *   <Main Concepts (...)>: name (d|b|t), ... </MainConcepts>
+   *   <TopicalGaps> ... </TopicalGaps>
+   *   <ConceptualGateways> ... </ConceptualGateways>
+   *   <Relations> a <- -> b  a -> b ... </Relations>
+   *   <DiversityStatistics> Key: val ... </DiversityStatistics>
+   *
+   * Falls back to styled plain text for natural-language summaries.
+   */
+  function renderGraphSummary(text) {
+    if (!text) return '';
+
+    var isStructured = text.indexOf('</MainConcepts>') !== -1 ||
+                       text.indexOf('<Main Concepts') !== -1 ||
+                       text.indexOf('</DiversityStatistics>') !== -1;
+
+    if (!isStructured) {
+      return '<div class="gs-plain">' + escapeHtml(text) + '</div>';
+    }
+
+    var html = '<div class="gs-summary">';
+
+    // ── Main Concepts ──────────────────────────────────────────────────
+    var mcMatch = text.match(/<Main Concepts[^>]*>:?\s*([\s\S]*?)\s*<\/MainConcepts>/i);
+    if (mcMatch && mcMatch[1].trim()) {
+      var concepts = [];
+      var cRe = /([\w][\w\s\-']*?)\s*\(\s*([^)]*)\)/g;
+      var cm;
+      while ((cm = cRe.exec(mcMatch[1])) !== null) {
+        var parts = cm[2].split('|').map(function (p) { return p.trim(); });
+        var name = cm[1].trim();
+        if (name) concepts.push({ name: name, degree: parts[0] || '0', betweenness: parseFloat(parts[1] || '0') });
+      }
+      if (concepts.length) {
+        // Sort by degree descending so most connected appear first
+        concepts.sort(function (a, b) { return (parseInt(b.degree) || 0) - (parseInt(a.degree) || 0); });
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#127760;</span>Main Concepts</div>' +
+          '<div class="gs-concepts">';
+        concepts.forEach(function (c) {
+          var bwLabel = c.betweenness > 0 ? c.betweenness.toFixed(2) : null;
+          html += '<span class="gs-concept">' +
+            '<span class="gs-concept-name">' + escapeHtml(c.name) + '</span>' +
+            '<span class="gs-concept-metric" title="degree (connections)">d:' + escapeHtml(c.degree) + '</span>' +
+            (bwLabel ? '<span class="gs-concept-metric gs-metric-bw" title="betweenness (bridge score)">b:' + bwLabel + '</span>' : '') +
+          '</span>';
+        });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Topical Gaps ───────────────────────────────────────────────────
+    var gapMatch = text.match(/<TopicalGaps>([\s\S]*?)<\/TopicalGaps>/i);
+    if (gapMatch && gapMatch[1].trim()) {
+      var gaps = gapMatch[1].trim().split(/[,;]+/).map(function (g) { return g.trim(); }).filter(Boolean);
+      if (gaps.length) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128262;</span>Topical Gaps</div>' +
+          '<div class="gs-tags">';
+        gaps.forEach(function (g) { html += '<span class="gs-tag gs-tag-gap">' + escapeHtml(g) + '</span>'; });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Conceptual Gateways ────────────────────────────────────────────
+    var gwMatch = text.match(/<ConceptualGateways>([\s\S]*?)<\/ConceptualGateways>/i);
+    if (gwMatch && gwMatch[1].trim()) {
+      var gws = gwMatch[1].trim().split(/[,;]+/).map(function (g) { return g.trim(); }).filter(Boolean);
+      if (gws.length) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128279;</span>Conceptual Gateways</div>' +
+          '<div class="gs-tags">';
+        gws.forEach(function (g) { html += '<span class="gs-tag gs-tag-gateway">' + escapeHtml(g) + '</span>'; });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Relations ─────────────────────────────────────────────────────
+    var relMatch = text.match(/<Relations>([\s\S]*?)<\/Relations>/i);
+    if (relMatch && relMatch[1].trim()) {
+      var relItems = [];
+      var tokens = relMatch[1].trim().split(/\s+/);
+      var ti = 0;
+      while (ti < tokens.length) {
+        // Collect left-side words until an arrow token
+        var leftParts = [];
+        while (ti < tokens.length && tokens[ti] !== '<-' && tokens[ti] !== '->') {
+          leftParts.push(tokens[ti++]);
+        }
+        var left = leftParts.join(' ').trim();
+        if (ti >= tokens.length) break;
+
+        var arrowType;
+        if (tokens[ti] === '<-' && tokens[ti + 1] === '->') {
+          arrowType = 'bi'; ti += 2;
+        } else if (tokens[ti] === '->') {
+          arrowType = 'fwd'; ti++;
+        } else if (tokens[ti] === '<-') {
+          arrowType = 'rev'; ti++;
+        } else {
+          ti++; continue;
+        }
+
+        // Collect right-side words until next arrow or end
+        var rightParts = [];
+        while (ti < tokens.length && tokens[ti] !== '<-' && tokens[ti] !== '->') {
+          rightParts.push(tokens[ti++]);
+        }
+        var right = rightParts.join(' ').trim();
+
+        if (left && right) relItems.push({ from: left, type: arrowType, to: right });
+      }
+
+      if (relItems.length) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128257;</span>Relations</div>' +
+          '<div class="gs-relations">';
+        relItems.forEach(function (r) {
+          var arrowHtml = r.type === 'bi' ? '<span class="gs-arrow gs-arrow-bi">&#8596;</span>' :
+                          r.type === 'fwd' ? '<span class="gs-arrow gs-arrow-fwd">&#8594;</span>' :
+                                             '<span class="gs-arrow gs-arrow-rev">&#8592;</span>';
+          html += '<div class="gs-relation">' +
+            '<span class="gs-rel-node">' + escapeHtml(r.from) + '</span>' +
+            arrowHtml +
+            '<span class="gs-rel-node">' + escapeHtml(r.to) + '</span>' +
+          '</div>';
+        });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Diversity Statistics ───────────────────────────────────────────
+    var statsMatch = text.match(/<DiversityStatistics>([\s\S]*?)<\/DiversityStatistics>/i);
+    if (statsMatch && statsMatch[1].trim()) {
+      var statsText = statsMatch[1].trim();
+
+      // Known key-value patterns (ordered longest-first to avoid partial matches)
+      var kvKeys = [
+        'Entropy of top nodes distribution among clusters',
+        'Ratio of top nodes Influence / betweenness',
+        'Betweenness / influence per cluster',
+        'Ratio of top topical clusters',
+        'Modularity Score',
+        'Modularity',
+      ];
+      var kvShort = {
+        'Entropy of top nodes distribution among clusters': 'Entropy',
+        'Ratio of top nodes Influence / betweenness':       'Influence/betweenness',
+        'Betweenness / influence per cluster':              'Betweenness/cluster',
+        'Ratio of top topical clusters':                    'Topical clusters ratio',
+        'Modularity Score':                                 'Modularity score',
+        'Modularity':                                       'Modularity',
+      };
+      var kvValues = {};
+      var remaining = statsText;
+      kvKeys.forEach(function (k) {
+        var re = new RegExp(k.replace(/[/\\()]/g, '\\$&') + '\\s*:\\s*([\\w\\.\\-]+)', 'i');
+        var m = remaining.match(re);
+        if (m) { kvValues[k] = m[1]; remaining = remaining.replace(m[0], ' ').trim(); }
+      });
+
+      // Standalone badge statements (what's left after stripping kv pairs)
+      var badges = remaining.split(/\s{2,}|(?<=[a-z])(?=[A-Z])/)
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return s.length > 4 && !/^\d+$/.test(s); });
+
+      var hasAny = Object.keys(kvValues).length > 0 || badges.length > 0;
+      if (hasAny) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128202;</span>Graph Diversity</div>' +
+          '<div class="gs-stats-grid">';
+
+        kvKeys.forEach(function (k) {
+          if (kvValues[k] === undefined) return;
+          var valClass = '';
+          var numVal = parseFloat(kvValues[k]);
+          if (k === 'Modularity' && !isNaN(numVal)) {
+            valClass = numVal === 0 ? 'gs-val-warn' : numVal < 0.3 ? 'gs-val-warn' : 'gs-val-ok';
+          }
+          html += '<div class="gs-stat-item">' +
+            '<span class="gs-stat-key">' + escapeHtml(kvShort[k]) + '</span>' +
+            '<span class="gs-stat-val ' + valClass + '">' + escapeHtml(kvValues[k]) + '</span>' +
+          '</div>';
+        });
+
+        if (badges.length) {
+          html += '<div class="gs-stat-badges">';
+          badges.forEach(function (b) {
+            html += '<span class="gs-stat-badge">' + escapeHtml(b) + '</span>';
+          });
+          html += '</div>';
+        }
+
+        html += '</div></div>';
+      }
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  /**
    * Extract readable text from content_markdown that might be JSON chunks format.
    */
   function extractReadableText(raw) {
@@ -3850,10 +4054,11 @@
           html += '</div>';
         }
 
-        // ── BLOCK 2: Graph Summary ────────────────────────────────────────
+        // ── BLOCK 2: Knowledge Graph Summary (parsed & structured) ───────
         if (d.graphSummary) {
           html += '<div class="infra-section"><h4>Knowledge Graph Summary</h4>' +
-            '<div class="infra-entity-summary">' + escapeHtml(d.graphSummary) + '</div></div>';
+            renderGraphSummary(d.graphSummary) +
+          '</div>';
         }
 
         // ── BLOCK 3: Tags row — topics + related queries + demand topics ──
