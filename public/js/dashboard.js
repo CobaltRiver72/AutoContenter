@@ -4395,7 +4395,7 @@
 
     fetchApi('/api/drafts/' + draftId + '/ai-patch', {
       method: 'POST',
-      body: JSON.stringify({ html: html, instruction: instruction }),
+      body: { html: html, instruction: instruction },
     })
       .then(function (resp) {
         if (resp && resp.success && resp.html) {
