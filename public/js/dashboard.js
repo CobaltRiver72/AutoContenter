@@ -5126,10 +5126,11 @@
   // ─── InfraNodus Debug Panel ──────────────────────────────────────────────
 
   function initInfraDebugPanel() {
-    var btn     = $('editorInfraDebugBtn');
-    var panel   = $('editorInfraDebug');
-    var refresh = $('editorInfraRefreshBtn');
-    var close   = $('editorInfraCloseBtn');
+    var btn        = $('editorInfraDebugBtn');
+    var panel      = $('editorInfraDebug');
+    var refresh    = $('editorInfraRefreshBtn');
+    var close      = $('editorInfraCloseBtn');
+    var cacheClear = $('editorInfraCacheClearBtn');
 
     if (btn && panel) {
       btn.onclick = function () {
@@ -5140,6 +5141,37 @@
     }
     if (refresh) { refresh.onclick = renderInfraDebug; }
     if (close && panel) { close.onclick = function () { panel.style.display = 'none'; }; }
+    if (cacheClear) {
+      cacheClear.onclick = function () {
+        cacheClear.disabled = true;
+        cacheClear.textContent = 'Clearing...';
+        fetchApi('/api/infranodus/cache-clear', { method: 'POST' })
+          .then(function (data) {
+            showToast('Cache cleared (' + (data.clearedEntries || 0) + ' entries). Re-running analysis...', 'info');
+            cacheClear.disabled = false;
+            cacheClear.textContent = '&#128465; Clear Cache';
+            // Re-run analysis for current draft automatically
+            if (currentDraftId) {
+              var body = document.getElementById('infra-body-' + currentDraftId);
+              if (body) body.innerHTML = '<div class="infra-loading">&#128300; Re-running analysis...</div>';
+              fetchApi('/api/drafts/' + currentDraftId + '/analyze', { method: 'POST' })
+                .then(function () {
+                  loadInfraData(currentDraftId);
+                  renderInfraDebug();
+                })
+                .catch(function (err) {
+                  showToast('Re-analysis failed: ' + err.message, 'error');
+                  renderInfraDebug();
+                });
+            }
+          })
+          .catch(function (err) {
+            showToast('Cache clear failed: ' + err.message, 'error');
+            cacheClear.disabled = false;
+            cacheClear.textContent = '&#128465; Clear Cache';
+          });
+      };
+    }
   }
 
   function renderInfraDebug() {
@@ -5199,7 +5231,7 @@
         var topicCount = (infraData.mainTopics || []).length;
         var entityCount = (infraData.missingEntities || []).length;
         if (topicCount === 0 && entityCount === 0) {
-          issues.push({ type: 'warn', icon: '⚠', text: 'Analysis ran but returned 0 topics and 0 entities. The article may be too short, or the API key may have quota issues.' });
+          issues.push({ type: 'warn', icon: '⚠', text: 'Analysis returned 0 topics and 0 entities. Click "Clear Cache" to force a fresh re-analysis with the fixed dual-endpoint call (graphAndStatements + graphAndAdvice).' });
         } else {
           issues.push({ type: 'ok', icon: '✔', text: 'Analysis looks good — ' + topicCount + ' topics and ' + entityCount + ' entities will enrich the next rewrite.' });
         }

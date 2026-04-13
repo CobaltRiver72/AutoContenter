@@ -136,6 +136,9 @@ class InfranodusAnalyzer extends EventEmitter {
    * Endpoint #1: POST /api/v1/graphAndStatements
    * Lighter analysis (graph + topics + stats) without AI advice. Used by the
    * dashboard's "test connection" route and by getEntityClusters/getContentGaps.
+   *
+   * This is ALSO the source of aiTopics, stats.gaps, and graphSummary for
+   * enhanceArticle() — graphAndAdvice (#2) does NOT return aiTopics data.
    */
   async analyzeText(text, options) {
     if (!this.enabled || !this.ready) return null;
@@ -155,6 +158,7 @@ class InfranodusAnalyzer extends EventEmitter {
           compactGraph: true,
           includeGraphSummary: true,
           extendedGraphSummary: true,
+          gapDepth: 1, // one level deeper for richer entity bridge detection
         }
       );
     } catch (err) {
@@ -242,12 +246,18 @@ class InfranodusAnalyzer extends EventEmitter {
   /**
    * Main pipeline entry point (post-extraction B5 + pre-rewrite).
    *
-   * ONE call to graphAndAdvice returns everything we need:
-   *   - mainTopics, missingEntities, contentGaps, researchQuestions
-   *   - advice (from aiAdvice[0].text)
-   *   - graphSummary
+   * Runs TWO calls in parallel:
+   *   #1 graphAndStatements → aiTopics (mainTopics/contentGaps/researchQuestions)
+   *                           + stats.gaps (missingEntities/bridgeConcepts)
+   *                           + graphSummary
+   *   #2 graphAndAdvice     → aiAdvice[0].text (content strategy advice)
+   *
+   * NOTE: graphAndAdvice does NOT return aiTopics or stats — those only come
+   * from graphAndStatements. This was confirmed by observing advice=yes but
+   * topics=0 when using graphAndAdvice alone.
    *
    * Cached by sha256(text) for 30 min — same text within a session is free.
+   * Both calls share the same AbortSignal so cancellation is clean.
    */
   async enhanceArticle(articleText, options, signal) {
     if (!this.enabled || !this.ready) return null;
@@ -262,46 +272,64 @@ class InfranodusAnalyzer extends EventEmitter {
     }
 
     options = options || {};
+    var self = this;
 
     try {
-      var result = await this.analyzeWithAdvice(
-        text,
-        options.optimize || 'gaps',
-        signal
-      );
+      // Run both endpoints in parallel. Each failure is caught independently
+      // so a single endpoint error doesn't wipe out the other result.
+      var results = await Promise.all([
+        this.analyzeText(text, { aiTopics: true }).catch(function (e) {
+          self.logger.warn(MODULE, 'graphAndStatements failed: ' + e.message);
+          return null;
+        }),
+        this.analyzeWithAdvice(text, options.optimize || 'gaps', signal).catch(function (e) {
+          self.logger.warn(MODULE, 'graphAndAdvice failed: ' + e.message);
+          return null;
+        }),
+      ]);
 
-      if (!result) return null;
+      var stmtResult   = results[0]; // graphAndStatements  → topics + entities
+      var adviceResult = results[1]; // graphAndAdvice      → advice text
 
-      // ─── Defensive response parsing ─────────────────────────────────────
-      // graphAndAdvice may place fields at root OR nested in result.graph.
-      // We check both locations for every field we care about.
+      if (!stmtResult && !adviceResult) return null;
 
-      // 1) AI advice text — array form, NOT a flat .advice string
+      // ─── 1) AI advice — from graphAndAdvice only ───────────────────────
       var advice = null;
-      if (Array.isArray(result.aiAdvice) && result.aiAdvice.length > 0) {
-        var firstAdvice = result.aiAdvice[0];
+      if (adviceResult && Array.isArray(adviceResult.aiAdvice) && adviceResult.aiAdvice.length > 0) {
+        var firstAdvice = adviceResult.aiAdvice[0];
         if (firstAdvice && typeof firstAdvice.text === 'string' && firstAdvice.text.length > 0) {
           advice = firstAdvice.text.slice(0, 2000);
         }
       }
 
-      // 2) Graph summary — at root or nested in result.graph
+      // ─── 2) graphSummary — prefer stmtResult, fall back to adviceResult ─
       var graphSummary = null;
-      if (typeof result.graphSummary === 'string' && result.graphSummary.length > 0) {
-        graphSummary = result.graphSummary.slice(0, 1000);
-      } else if (result.graph && typeof result.graph.graphSummary === 'string' && result.graph.graphSummary.length > 0) {
-        graphSummary = result.graph.graphSummary.slice(0, 1000);
+      var summaryCandidate = stmtResult || adviceResult;
+      if (typeof summaryCandidate.graphSummary === 'string' && summaryCandidate.graphSummary.length > 0) {
+        graphSummary = summaryCandidate.graphSummary.slice(0, 1000);
+      } else if (summaryCandidate.graph && typeof summaryCandidate.graph.graphSummary === 'string' && summaryCandidate.graph.graphSummary.length > 0) {
+        graphSummary = summaryCandidate.graph.graphSummary.slice(0, 1000);
+      }
+      // If stmtResult had no summary, also check adviceResult
+      if (!graphSummary && stmtResult && adviceResult) {
+        if (typeof adviceResult.graphSummary === 'string' && adviceResult.graphSummary.length > 0) {
+          graphSummary = adviceResult.graphSummary.slice(0, 1000);
+        } else if (adviceResult.graph && typeof adviceResult.graph.graphSummary === 'string' && adviceResult.graph.graphSummary.length > 0) {
+          graphSummary = adviceResult.graph.graphSummary.slice(0, 1000);
+        }
       }
 
-      // 3) AI-extracted topics — at root or nested
-      var aiTopicsData = result.aiTopics || (result.graph && result.graph.aiTopics) || {};
+      // ─── 3) AI-extracted topics — from graphAndStatements only ────────
+      var aiTopicsData = {};
+      if (stmtResult) {
+        aiTopicsData = stmtResult.aiTopics || (stmtResult.graph && stmtResult.graph.aiTopics) || {};
+      }
       var mainTopics        = Array.isArray(aiTopicsData.mainTopics)        ? aiTopicsData.mainTopics.slice(0, 10)        : [];
       var contentGaps       = Array.isArray(aiTopicsData.contentGaps)       ? aiTopicsData.contentGaps.slice(0, 5)        : [];
       var researchQuestions = Array.isArray(aiTopicsData.researchQuestions) ? aiTopicsData.researchQuestions.slice(0, 3) : [];
 
-      // 4) Stats with bridge concepts (= entities the article mentions but
-      //    never connects) — at root or nested
-      var statsData = result.stats || (result.graph && result.graph.stats) || {};
+      // ─── 4) Bridge concepts = entities never connected in the graph ────
+      var statsData = stmtResult ? (stmtResult.stats || (stmtResult.graph && stmtResult.graph.stats) || {}) : {};
       var missingEntities = [];
       if (Array.isArray(statsData.gaps)) {
         for (var i = 0; i < statsData.gaps.length; i++) {
@@ -327,6 +355,14 @@ class InfranodusAnalyzer extends EventEmitter {
         analyzedAt:        new Date().toISOString(),
         charsSent:         text.length,
       };
+
+      this.logger.info(MODULE,
+        'enhanceArticle complete — topics:' + mainTopics.length +
+        ' entities:' + missingEntities.length +
+        ' gaps:' + contentGaps.length +
+        ' advice:' + (advice ? 'yes' : 'no') +
+        ' summary:' + (graphSummary ? 'yes' : 'no')
+      );
 
       this._setCache(cacheKey, enhancement);
       this.lastActivity = new Date().toISOString();
