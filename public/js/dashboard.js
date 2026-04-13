@@ -5152,17 +5152,28 @@
         sel.onchange = function () {
           var picked = parseInt(sel.value, 10);
           syncRestore();
-          if (!picked || picked === currentVersion) return;
+          if (!picked) return;
           // Preview the picked version inline (HTML editor + preview iframe)
+          sel.disabled = true;
+          if (currentTag) currentTag.textContent = 'loading v' + picked + '...';
           fetchApi('/api/drafts/' + draftId + '/versions/' + picked)
             .then(function (vr) {
-              if (!vr || !vr.success || !vr.version) return;
+              sel.disabled = false;
+              if (currentTag) currentTag.textContent = picked === currentVersion ? 'current: v' + currentVersion : 'viewing v' + picked + ' (current: v' + currentVersion + ')';
+              if (!vr || !vr.success || !vr.version) {
+                showToast('Version data not found', 'error');
+                return;
+              }
               var html = vr.version.rewritten_html || '';
               var htmlEd = $('html-code-editor');
               if (htmlEd) htmlEd.value = html;
               updatePreviewIframe(html);
             })
-            .catch(function () { /* ignore */ });
+            .catch(function (err) {
+              sel.disabled = false;
+              if (currentTag) currentTag.textContent = 'current: v' + currentVersion;
+              showToast('Failed to load version: ' + (err && err.message ? err.message : 'network error'), 'error');
+            });
         };
         syncRestore();
 
@@ -5222,7 +5233,6 @@
   function updatePreviewIframe(html) {
     var iframe = $('preview-iframe');
     if (!iframe) return;
-    var doc = iframe.contentDocument || iframe.contentWindow.document;
     // Wrap the rewritten HTML in a minimal CSS shell so the v2 structured
     // blocks (.hdf-in-brief, .hdf-body, .hdf-faqs) render attractively in
     // the preview iframe. WordPress themes style these on the live site.
@@ -5247,12 +5257,9 @@
       '.hdf-faq-item{margin:16px 0;padding:14px 16px;background:#fafafa;border-radius:6px}' +
       '.hdf-faq-item h3{margin:0 0 6px;font-size:15px;color:#222}' +
       '.hdf-faq-item p{margin:0;font-size:14px;color:#444}';
-    doc.open();
-    doc.write(
+    iframe.srcdoc =
       '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' + css + '</style></head><body>' +
-      html + '</body></html>'
-    );
-    doc.close();
+      html + '</body></html>';
   }
 
   // Click-to-expand compact previews (delegated)
