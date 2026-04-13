@@ -4017,6 +4017,7 @@
     $('tab-ai-output').style.display = '';
     $('tab-html-editor').style.display = 'none';
     $('tab-preview').style.display = 'none';
+    $('tab-infranodus').style.display = 'none';
   }
 
   function getStatusColor(status) {
@@ -4086,7 +4087,7 @@
     var contents = parent.querySelectorAll('.editor-tab-content');
     for (var j = 0; j < contents.length; j++) contents[j].style.display = 'none';
 
-    var tabMap = { source: 'tab-source', settings: 'tab-settings', 'ai-output': 'tab-ai-output', 'html-editor': 'tab-html-editor', preview: 'tab-preview' };
+    var tabMap = { source: 'tab-source', settings: 'tab-settings', 'ai-output': 'tab-ai-output', 'html-editor': 'tab-html-editor', preview: 'tab-preview', infranodus: 'tab-infranodus' };
     var target = $(tabMap[tab]);
     if (target) target.style.display = '';
 
