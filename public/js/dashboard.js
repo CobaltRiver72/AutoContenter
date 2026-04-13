@@ -2457,18 +2457,26 @@
     }
   }
 
+  var _publishInFlight = {};
   window.__publishReady = function (draftId) {
+    if (_publishInFlight[draftId]) return;
     if (!confirm('Publish this article to WordPress now?')) return;
+    _publishInFlight[draftId] = true;
     fetchApi('/api/drafts/' + draftId + '/publish', { method: 'POST' })
       .then(function (data) {
+        delete _publishInFlight[draftId];
         if (data.success) {
-          showToast('Published successfully!', 'success');
+          var msg = data.wasDeleted
+            ? 'WP post was deleted — re-published as new post!'
+            : 'Published successfully!';
+          showToast(msg, 'success');
           loadReady();
         } else {
           showToast('Publish failed: ' + (data.error || 'Unknown error'), 'error');
         }
       })
       .catch(function (err) {
+        delete _publishInFlight[draftId];
         showToast('Publish failed: ' + err.message, 'error');
       });
   };
@@ -3930,15 +3938,21 @@
       '</div>' +
       // Action row
       '<div class="imgpicker-actions">' +
-        '<button class="btn btn-xs btn-secondary" id="imgpicker-browse-btn">&#128247; Pick from Article</button>' +
+        '<button class="btn btn-xs btn-secondary" id="imgpicker-browse-btn">&#128247; Article Images</button>' +
+        (draft.cluster_id ? '<button class="btn btn-xs btn-secondary" id="imgpicker-cluster-btn">&#128196; Cluster Images</button>' : '') +
         (isPublished
           ? '<button class="btn btn-xs btn-primary" id="imgpicker-wp-btn">&#9650; Upload &amp; Set on WordPress</button>'
           : '<button class="btn btn-xs btn-secondary" id="imgpicker-wp-btn">&#9650; Upload to WordPress</button>') +
       '</div>' +
-      // Grid (hidden until browse is clicked)
+      // Article images grid (hidden until browse is clicked)
       '<div class="imgpicker-grid-wrap" id="imgpicker-grid-wrap" style="display:none;">' +
-        '<div class="imgpicker-grid-label">Images found in article — click to select</div>' +
+        '<div class="imgpicker-grid-label">Images from this article — click to select</div>' +
         '<div class="imgpicker-grid" id="imgpicker-grid"></div>' +
+      '</div>' +
+      // Cluster images grid (hidden until cluster btn is clicked)
+      '<div class="imgpicker-grid-wrap" id="imgpicker-cluster-wrap" style="display:none;">' +
+        '<div class="imgpicker-grid-label" id="imgpicker-cluster-label">Loading cluster images…</div>' +
+        '<div id="imgpicker-cluster-content"></div>' +
       '</div>' +
       // WP upload status
       '<div class="imgpicker-wp-status" id="imgpicker-wp-status" style="display:none;"></div>' +
@@ -3947,13 +3961,17 @@
   }
 
   function initImagePicker(draftId, draft) {
-    var browseBtn  = document.getElementById('imgpicker-browse-btn');
-    var wpBtn      = document.getElementById('imgpicker-wp-btn');
-    var setUrlBtn  = document.getElementById('imgpicker-set-url-btn');
-    var urlInput   = document.getElementById('editor-featured-input');
-    var gridWrap   = document.getElementById('imgpicker-grid-wrap');
-    var grid       = document.getElementById('imgpicker-grid');
-    var status     = document.getElementById('imgpicker-wp-status');
+    var browseBtn      = document.getElementById('imgpicker-browse-btn');
+    var clusterBtn     = document.getElementById('imgpicker-cluster-btn');
+    var wpBtn          = document.getElementById('imgpicker-wp-btn');
+    var setUrlBtn      = document.getElementById('imgpicker-set-url-btn');
+    var urlInput       = document.getElementById('editor-featured-input');
+    var gridWrap       = document.getElementById('imgpicker-grid-wrap');
+    var grid           = document.getElementById('imgpicker-grid');
+    var clusterWrap    = document.getElementById('imgpicker-cluster-wrap');
+    var clusterContent = document.getElementById('imgpicker-cluster-content');
+    var clusterLabel   = document.getElementById('imgpicker-cluster-label');
+    var status         = document.getElementById('imgpicker-wp-status');
 
     // Set URL button — save to DB + update preview
     if (setUrlBtn && urlInput) {
@@ -3967,15 +3985,38 @@
       });
     }
 
-    // Browse article images
+    // Helper: clicking a thumb in ANY grid selects the image
+    function wireGridClicks(container) {
+      container.addEventListener('click', function (e) {
+        var thumb = e.target.closest('.imgpicker-thumb');
+        if (!thumb) return;
+        var src = thumb.dataset.src;
+        if (!src) return;
+        // Remove active from all thumbs in all grids
+        document.querySelectorAll('.imgpicker-thumb').forEach(function (t) { t.classList.remove('active'); });
+        thumb.classList.add('active');
+        if (urlInput) urlInput.value = src;
+        updateImagePreview(src);
+        setSelectedImage(draftId, src);
+      });
+    }
+
+    // Browse article images (from draft's own extracted/rewritten content)
     if (browseBtn && grid && gridWrap) {
       browseBtn.addEventListener('click', function () {
         var isOpen = gridWrap.style.display !== 'none';
-        if (isOpen) { gridWrap.style.display = 'none'; browseBtn.textContent = '🖼 Pick from Article'; return; }
-        // Populate grid
+        if (isOpen) {
+          gridWrap.style.display = 'none';
+          browseBtn.innerHTML = '&#128247; Article Images';
+          return;
+        }
+        // Close cluster grid if open
+        if (clusterWrap) clusterWrap.style.display = 'none';
+        if (clusterBtn) clusterBtn.innerHTML = '&#128196; Cluster Images';
+
         var images = extractImagesFromDraft(draft);
         if (!images.length) {
-          grid.innerHTML = '<p style="color:var(--text-muted);font-size:12px;padding:8px;">No images found in article content.</p>';
+          grid.innerHTML = '<p class="imgpicker-cluster-empty">No images found in article content.</p>';
         } else {
           var currentUrl = (urlInput && urlInput.value.trim()) || draft.featured_image || '';
           grid.innerHTML = images.map(function (src) {
@@ -3984,23 +4025,74 @@
               '<img src="' + escapeHtml(src) + '" loading="lazy" alt="" />' +
             '</div>';
           }).join('');
-          // Click on thumb selects it
-          grid.addEventListener('click', function (e) {
-            var thumb = e.target.closest('.imgpicker-thumb');
-            if (!thumb) return;
-            var src = thumb.dataset.src;
-            if (!src) return;
-            // Update active state
-            grid.querySelectorAll('.imgpicker-thumb').forEach(function (t) { t.classList.remove('active'); });
-            thumb.classList.add('active');
-            // Update URL input + preview + save
-            if (urlInput) urlInput.value = src;
-            updateImagePreview(src);
-            setSelectedImage(draftId, src);
-          });
+          wireGridClicks(grid);
         }
         gridWrap.style.display = '';
-        browseBtn.textContent = '✕ Close';
+        browseBtn.innerHTML = '&#10005; Close';
+      });
+    }
+
+    // Cluster images button — fetches images from ALL articles in the cluster
+    if (clusterBtn && clusterWrap && clusterContent) {
+      var _clusterLoaded = false;
+      clusterBtn.addEventListener('click', function () {
+        var isOpen = clusterWrap.style.display !== 'none';
+        if (isOpen) {
+          clusterWrap.style.display = 'none';
+          clusterBtn.innerHTML = '&#128196; Cluster Images';
+          return;
+        }
+        // Close article grid if open
+        if (gridWrap) gridWrap.style.display = 'none';
+        if (browseBtn) browseBtn.innerHTML = '&#128247; Article Images';
+
+        clusterWrap.style.display = '';
+        clusterBtn.innerHTML = '&#10005; Close Cluster';
+
+        if (_clusterLoaded) return; // already fetched, just show cached result
+        if (clusterLabel) clusterLabel.textContent = 'Loading images from cluster articles…';
+        clusterContent.innerHTML = '';
+
+        fetchApi('/api/drafts/' + draftId + '/cluster-images')
+          .then(function (resp) {
+            _clusterLoaded = true;
+            if (!resp || !resp.success) {
+              clusterContent.innerHTML = '<p class="imgpicker-cluster-empty">Failed to load cluster images.</p>';
+              if (clusterLabel) clusterLabel.textContent = 'Cluster images';
+              return;
+            }
+            var groups = resp.groups || [];
+            if (!groups.length) {
+              clusterContent.innerHTML = '<p class="imgpicker-cluster-empty">No images found in cluster articles.</p>';
+              if (clusterLabel) clusterLabel.textContent = 'Cluster images (0)';
+              return;
+            }
+            if (clusterLabel) clusterLabel.textContent = resp.total + ' image' + (resp.total !== 1 ? 's' : '') + ' across ' + resp.clusterArticleCount + ' articles — click to select';
+
+            var currentUrl = (urlInput && urlInput.value.trim()) || draft.featured_image || '';
+            var html = '';
+            groups.forEach(function (group) {
+              html += '<div class="imgpicker-cluster-source">' +
+                '<span class="src-domain">' + escapeHtml(group.domain) + '</span>' +
+                '<span>— ' + escapeHtml(group.title) + '</span>' +
+              '</div>' +
+              '<div class="imgpicker-grid">' +
+              group.images.map(function (src) {
+                var active = src === currentUrl ? ' active' : '';
+                return '<div class="imgpicker-thumb' + active + '" data-src="' + escapeHtml(src) + '">' +
+                  '<img src="' + escapeHtml(src) + '" loading="lazy" alt="" />' +
+                '</div>';
+              }).join('') +
+              '</div>';
+            });
+            clusterContent.innerHTML = html;
+            wireGridClicks(clusterContent);
+          })
+          .catch(function (err) {
+            _clusterLoaded = false; // allow retry
+            clusterContent.innerHTML = '<p class="imgpicker-cluster-empty">Error: ' + (err.message || 'network error') + '</p>';
+            if (clusterLabel) clusterLabel.textContent = 'Cluster images';
+          });
       });
     }
 
@@ -5491,13 +5583,27 @@
 
     var publishBtn = $('editorPublishBtn');
     if (publishBtn) {
+      // Set initial label based on whether draft is already on WP
+      if (currentDraft && currentDraft.wp_post_id) {
+        publishBtn.innerHTML = '&#8635; Update on WP';
+      } else {
+        publishBtn.innerHTML = '&#128640; Publish';
+      }
+
       publishBtn.onclick = function () {
+        if (publishBtn.disabled) return;
         if (!currentDraftId) return;
         var platform = $('setting-platform').value;
         var html = $('html-code-editor').value;
         if (!html) { showToast('No HTML content to publish', 'error'); return; }
-        if (!confirm('Publish this draft to ' + platform + '?')) return;
+        var isUpdate = !!(currentDraft && currentDraft.wp_post_id);
+        var confirmMsg = isUpdate
+          ? 'Update the existing WordPress post with new content?'
+          : 'Publish this draft to ' + platform + '?';
+        if (!confirm(confirmMsg)) return;
 
+        publishBtn.disabled = true;
+        publishBtn.textContent = isUpdate ? 'Updating...' : 'Publishing...';
         $('editor-status').textContent = 'PUBLISHING...';
         $('editor-status').style.background = '#f59e0b';
 
@@ -5509,18 +5615,24 @@
           body: { platform: platform, html: html }
         })
           .then(function (data) {
+            publishBtn.disabled = false;
             if (data.success) {
               $('editor-status').textContent = 'PUBLISHED';
               $('editor-status').style.background = '#22c55e';
-              showToast('Published!' + (data.url ? ' URL: ' + data.url : ''), 'success');
-              // Hide error log on success
+              publishBtn.innerHTML = '&#8635; Update on WP';
+              // Update currentDraft so next click shows correct label
+              if (currentDraft) currentDraft.wp_post_id = data.wpPostId || currentDraft.wp_post_id;
+              var msg = data.wasDeleted
+                ? 'WP post was deleted — re-published as new post!' + (data.url ? ' ' + data.url : '')
+                : (data.isUpdate ? 'Updated on WordPress!' : 'Published!') + (data.url ? ' ' + data.url : '');
+              showToast(msg, 'success');
               var logPanel = $('editorWpLog');
               if (logPanel) logPanel.style.display = 'none';
             } else {
+              publishBtn.innerHTML = isUpdate ? '&#8635; Update on WP' : '&#128640; Publish';
               showToast('Publish failed: ' + (data.error || 'Unknown'), 'error');
               $('editor-status').textContent = 'READY';
               $('editor-status').style.background = '#22c55e';
-              // Auto-show WP error log on failure
               var logPanel = $('editorWpLog');
               if (logPanel) {
                 logPanel.style.display = '';
@@ -5529,10 +5641,11 @@
             }
           })
           .catch(function (err) {
+            publishBtn.disabled = false;
+            publishBtn.innerHTML = isUpdate ? '&#8635; Update on WP' : '&#128640; Publish';
             showToast('Publish error: ' + err.message, 'error');
             $('editor-status').textContent = 'READY';
             $('editor-status').style.background = '#22c55e';
-            // Auto-show WP error log on network error
             var logPanel = $('editorWpLog');
             if (logPanel) {
               logPanel.style.display = '';

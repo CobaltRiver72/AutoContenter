@@ -3197,6 +3197,77 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/drafts/:id/cluster-images ─────────────────────────────────
+  // Returns all images found across every source article in the draft's cluster,
+  // grouped by article so the admin can pick from any of them.
+  router.get('/drafts/:id/cluster-images', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
+
+      var draft = db.prepare('SELECT id, cluster_id, featured_image FROM drafts WHERE id = ?').get(id);
+      if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+      if (!draft.cluster_id) return res.json({ success: true, groups: [], total: 0, message: 'Draft has no cluster' });
+
+      var articles = db.prepare(
+        'SELECT id, title, domain, url, extracted_content, content_markdown ' +
+        'FROM articles WHERE cluster_id = ? ORDER BY authority_tier ASC, received_at DESC'
+      ).all(draft.cluster_id);
+
+      var seen = {};
+      // Pre-seed with existing featured_image so it won't duplicate
+      if (draft.featured_image) seen[draft.featured_image] = true;
+
+      var groups = [];
+      var totalImages = 0;
+
+      articles.forEach(function (article) {
+        var imgs = [];
+
+        // Extract from HTML extracted_content
+        if (article.extracted_content) {
+          var reHtml = /<img[^>]+src=["']([^"']+)["']/gi;
+          var m;
+          while ((m = reHtml.exec(article.extracted_content)) !== null) {
+            var u = m[1];
+            if (u && u.match(/^https?:\/\//) && !seen[u]) {
+              seen[u] = true;
+              imgs.push(u);
+            }
+          }
+        }
+
+        // Extract from markdown: ![alt](url)
+        if (article.content_markdown) {
+          var reMd = /!\[.*?\]\((https?:\/\/[^)\s]+)\)/g;
+          var mMd;
+          while ((mMd = reMd.exec(article.content_markdown)) !== null) {
+            if (!seen[mMd[1]]) {
+              seen[mMd[1]] = true;
+              imgs.push(mMd[1]);
+            }
+          }
+        }
+
+        if (imgs.length > 0) {
+          groups.push({
+            articleId: article.id,
+            domain: article.domain || '',
+            title: (article.title || article.domain || 'Article').slice(0, 80),
+            url: article.url || '',
+            images: imgs,
+          });
+          totalImages += imgs.length;
+        }
+      });
+
+      return res.json({ success: true, groups: groups, total: totalImages, clusterArticleCount: articles.length });
+    } catch (err) {
+      logger.error('api', 'GET /drafts/' + req.params.id + '/cluster-images: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to extract cluster images' });
+    }
+  });
+
   // ─── POST /api/drafts/:id/update-wp-image ────────────────────────────────
   // Upload a new featured image to WordPress and update featured_media on the
   // existing post. Works whether the post is already published or not.
@@ -4103,7 +4174,7 @@ function createApiRouter(deps) {
               .then(function (result) { return { wpPostId: result.wpPostId, wpPostUrl: result.wpPostUrl, wpImageId: result.wpImageId || null, isUpdate: false }; });
           }
 
-          publishPromise.then(function (result) {
+          function _savePublishResult(result, wasDeleted) {
             publishUrl = result.wpPostUrl || '';
             db.prepare(
               "UPDATE drafts SET status = 'published', wp_post_id = ?, wp_post_url = ?, " +
@@ -4116,10 +4187,33 @@ function createApiRouter(deps) {
             if (draft.cluster_id) {
               try { db.prepare("UPDATE clusters SET status = 'published', published_at = datetime('now') WHERE id = ?").run(draft.cluster_id); } catch (e) { /* ignore */ }
             }
-            var action = result.isUpdate ? 'updated' : 'published';
-            logger.info('api', 'Draft ' + id + ' ' + action + ' to WordPress: ' + publishUrl + (result.wpImageId ? ' (image: ' + result.wpImageId + ')' : ''));
-            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null, isUpdate: result.isUpdate });
+            var action = wasDeleted ? 're-published (old post was deleted)' : (result.isUpdate ? 'updated' : 'published');
+            logger.info('api', 'Draft ' + id + ' ' + action + ' to WordPress: ' + publishUrl);
+            res.json({ success: true, url: publishUrl, wpPostId: result.wpPostId, wpMediaId: result.wpImageId || null, isUpdate: result.isUpdate, wasDeleted: wasDeleted || false });
+          }
+
+          publishPromise.then(function (result) {
+            _savePublishResult(result, false);
           }).catch(function (err) {
+            // If we were trying to UPDATE and WP returned 404, the post was deleted.
+            // Auto-fallback: clear stale wp_post_id and create a brand-new post.
+            var is404 = existingWpPostId && err.wpErrors &&
+              err.wpErrors.some(function (e) { return e.status === 404; });
+            if (is404) {
+              logger.info('api', 'Draft ' + id + ': WP post ' + existingWpPostId + ' returned 404 (deleted/trashed) — re-publishing as new post');
+              try { db.prepare('UPDATE drafts SET wp_post_id = NULL, wp_post_url = NULL WHERE id = ?').run(id); } catch (e) { /* ignore */ }
+              return publisherMod.publish(rewrittenArticle, draftCluster, db)
+                .then(function (freshResult) {
+                  _savePublishResult({ wpPostId: freshResult.wpPostId, wpPostUrl: freshResult.wpPostUrl, wpImageId: freshResult.wpImageId || null, isUpdate: false }, true);
+                })
+                .catch(function (err2) {
+                  var safe2 = sanitizeAxiosError(err2);
+                  var msg2 = 'WP re-publish (after 404 on post ' + existingWpPostId + ') failed: ' + (safe2.message || 'Unknown');
+                  logger.error('api', msg2);
+                  try { db.prepare("INSERT INTO logs (level, module, message, created_at) VALUES ('error', 'publisher', ?, datetime('now'))").run(msg2); } catch (le) { /* ignore */ }
+                  res.status(500).json({ success: false, error: 'The WordPress post was deleted. Re-publish attempt failed: ' + (safe2.message || 'Unknown') });
+                });
+            }
             var safeWp3 = sanitizeAxiosError(err);
             var statusCode = safeWp3.status;
             var wpError = safeWp3.data || '';
