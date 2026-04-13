@@ -1700,8 +1700,18 @@ select:focus {
   height: 100%;
   background: #0f1117;
   z-index: 1000;
-  display: flex;
+  display: none;
   flex-direction: column;
+}
+.editor-version-bar {
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  font-size: 12px;
+  color: #aaa;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .editor-container {
   display: flex;
