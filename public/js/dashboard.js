@@ -2973,7 +2973,7 @@
     var rawContent = draft.extracted_content || draft.source_content_markdown || '';
     var contentPreview = extractReadableText(rawContent).substring(0, isPrimary ? 800 : 400);
 
-    var extractedChars = (draft.extracted_content || '').length;
+    var extractedChars = draft.extracted_chars != null ? draft.extracted_chars : (draft.extracted_content || '').length;
     var extractInfo = '';
     if (draft.extraction_status === 'success' || draft.extraction_status === 'cached') {
       extractInfo = '<span class="compact-meta-tag tag-success">&#9989; ' + formatCharCount(extractedChars) + '</span>';
@@ -3135,7 +3135,7 @@
           '<span class="domain-badge">' + escapeHtml(draft.source_domain || '--') + '</span>' +
           (draft.source_language ? '<span class="domain-badge">' + escapeHtml(draft.source_language.toUpperCase()) + '</span>' : '') +
           (draft.target_keyword ? '<span class="domain-badge" style="color:var(--green)">&#127919; ' + escapeHtml(draft.target_keyword) + '</span>' : '') +
-          (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + formatCharCount((draft.extracted_content || '').length) + '</span>' : '') +
+          (draft.extraction_status === 'success' ? '<span style="color:var(--green);font-size:11px">&#9989; ' + formatCharCount(draft.extracted_chars != null ? draft.extracted_chars : (draft.extracted_content || '').length) + '</span>' : '') +
           (draft.extraction_status === 'failed' ? '<span style="color:var(--red);font-size:11px">&#10060; Extract failed</span>' : '') +
           (draft.ai_model_used ? '<span class="ai-badge">' + escapeHtml(draft.ai_model_used.replace('claude-', '').replace('gpt-', 'GPT-').split('-20')[0]) + '</span>' : '') +
         '</div>' +
@@ -3550,7 +3550,7 @@
                 var sdContent = extractReadableText(sd.extracted_content || sd.source_content_markdown || '');
                 var sdStatusColor = sd.extraction_status === 'success' ? 'var(--green)' :
                                     sd.extraction_status === 'failed' ? 'var(--red)' : 'var(--text-muted)';
-                var sdChars = (sd.extracted_content || '').length;
+                var sdChars = sd.extracted_chars != null ? sd.extracted_chars : (sd.extracted_content || '').length;
 
                 html +=
                   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;background:var(--bg-card)">' +

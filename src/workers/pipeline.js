@@ -123,6 +123,28 @@ class Pipeline {
           this.logger.info(MODULE, 'Extracted #' + draft.id + ' -> ' +
             updated.extraction_status + ' (' + (updated.extracted_content || '').length + ' chars)');
 
+          // ─── B5: Auto InfraNodus analysis after successful extraction ────────
+          // Runs before synthetic cluster creation so infranodus_data is ready
+          // before the rewrite worker picks up the draft.
+          if (this.infranodus && this.infranodus.enabled) {
+            var inoExtractOk = updated.extraction_status === 'success'
+              || updated.extraction_status === 'cached'
+              || updated.extraction_status === 'fallback';
+            if (inoExtractOk && updated.extracted_content && updated.extracted_content.length >= 200) {
+              try {
+                var infraData = await this.infranodus.enhanceArticle(updated.extracted_content.slice(0, 5000));
+                if (infraData) {
+                  this.db.prepare('UPDATE drafts SET infranodus_data = ?, updated_at = datetime(\'now\') WHERE id = ?')
+                    .run(JSON.stringify(infraData), draft.id);
+                  this.logger.info(MODULE, 'InfraNodus analysis complete for draft #' + draft.id);
+                }
+              } catch (infraErr) {
+                this.logger.warn(MODULE, 'InfraNodus analysis skipped for draft #' + draft.id + ': ' + infraErr.message);
+              }
+            }
+          }
+          // ─── END B5 ──────────────────────────────────────────────────────────
+
           // ─── MANUAL IMPORT: Create synthetic cluster so rewrite + publish pipeline handles it ───
           if (updated.mode === 'manual_import') {
             var extractionOk = updated.extraction_status === 'success'
