@@ -3608,6 +3608,19 @@
               '<div class="infra-body" id="infra-body-' + draftId + '">' +
                 '<div class="infra-loading">Fetching analysis...</div>' +
               '</div>' +
+            '</div>' +
+            // ─── Entity Search Box ───────────────────────────────
+            '<div class="infra-entity-search-box">' +
+              '<div class="infra-entity-search-header">' +
+                '<span class="infra-icon">&#128269;</span>' +
+                '<span>Entity Deep Search</span>' +
+                '<span class="infra-entity-search-hint">Type a word or phrase and fetch all InfraNodus data for it</span>' +
+              '</div>' +
+              '<div class="infra-entity-search-row">' +
+                '<input type="text" id="infra-entity-input-' + draftId + '" class="infra-entity-input" placeholder="e.g. climate change, bitcoin, Modi..." maxlength="200" />' +
+                '<button class="btn btn-sm btn-infra-fetch" id="infra-entity-fetch-btn-' + draftId + '" data-click="searchEntityInfra" data-draft-id="' + draftId + '">Fetch</button>' +
+              '</div>' +
+              '<div class="infra-entity-results" id="infra-entity-results-' + draftId + '"></div>' +
             '</div>';
         }
         loadInfraData(draftId);
@@ -3780,6 +3793,104 @@
       });
   }
 
+  function searchEntityInfra(draftId) {
+    var input = document.getElementById('infra-entity-input-' + draftId);
+    var results = document.getElementById('infra-entity-results-' + draftId);
+    var btn = document.getElementById('infra-entity-fetch-btn-' + draftId);
+    if (!input || !results) return;
+
+    var entity = input.value.trim();
+    if (!entity) {
+      results.innerHTML = '<p class="infra-entity-error">Please enter a word or phrase to search.</p>';
+      return;
+    }
+
+    results.innerHTML = '<div class="infra-loading">&#128269; Searching InfraNodus for <strong>' + escapeHtml(entity) + '</strong>...</div>';
+    if (btn) { btn.disabled = true; btn.textContent = 'Fetching...'; }
+
+    fetchApi('/api/infranodus/entity-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity: entity }),
+    })
+      .then(function (resp) {
+        if (!resp.success || !resp.data) {
+          results.innerHTML = '<p class="infra-entity-error">' + escapeHtml((resp && resp.error) || 'No data returned') + '</p>';
+          return;
+        }
+        var d = resp.data;
+        var html = '<div class="infra-entity-result-header">Results for: <strong>' + escapeHtml(d.entity) + '</strong></div>';
+
+        if (d.advice) {
+          html += '<div class="infra-section"><h4>AI Advice (from Google results)</h4>' +
+            '<div class="infra-entity-advice">' + escapeHtml(d.advice) + '</div></div>';
+        }
+
+        if (d.graphSummary) {
+          html += '<div class="infra-section"><h4>Graph Summary</h4>' +
+            '<div class="infra-entity-summary">' + escapeHtml(d.graphSummary) + '</div></div>';
+        }
+
+        if (d.mainTopics && d.mainTopics.length) {
+          html += '<div class="infra-section"><h4>Main Topics</h4><div class="infra-tags">';
+          d.mainTopics.forEach(function (t) {
+            html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>';
+          });
+          html += '</div></div>';
+        }
+
+        if (d.relatedQueries && d.relatedQueries.length) {
+          html += '<div class="infra-section"><h4>Related Search Queries</h4><div class="infra-tags">';
+          d.relatedQueries.forEach(function (q) {
+            html += '<span class="infra-tag infra-tag-query">' + escapeHtml(q) + '</span>';
+          });
+          html += '</div></div>';
+        }
+
+        if (d.missingEntities && d.missingEntities.length) {
+          html += '<div class="infra-section"><h4>Bridge Concepts (Missing Entities)</h4><div class="infra-tags">';
+          d.missingEntities.forEach(function (e) {
+            html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>';
+          });
+          html += '</div></div>';
+        }
+
+        if (d.contentGaps && d.contentGaps.length) {
+          html += '<div class="infra-section"><h4>Content Gaps</h4><ul class="infra-gaps">';
+          d.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+          html += '</ul></div>';
+        }
+
+        if (d.researchQuestions && d.researchQuestions.length) {
+          html += '<div class="infra-section"><h4>Research Questions</h4><ul class="infra-questions">';
+          d.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
+          html += '</ul></div>';
+        }
+
+        if (!d.advice && !d.mainTopics.length && !d.relatedQueries.length) {
+          html += '<p class="infra-empty">No meaningful data returned. Try a broader search term.</p>';
+        }
+
+        html += '<div class="infra-entity-meta">Analyzed at: ' + escapeHtml(d.analyzedAt || '') + '</div>';
+        results.innerHTML = html;
+      })
+      .catch(function (err) {
+        results.innerHTML = '<p class="infra-entity-error">Search failed: ' + escapeHtml(err.message || String(err)) + '</p>';
+      })
+      .finally(function () {
+        if (btn) { btn.disabled = false; btn.textContent = 'Fetch'; }
+      });
+  }
+
+  // Wire up Enter key on entity search inputs (delegated — runs after editor opens)
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    var el = e.target;
+    if (!el || !el.classList.contains('infra-entity-input')) return;
+    var id = el.id.replace('infra-entity-input-', '');
+    if (id) searchEntityInfra(id);
+  });
+
   window.__switchToInfraTab = function () {
     var btn = document.querySelector('.editor-tab[data-panel="right"][data-tab="infranodus"]');
     if (btn) btn.click();
@@ -3788,6 +3899,7 @@
   window.__loadInfraData = loadInfraData;
   window.__toggleInfraPanel = toggleInfraPanel;
   window.__runInfraAnalysis = runInfraAnalysis;
+  window.__searchEntityInfra = searchEntityInfra;
 
   // ─── Batch Action Bar (Manual Cluster from Feed / Drafts) ─────────
   function _getBatchSelectionCount() {
@@ -5824,6 +5936,7 @@
     'downloadDraftHTML':       function (el) { __downloadDraftHTML(Number(el.dataset.draftId)); },
     'toggleDraftSelect':       function (el, e) { __toggleDraftSelect(Number(el.dataset.draftId), e); },
     'runInfraAnalysis':        function (el) { __runInfraAnalysis(Number(el.dataset.draftId)); },
+    'searchEntityInfra':       function (el) { __searchEntityInfra(String(el.dataset.draftId)); },
     'switchToInfraTab':        function () { __switchToInfraTab(); },
     'toggleSelectMode':        function () { __toggleSelectMode(); },
     'batchDeleteFailed':       function () { __batchDeleteFailed(); },
