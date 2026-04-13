@@ -601,13 +601,10 @@ function createApiRouter(deps) {
       return res.status(400).json({ error: 'Not enough valid drafts found' });
     }
 
+    // Note drafts already in clusters — we'll move them rather than reject.
+    // Collect old cluster IDs for cleanup after the new cluster is created.
     const alreadyClustered = drafts.filter(d => d.cluster_id);
-    if (alreadyClustered.length > 0) {
-      return res.status(400).json({
-        error: `${alreadyClustered.length} draft(s) already belong to a cluster. Remove them first.`,
-        clusteredIds: alreadyClustered.map(d => d.id)
-      });
-    }
+    const oldClusterIds = [...new Set(alreadyClustered.map(d => d.cluster_id).filter(Boolean))];
 
     // Refuse to merge drafts that are actively locked by a worker — the worker
     // would otherwise complete its rewrite against a draft that has moved into
@@ -659,20 +656,32 @@ function createApiRouter(deps) {
         updateDraft.run(clusterId, 'secondary', draftIds[i]);
       }
 
+      // Clean up old clusters whose drafts have all been moved.
+      // Mark them 'skipped' rather than deleting so history is preserved.
+      for (const oldId of oldClusterIds) {
+        const remaining = db.prepare('SELECT COUNT(*) as c FROM drafts WHERE cluster_id = ?').get(oldId);
+        if (remaining && remaining.c === 0) {
+          db.prepare("UPDATE clusters SET status = 'skipped', updated_at = datetime('now') WHERE id = ?").run(oldId);
+          logger.info('api', 'Cluster #' + oldId + ' marked skipped — all drafts moved to new cluster #' + clusterId);
+        }
+      }
+
       return clusterId;
     });
 
     try {
       const clusterId = createCluster();
+      const movedCount = alreadyClustered.length;
       res.json({
         success: true,
         clusterId,
         topic: clusterTopic,
         draftCount: drafts.length,
         primaryDraftId: draftIds[0],
-        message: `Manual cluster created from ${drafts.length} drafts. ` +
-          `Drafts with content reset to 'draft' status; drafts without content reset to 'fetching'. ` +
-          `Pipeline will rewrite with multi-source context.`
+        movedFromClusters: movedCount,
+        message: `Manual cluster created from ${drafts.length} drafts.` +
+          (movedCount ? ` ${movedCount} draft(s) moved from existing clusters.` : '') +
+          ` Pipeline will rewrite with multi-source context.`
       });
     } catch (err) {
       logger.error('api', 'POST /clusters/manual-from-drafts failed: ' + err.message);
