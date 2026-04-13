@@ -478,6 +478,7 @@
       editorOverlay.style.display = 'none';
       currentDraftId = null;
       currentDraft = null;
+      try { sessionStorage.removeItem('hdf_editor'); } catch (e) {}
     }
 
     // Close SSE connection when leaving feed page
@@ -533,6 +534,20 @@
   function initRouter() {
     var hash = window.location.hash.slice(1) || 'overview';
     navigateTo(hash);
+
+    // Restore editor state after refresh
+    try {
+      var saved = sessionStorage.getItem('hdf_editor');
+      if (saved) {
+        var editorState = JSON.parse(saved);
+        if (editorState && editorState.draftId) {
+          // Small delay so the page data loads first, then reopen editor
+          setTimeout(function () {
+            openEditor(editorState.draftId);
+          }, 400);
+        }
+      }
+    } catch (e) {}
 
     // Handle browser back/forward
     window.addEventListener('hashchange', function () {
@@ -3666,6 +3681,10 @@
 
   function openEditor(draftId) {
     currentDraftId = draftId;
+    // Persist so refresh reopens the same editor
+    try {
+      sessionStorage.setItem('hdf_editor', JSON.stringify({ draftId: draftId, page: state.currentPage }));
+    } catch (e) {}
 
     fetchApi('/api/drafts/' + draftId)
       .then(function (data) {
@@ -3890,6 +3909,8 @@
     if (panels) panels.classList.remove('aiedit-fullview');
     var expandBtn = document.getElementById('aiedit-expand-btn');
     if (expandBtn) { expandBtn.classList.remove('active'); expandBtn.innerHTML = '&#x26F6; Full View'; }
+    // Clear persisted editor state
+    try { sessionStorage.removeItem('hdf_editor'); } catch (e) {}
     $('editor-overlay').style.display = 'none';
     currentDraftId = null;
     currentDraft = null;
