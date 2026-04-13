@@ -3885,6 +3885,11 @@
   }
 
   function closeEditor() {
+    // Exit full view mode before closing
+    var panels = document.querySelector('.editor-panels');
+    if (panels) panels.classList.remove('aiedit-fullview');
+    var expandBtn = document.getElementById('aiedit-expand-btn');
+    if (expandBtn) { expandBtn.classList.remove('active'); expandBtn.innerHTML = '&#x26F6; Full View'; }
     $('editor-overlay').style.display = 'none';
     currentDraftId = null;
     currentDraft = null;
@@ -4320,9 +4325,10 @@
     // Guard: only wire listeners once per DOM element lifetime
     if (loadBtn && loadBtn.dataset.init) return;
 
-    var saveBtn  = document.getElementById('aiedit-save-btn');
-    var patchBtn = document.getElementById('aiedit-patch-btn');
-    var checkBtn = document.getElementById('aiedit-check-btn');
+    var saveBtn    = document.getElementById('aiedit-save-btn');
+    var expandBtn  = document.getElementById('aiedit-expand-btn');
+    var patchBtn   = document.getElementById('aiedit-patch-btn');
+    var checkBtn   = document.getElementById('aiedit-check-btn');
     var instrInput = document.getElementById('aiedit-instruction');
 
     if (loadBtn) { loadBtn.dataset.init = '1';
@@ -4371,6 +4377,16 @@
     if (checkBtn) {
       checkBtn.addEventListener('click', function () {
         checkEntityCoverage();
+      });
+    }
+
+    if (expandBtn) {
+      expandBtn.addEventListener('click', function () {
+        var panels = document.querySelector('.editor-panels');
+        if (!panels) return;
+        var isExpanded = panels.classList.toggle('aiedit-fullview');
+        expandBtn.classList.toggle('active', isExpanded);
+        expandBtn.innerHTML = isExpanded ? '&#x2715; Exit Full View' : '&#x26F6; Full View';
       });
     }
   }
@@ -4955,6 +4971,16 @@
 
     if (tab === 'preview') {
       updatePreviewIframe($('html-code-editor').value);
+    }
+
+    // Exit full view when switching away from AI Edit tab
+    if (tab !== 'ai-edit') {
+      var panels = document.querySelector('.editor-panels');
+      if (panels && panels.classList.contains('aiedit-fullview')) {
+        panels.classList.remove('aiedit-fullview');
+        var expandBtn = document.getElementById('aiedit-expand-btn');
+        if (expandBtn) { expandBtn.classList.remove('active'); expandBtn.innerHTML = '&#x26F6; Full View'; }
+      }
     }
   });
 

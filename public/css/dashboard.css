@@ -3763,3 +3763,26 @@ select:focus {
   vertical-align: middle;
   margin-right: 5px;
 }
+
+/* ─── AI Edit: Full-Width Expanded Mode ───────────────────────────────── */
+/* When .aiedit-fullview is on .editor-panels, hide the left panel and
+   expand the right panel to fill the whole editor width.               */
+.editor-panels.aiedit-fullview .editor-left {
+  display: none !important;
+}
+.editor-panels.aiedit-fullview .editor-right {
+  width: 100% !important;
+}
+/* In full view give the coverage column a fixed wider width */
+.editor-panels.aiedit-fullview .aiedit-editor-col {
+  flex: 0 0 65%;
+}
+.editor-panels.aiedit-fullview .aiedit-coverage-col {
+  flex: 0 0 35%;
+}
+/* Expand button active state */
+#aiedit-expand-btn.active {
+  background: #1e1e3a;
+  border-color: #a855f7;
+  color: #a855f7;
+}
