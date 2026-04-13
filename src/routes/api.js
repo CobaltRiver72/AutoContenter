@@ -3197,6 +3197,77 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── GET /api/drafts/:id/cluster-images ─────────────────────────────────
+  // Returns all images found across every source article in the draft's cluster,
+  // grouped by article so the admin can pick from any of them.
+  router.get('/drafts/:id/cluster-images', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
+
+      var draft = db.prepare('SELECT id, cluster_id, featured_image FROM drafts WHERE id = ?').get(id);
+      if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+      if (!draft.cluster_id) return res.json({ success: true, groups: [], total: 0, message: 'Draft has no cluster' });
+
+      var articles = db.prepare(
+        'SELECT id, title, domain, url, extracted_content, content_markdown ' +
+        'FROM articles WHERE cluster_id = ? ORDER BY authority_tier ASC, received_at DESC'
+      ).all(draft.cluster_id);
+
+      var seen = {};
+      // Pre-seed with existing featured_image so it won't duplicate
+      if (draft.featured_image) seen[draft.featured_image] = true;
+
+      var groups = [];
+      var totalImages = 0;
+
+      articles.forEach(function (article) {
+        var imgs = [];
+
+        // Extract from HTML extracted_content
+        if (article.extracted_content) {
+          var reHtml = /<img[^>]+src=["']([^"']+)["']/gi;
+          var m;
+          while ((m = reHtml.exec(article.extracted_content)) !== null) {
+            var u = m[1];
+            if (u && u.match(/^https?:\/\//) && !seen[u]) {
+              seen[u] = true;
+              imgs.push(u);
+            }
+          }
+        }
+
+        // Extract from markdown: ![alt](url)
+        if (article.content_markdown) {
+          var reMd = /!\[.*?\]\((https?:\/\/[^)\s]+)\)/g;
+          var mMd;
+          while ((mMd = reMd.exec(article.content_markdown)) !== null) {
+            if (!seen[mMd[1]]) {
+              seen[mMd[1]] = true;
+              imgs.push(mMd[1]);
+            }
+          }
+        }
+
+        if (imgs.length > 0) {
+          groups.push({
+            articleId: article.id,
+            domain: article.domain || '',
+            title: (article.title || article.domain || 'Article').slice(0, 80),
+            url: article.url || '',
+            images: imgs,
+          });
+          totalImages += imgs.length;
+        }
+      });
+
+      return res.json({ success: true, groups: groups, total: totalImages, clusterArticleCount: articles.length });
+    } catch (err) {
+      logger.error('api', 'GET /drafts/' + req.params.id + '/cluster-images: ' + err.message);
+      return res.status(500).json({ success: false, error: 'Failed to extract cluster images' });
+    }
+  });
+
   // ─── POST /api/drafts/:id/update-wp-image ────────────────────────────────
   // Upload a new featured image to WordPress and update featured_media on the
   // existing post. Works whether the post is already published or not.
