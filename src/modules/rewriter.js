@@ -191,13 +191,16 @@ function buildPrompt(article, cluster, settings) {
       'Use this trending momentum — weave the trend topic into the headline and opening paragraph.\n\n';
   }
 
-  // InfraNodus entity analysis — graph-derived topics, missing entities, gaps
-  // to fill, and research questions. Populated when the pipeline runs the
-  // cluster through the InfraNodus module before calling the rewriter.
+  // InfraNodus entity analysis — injected into the AI prompt so the rewriter
+  // knows the topical landscape, SEO gaps, and what readers actually want.
+  // This block is populated only when the user clicks "Rewrite with AI" or
+  // the pipeline pre-rewrite step runs — never on autopilot extraction.
   var entityContext = '';
   if (s.infraData) {
     var infra = s.infraData;
     entityContext = '--- ENTITY ANALYSIS (from InfraNodus) ---\n';
+
+    // ── Article text analysis (always present) ────────────────────────
     if (infra.mainTopics && infra.mainTopics.length) {
       entityContext += 'Main Topics: ' + infra.mainTopics.join(', ') + '\n';
     }
@@ -211,11 +214,38 @@ function buildPrompt(article, cluster, settings) {
       entityContext += 'Questions readers may have: ' + infra.researchQuestions.slice(0, 3).join('; ') + '\n';
     }
     if (infra.advice) {
-      entityContext += 'Content Strategy: ' + infra.advice + '\n';
+      entityContext += 'Content Strategy (article analysis): ' + infra.advice + '\n';
+    }
+    if (infra.bigrams && infra.bigrams.length) {
+      entityContext += 'Key concept pairs: ' + infra.bigrams.slice(0, 8).join(', ') + '\n';
     }
     if (infra.graphSummary) {
       entityContext += 'Entity Relationships: ' + infra.graphSummary + '\n';
     }
+
+    // ── SEO / keyword intelligence (present when target_keyword is set) ─
+    if (infra.targetKeyword) {
+      entityContext += '\n[SEO intelligence for keyword: "' + infra.targetKeyword + '"]\n';
+    }
+    if (infra.rankingAdvice) {
+      entityContext += 'What currently ranks (competitive landscape): ' + infra.rankingAdvice + '\n';
+    }
+    if (infra.intentAdvice) {
+      entityContext += 'What readers are searching for (intent): ' + infra.intentAdvice + '\n';
+    }
+    if (infra.gapAdvice) {
+      entityContext += 'SEO content gap opportunity (write about this): ' + infra.gapAdvice + '\n';
+    }
+    if (infra.relatedQueries && infra.relatedQueries.length) {
+      entityContext += 'Related searches to address: ' + infra.relatedQueries.slice(0, 8).join(', ') + '\n';
+    }
+    if (infra.demandTopics && infra.demandTopics.length) {
+      entityContext += 'High-demand underserved topics to include: ' + infra.demandTopics.slice(0, 6).join(', ') + '\n';
+    }
+    if (infra.demandGaps && infra.demandGaps.length) {
+      entityContext += 'Demand gaps (topics people want but nobody covers well): ' + infra.demandGaps.join('; ') + '\n';
+    }
+
     entityContext += '--- END ENTITY ANALYSIS ---';
   }
 
@@ -1022,6 +1052,96 @@ class ArticleRewriter {
 
       throw new Error('All providers failed. Last error: ' + lastError.message);
     }
+  }
+
+  // ─── patchContent — targeted AI edit (AI Edit tab) ──────────────────────
+  //
+  // Apply a targeted instruction (e.g. "add more detail about the price") to
+  // an existing HTML content string. Returns the edited HTML directly, NOT a
+  // full rewrite result object.
+  //
+  // opts: { provider, model, infraData }
+  //
+  async patchContent(html, instruction, opts) {
+    this._loadConfig();
+    opts = opts || {};
+
+    var provider = opts.provider || this._cfg.provider;
+    var pkm = this._getProviderKeyModel(provider, opts);
+    var apiKey = pkm.key;
+    var model = pkm.model;
+
+    if (!apiKey) {
+      throw new Error(provider.toUpperCase() + ' API key is not configured. Go to Settings.');
+    }
+
+    // Build context block from InfraNodus data
+    var infraCtx = '';
+    var infra = opts.infraData || {};
+    if (infra.mainTopics && infra.mainTopics.length) {
+      infraCtx += 'Key entities/topics: ' + infra.mainTopics.slice(0, 12).join(', ') + '\n';
+    }
+    if (infra.missingEntities && infra.missingEntities.length) {
+      infraCtx += 'Entities missing from article: ' + infra.missingEntities.slice(0, 10).join(', ') + '\n';
+    }
+    if (infra.targetKeyword) {
+      infraCtx += 'Target keyword: ' + infra.targetKeyword + '\n';
+    }
+    if (infra.gapAdvice) {
+      infraCtx += 'SEO gap advice: ' + infra.gapAdvice + '\n';
+    }
+
+    var systemPrompt = 'You are an expert news editor. ' +
+      'You will receive an HTML article and an editing instruction. ' +
+      'Apply ONLY the requested change — do not restructure or rewrite the whole article. ' +
+      'Return the edited HTML only, with no commentary, no markdown fences, no JSON wrapper.' +
+      (infraCtx ? '\n\nInfraNodus SEO context:\n' + infraCtx : '');
+
+    var userPrompt = 'INSTRUCTION: ' + instruction + '\n\n' +
+      'CURRENT HTML:\n' + html.slice(0, 32000); // cap to avoid token overflow
+
+    return this._callProviderRaw(provider, apiKey, model, systemPrompt, userPrompt, opts.signal || null);
+  }
+
+  // ─── Raw provider call (returns plain text, for patchContent) ───────────
+
+  async _callProviderRaw(provider, apiKey, model, systemPrompt, userPrompt, signal) {
+    if (provider === 'anthropic') {
+      var Anthropic = require('@anthropic-ai/sdk');
+      var client = new Anthropic({ apiKey: apiKey.trim() });
+      var reqOpts = signal ? { signal: signal } : {};
+      var resp = await client.messages.create({
+        model: model,
+        max_tokens: 8192,
+        temperature: 0.4,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      }, reqOpts);
+      return (resp.content && resp.content[0] ? resp.content[0].text : '').trim();
+    }
+
+    if (provider === 'openrouter' || provider === 'openai') {
+      var OpenAI = require('openai');
+      var clientOpts = { apiKey: apiKey.trim() };
+      if (provider === 'openrouter') {
+        clientOpts.baseURL = 'https://openrouter.ai/api/v1';
+        clientOpts.defaultHeaders = { 'HTTP-Referer': 'https://hdf-autopub.com', 'X-Title': 'HDF AutoPub' };
+      }
+      var oai = new OpenAI(clientOpts);
+      var reqOpts2 = signal ? { signal: signal } : {};
+      var resp2 = await oai.chat.completions.create({
+        model: model,
+        max_tokens: 8192,
+        temperature: 0.4,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      }, reqOpts2);
+      return (resp2.choices && resp2.choices[0] ? resp2.choices[0].message.content : '').trim();
+    }
+
+    throw new Error('Unknown provider: ' + provider);
   }
 
   // ─── Provider calls (structured JSON output for pipeline) ───────────────

@@ -164,6 +164,210 @@
   }
 
   /**
+   * Render an InfraNodus graphSummary string as structured, readable HTML.
+   *
+   * The extendedGraphSummary format is XML-like:
+   *   <Main Concepts (...)>: name (d|b|t), ... </MainConcepts>
+   *   <TopicalGaps> ... </TopicalGaps>
+   *   <ConceptualGateways> ... </ConceptualGateways>
+   *   <Relations> a <- -> b  a -> b ... </Relations>
+   *   <DiversityStatistics> Key: val ... </DiversityStatistics>
+   *
+   * Falls back to styled plain text for natural-language summaries.
+   */
+  function renderGraphSummary(text) {
+    if (!text) return '';
+
+    var isStructured = text.indexOf('</MainConcepts>') !== -1 ||
+                       text.indexOf('<Main Concepts') !== -1 ||
+                       text.indexOf('</DiversityStatistics>') !== -1;
+
+    if (!isStructured) {
+      return '<div class="gs-plain">' + escapeHtml(text) + '</div>';
+    }
+
+    var html = '<div class="gs-summary">';
+
+    // ── Main Concepts ──────────────────────────────────────────────────
+    var mcMatch = text.match(/<Main Concepts[^>]*>:?\s*([\s\S]*?)\s*<\/MainConcepts>/i);
+    if (mcMatch && mcMatch[1].trim()) {
+      var concepts = [];
+      var cRe = /([\w][\w\s\-']*?)\s*\(\s*([^)]*)\)/g;
+      var cm;
+      while ((cm = cRe.exec(mcMatch[1])) !== null) {
+        var parts = cm[2].split('|').map(function (p) { return p.trim(); });
+        var name = cm[1].trim();
+        if (name) concepts.push({ name: name, degree: parts[0] || '0', betweenness: parseFloat(parts[1] || '0') });
+      }
+      if (concepts.length) {
+        // Sort by degree descending so most connected appear first
+        concepts.sort(function (a, b) { return (parseInt(b.degree) || 0) - (parseInt(a.degree) || 0); });
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#127760;</span>Main Concepts</div>' +
+          '<div class="gs-concepts">';
+        concepts.forEach(function (c) {
+          var bwLabel = c.betweenness > 0 ? c.betweenness.toFixed(2) : null;
+          html += '<span class="gs-concept">' +
+            '<span class="gs-concept-name">' + escapeHtml(c.name) + '</span>' +
+            '<span class="gs-concept-metric" title="degree (connections)">d:' + escapeHtml(c.degree) + '</span>' +
+            (bwLabel ? '<span class="gs-concept-metric gs-metric-bw" title="betweenness (bridge score)">b:' + bwLabel + '</span>' : '') +
+          '</span>';
+        });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Topical Gaps ───────────────────────────────────────────────────
+    var gapMatch = text.match(/<TopicalGaps>([\s\S]*?)<\/TopicalGaps>/i);
+    if (gapMatch && gapMatch[1].trim()) {
+      var gaps = gapMatch[1].trim().split(/[,;]+/).map(function (g) { return g.trim(); }).filter(Boolean);
+      if (gaps.length) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128262;</span>Topical Gaps</div>' +
+          '<div class="gs-tags">';
+        gaps.forEach(function (g) { html += '<span class="gs-tag gs-tag-gap">' + escapeHtml(g) + '</span>'; });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Conceptual Gateways ────────────────────────────────────────────
+    var gwMatch = text.match(/<ConceptualGateways>([\s\S]*?)<\/ConceptualGateways>/i);
+    if (gwMatch && gwMatch[1].trim()) {
+      var gws = gwMatch[1].trim().split(/[,;]+/).map(function (g) { return g.trim(); }).filter(Boolean);
+      if (gws.length) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128279;</span>Conceptual Gateways</div>' +
+          '<div class="gs-tags">';
+        gws.forEach(function (g) { html += '<span class="gs-tag gs-tag-gateway">' + escapeHtml(g) + '</span>'; });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Relations ─────────────────────────────────────────────────────
+    var relMatch = text.match(/<Relations>([\s\S]*?)<\/Relations>/i);
+    if (relMatch && relMatch[1].trim()) {
+      var relItems = [];
+      var tokens = relMatch[1].trim().split(/\s+/);
+      var ti = 0;
+      while (ti < tokens.length) {
+        // Collect left-side words until an arrow token
+        var leftParts = [];
+        while (ti < tokens.length && tokens[ti] !== '<-' && tokens[ti] !== '->') {
+          leftParts.push(tokens[ti++]);
+        }
+        var left = leftParts.join(' ').trim();
+        if (ti >= tokens.length) break;
+
+        var arrowType;
+        if (tokens[ti] === '<-' && tokens[ti + 1] === '->') {
+          arrowType = 'bi'; ti += 2;
+        } else if (tokens[ti] === '->') {
+          arrowType = 'fwd'; ti++;
+        } else if (tokens[ti] === '<-') {
+          arrowType = 'rev'; ti++;
+        } else {
+          ti++; continue;
+        }
+
+        // Collect right-side words until next arrow or end
+        var rightParts = [];
+        while (ti < tokens.length && tokens[ti] !== '<-' && tokens[ti] !== '->') {
+          rightParts.push(tokens[ti++]);
+        }
+        var right = rightParts.join(' ').trim();
+
+        if (left && right) relItems.push({ from: left, type: arrowType, to: right });
+      }
+
+      if (relItems.length) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128257;</span>Relations</div>' +
+          '<div class="gs-relations">';
+        relItems.forEach(function (r) {
+          var arrowHtml = r.type === 'bi' ? '<span class="gs-arrow gs-arrow-bi">&#8596;</span>' :
+                          r.type === 'fwd' ? '<span class="gs-arrow gs-arrow-fwd">&#8594;</span>' :
+                                             '<span class="gs-arrow gs-arrow-rev">&#8592;</span>';
+          html += '<div class="gs-relation">' +
+            '<span class="gs-rel-node">' + escapeHtml(r.from) + '</span>' +
+            arrowHtml +
+            '<span class="gs-rel-node">' + escapeHtml(r.to) + '</span>' +
+          '</div>';
+        });
+        html += '</div></div>';
+      }
+    }
+
+    // ── Diversity Statistics ───────────────────────────────────────────
+    var statsMatch = text.match(/<DiversityStatistics>([\s\S]*?)<\/DiversityStatistics>/i);
+    if (statsMatch && statsMatch[1].trim()) {
+      var statsText = statsMatch[1].trim();
+
+      // Known key-value patterns (ordered longest-first to avoid partial matches)
+      var kvKeys = [
+        'Entropy of top nodes distribution among clusters',
+        'Ratio of top nodes Influence / betweenness',
+        'Betweenness / influence per cluster',
+        'Ratio of top topical clusters',
+        'Modularity Score',
+        'Modularity',
+      ];
+      var kvShort = {
+        'Entropy of top nodes distribution among clusters': 'Entropy',
+        'Ratio of top nodes Influence / betweenness':       'Influence/betweenness',
+        'Betweenness / influence per cluster':              'Betweenness/cluster',
+        'Ratio of top topical clusters':                    'Topical clusters ratio',
+        'Modularity Score':                                 'Modularity score',
+        'Modularity':                                       'Modularity',
+      };
+      var kvValues = {};
+      var remaining = statsText;
+      kvKeys.forEach(function (k) {
+        var re = new RegExp(k.replace(/[/\\()]/g, '\\$&') + '\\s*:\\s*([\\w\\.\\-]+)', 'i');
+        var m = remaining.match(re);
+        if (m) { kvValues[k] = m[1]; remaining = remaining.replace(m[0], ' ').trim(); }
+      });
+
+      // Standalone badge statements (what's left after stripping kv pairs)
+      var badges = remaining.split(/\s{2,}|(?<=[a-z])(?=[A-Z])/)
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return s.length > 4 && !/^\d+$/.test(s); });
+
+      var hasAny = Object.keys(kvValues).length > 0 || badges.length > 0;
+      if (hasAny) {
+        html += '<div class="gs-section">' +
+          '<div class="gs-section-title"><span class="gs-icon">&#128202;</span>Graph Diversity</div>' +
+          '<div class="gs-stats-grid">';
+
+        kvKeys.forEach(function (k) {
+          if (kvValues[k] === undefined) return;
+          var valClass = '';
+          var numVal = parseFloat(kvValues[k]);
+          if (k === 'Modularity' && !isNaN(numVal)) {
+            valClass = numVal === 0 ? 'gs-val-warn' : numVal < 0.3 ? 'gs-val-warn' : 'gs-val-ok';
+          }
+          html += '<div class="gs-stat-item">' +
+            '<span class="gs-stat-key">' + escapeHtml(kvShort[k]) + '</span>' +
+            '<span class="gs-stat-val ' + valClass + '">' + escapeHtml(kvValues[k]) + '</span>' +
+          '</div>';
+        });
+
+        if (badges.length) {
+          html += '<div class="gs-stat-badges">';
+          badges.forEach(function (b) {
+            html += '<span class="gs-stat-badge">' + escapeHtml(b) + '</span>';
+          });
+          html += '</div>';
+        }
+
+        html += '</div></div>';
+      }
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  /**
    * Extract readable text from content_markdown that might be JSON chunks format.
    */
   function extractReadableText(raw) {
@@ -3453,6 +3657,8 @@
 
   var currentDraftId = null;
   var currentDraft = null;
+  // Last entity search results keyed by draftId — used by "Apply to Rewrite"
+  var _entitySearchResults = {};
 
   window.__openEditor = function (draftId) {
     openEditor(draftId);
@@ -3667,6 +3873,9 @@
         // Reset tabs to defaults
         resetEditorTabs();
 
+        // Init AI Edit tab buttons (idempotent — runs each time editor opens)
+        initAiEditTab();
+
         // Show editor
         $('editor-overlay').style.display = 'flex';
       })
@@ -3700,47 +3909,128 @@
           return;
         }
 
-        var infra = data.infraData || {};
-        var topicCount = (infra.mainTopics || []).length;
-        var entityCount = (infra.missingEntities || []).length;
+        var d = data.infraData || {};
+        var topicCount  = (d.mainTopics  || []).length;
+        var entityCount = (d.missingEntities || []).length;
+        var hasKeyword  = !!d.targetKeyword;
 
         if (badge) {
-          badge.textContent = topicCount + ' topics · ' + entityCount + ' entities';
+          badge.textContent = topicCount + ' topics · ' + entityCount + ' entities' + (hasKeyword ? ' · SEO' : '');
           badge.className = 'infra-badge infra-badge-active';
         }
 
         var html = '';
-        if (infra.mainTopics && infra.mainTopics.length) {
-          html += '<div class="infra-section"><h4>Main Topics Identified</h4><div class="infra-tags">';
-          infra.mainTopics.forEach(function (t) {
-            html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>';
-          });
+
+        // ── Keyword banner ────────────────────────────────────────────
+        if (hasKeyword) {
+          html += '<div class="infra-kw-banner">&#127919; Target keyword: <strong>' + escapeHtml(d.targetKeyword) + '</strong></div>';
+        }
+
+        // ── Three AI advice cards (article + keyword SEO) ─────────────
+        var hasAdvice = d.advice || d.rankingAdvice || d.intentAdvice || d.gapAdvice;
+        if (hasAdvice) {
+          html += '<div class="infra-advice-grid">';
+          if (d.advice) {
+            html += '<div class="infra-advice-card infra-advice-article">' +
+              '<div class="infra-advice-card-title">&#128203; Article Analysis</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.advice) + '</div>' +
+            '</div>';
+          }
+          if (d.rankingAdvice) {
+            html += '<div class="infra-advice-card infra-advice-ranking">' +
+              '<div class="infra-advice-card-title">&#128200; What Currently Ranks</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.rankingAdvice) + '</div>' +
+            '</div>';
+          }
+          if (d.intentAdvice) {
+            html += '<div class="infra-advice-card infra-advice-intent">' +
+              '<div class="infra-advice-card-title">&#128269; What Readers Want</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.intentAdvice) + '</div>' +
+            '</div>';
+          }
+          if (d.gapAdvice) {
+            html += '<div class="infra-advice-card infra-advice-gap">' +
+              '<div class="infra-advice-card-title">&#127919; Content Opportunity</div>' +
+              '<div class="infra-advice-card-body">' + escapeHtml(d.gapAdvice) + '</div>' +
+            '</div>';
+          }
+          html += '</div>';
+        }
+
+        // ── Graph Summary (parsed) ────────────────────────────────────
+        if (d.graphSummary) {
+          html += '<div class="infra-section"><h4>Knowledge Graph Summary</h4>' + renderGraphSummary(d.graphSummary) + '</div>';
+        }
+
+        // ── Tag sections ──────────────────────────────────────────────
+        if (d.mainTopics && d.mainTopics.length) {
+          html += '<div class="infra-section"><h4>Main Topics</h4><div class="infra-tags">';
+          d.mainTopics.forEach(function (t) { html += '<span class="infra-tag infra-tag-topic">' + escapeHtml(t) + '</span>'; });
           html += '</div></div>';
         }
-        if (infra.missingEntities && infra.missingEntities.length) {
-          html += '<div class="infra-section"><h4>Entities the AI Was Told to Cover</h4><div class="infra-tags">';
-          infra.missingEntities.forEach(function (e) {
-            html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>';
-          });
+        if (d.relatedQueries && d.relatedQueries.length) {
+          html += '<div class="infra-section"><h4>Related Search Queries</h4><div class="infra-tags">';
+          d.relatedQueries.forEach(function (q) { html += '<span class="infra-tag infra-tag-query">' + escapeHtml(q) + '</span>'; });
           html += '</div></div>';
         }
-        if (infra.contentGaps && infra.contentGaps.length) {
-          html += '<div class="infra-section"><h4>Content Gaps (Bridging Opportunities)</h4><ul class="infra-gaps">';
-          infra.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
-          html += '</ul></div>';
+        if (d.demandTopics && d.demandTopics.length) {
+          html += '<div class="infra-section"><h4>High-Demand Topics (underserved)</h4><div class="infra-tags">';
+          d.demandTopics.forEach(function (t) { html += '<span class="infra-tag infra-tag-demand">' + escapeHtml(t) + '</span>'; });
+          html += '</div></div>';
         }
-        if (infra.researchQuestions && infra.researchQuestions.length) {
-          html += '<div class="infra-section"><h4>Research Questions Passed to AI</h4><ul class="infra-questions">';
-          infra.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
-          html += '</ul></div>';
+        if (d.missingEntities && d.missingEntities.length) {
+          html += '<div class="infra-section"><h4>Bridge Concepts (entities in gaps)</h4><div class="infra-tags">';
+          d.missingEntities.forEach(function (e) { html += '<span class="infra-tag infra-tag-entity">' + escapeHtml(e) + '</span>'; });
+          html += '</div></div>';
         }
+
+        // ── Lists ──────────────────────────────────────────────────────
+        var hasLists = (d.contentGaps && d.contentGaps.length) ||
+                       (d.demandGaps && d.demandGaps.length) ||
+                       (d.researchQuestions && d.researchQuestions.length);
+        if (hasLists) {
+          html += '<div class="infra-entity-lists">';
+          if (d.contentGaps && d.contentGaps.length) {
+            html += '<div class="infra-list-block"><h4>Content Gaps</h4><ul class="infra-gaps">';
+            d.contentGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+            html += '</ul></div>';
+          }
+          if (d.demandGaps && d.demandGaps.length) {
+            html += '<div class="infra-list-block"><h4>Demand Gaps</h4><ul class="infra-gaps infra-gaps-demand">';
+            d.demandGaps.forEach(function (g) { html += '<li>' + escapeHtml(g) + '</li>'; });
+            html += '</ul></div>';
+          }
+          if (d.researchQuestions && d.researchQuestions.length) {
+            html += '<div class="infra-list-block"><h4>Research Questions</h4><ul class="infra-questions">';
+            d.researchQuestions.forEach(function (q) { html += '<li>' + escapeHtml(q) + '</li>'; });
+            html += '</ul></div>';
+          }
+          html += '</div>';
+        }
+
+        // ── Bigrams + Clusters ─────────────────────────────────────────
+        if (d.bigrams && d.bigrams.length) {
+          html += '<div class="infra-section"><h4>Top Co-occurring Concepts</h4><div class="infra-bigrams">';
+          d.bigrams.forEach(function (b) { html += '<span class="infra-bigram">' + escapeHtml(b) + '</span>'; });
+          html += '</div></div>';
+        }
+        if (d.clusterDescriptions && d.clusterDescriptions.length) {
+          html += '<div class="infra-section"><h4>Topic Cluster Descriptions</h4>';
+          d.clusterDescriptions.forEach(function (c, i) {
+            html += '<div class="infra-cluster-desc"><span class="infra-cluster-num">C' + (i + 1) + '</span>' + escapeHtml(c) + '</div>';
+          });
+          html += '</div>';
+        }
+
+        // ── Meta row ──────────────────────────────────────────────────
         html += '<div class="infra-section infra-meta">' +
-          '<span>Used in rewrite: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
+          '<span>Rewrite model: <strong>' + escapeHtml(data.aiModel || 'unknown') + '</strong></span>' +
+          '<span style="color:#374151;font-size:11px;">' + escapeHtml(d.analyzedAt || '') + '</span>' +
           '<button class="btn btn-sm btn-outline" data-click="runInfraAnalysis" data-draft-id="' + draftId + '">&#128300; Re-run</button>' +
           '</div>';
 
         body.innerHTML = html;
-        _updateInfraStatusBar(infra);
+        _updateInfraStatusBar(d);
       })
       .catch(function (err) {
         body.innerHTML = '<p class="infra-error">Failed to load: ' + escapeHtml(err.message || String(err)) + '</p>';
@@ -3850,10 +4140,11 @@
           html += '</div>';
         }
 
-        // ── BLOCK 2: Graph Summary ────────────────────────────────────────
+        // ── BLOCK 2: Knowledge Graph Summary (parsed & structured) ───────
         if (d.graphSummary) {
           html += '<div class="infra-section"><h4>Knowledge Graph Summary</h4>' +
-            '<div class="infra-entity-summary">' + escapeHtml(d.graphSummary) + '</div></div>';
+            renderGraphSummary(d.graphSummary) +
+          '</div>';
         }
 
         // ── BLOCK 3: Tags row — topics + related queries + demand topics ──
@@ -3935,7 +4226,19 @@
           html += '<p class="infra-empty">No meaningful data returned. Try a broader or different search term.</p>';
         }
 
-        html += '<div class="infra-entity-meta">&#9203; ' + escapeHtml(d.analyzedAt || '') + ' &nbsp;&#183;&nbsp; 7 API calls in parallel</div>';
+        // ── Apply to Rewrite button ───────────────────────────────────
+        // Stores result so applyEntityToDraft() can read it without
+        // re-fetching or encoding the whole object into a data attribute.
+        _entitySearchResults[draftId] = d;
+        html +=
+          '<div class="infra-apply-bar">' +
+            '<div class="infra-apply-bar-info">' +
+              '<span class="infra-apply-bar-icon">&#128300;</span>' +
+              '<span>This data is <strong>not yet used by AI</strong>. Click Apply to wire it into the next rewrite.</span>' +
+            '</div>' +
+            '<button class="btn btn-infra-apply" data-click="applyEntityToDraft" data-draft-id="' + draftId + '">&#9989; Apply to Rewrite</button>' +
+          '</div>' +
+          '<div class="infra-entity-meta">&#9203; ' + escapeHtml(d.analyzedAt || '') + ' &nbsp;&#183;&nbsp; 7 API calls in parallel</div>';
         results.innerHTML = html;
       })
       .catch(function (err) {
@@ -3943,6 +4246,44 @@
       })
       .finally(function () {
         if (btn) { btn.disabled = false; btn.textContent = 'Fetch'; }
+      });
+  }
+
+  function applyEntityToDraft(draftId) {
+    var entityData = _entitySearchResults[draftId];
+    if (!entityData) {
+      showToast('No entity search result to apply. Run a search first.', 'error');
+      return;
+    }
+
+    var btn = document.querySelector('[data-click="applyEntityToDraft"][data-draft-id="' + draftId + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
+
+    fetchApi('/api/drafts/' + draftId + '/infranodus-merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entityData: entityData }),
+    })
+      .then(function (resp) {
+        if (resp.success) {
+          showToast('&#128300; Entity data applied — AI will use it on next rewrite', 'success');
+          // Update the apply bar to reflect applied state
+          if (btn) {
+            btn.textContent = '&#9989; Applied';
+            btn.classList.add('btn-infra-applied');
+            btn.closest('.infra-apply-bar').querySelector('.infra-apply-bar-info span:last-child').innerHTML =
+              'Entity data <strong>merged into this draft</strong>. AI will use it when you click Rewrite.';
+          }
+          // Refresh the analysis panel so it shows the merged data
+          loadInfraData(draftId);
+        } else {
+          showToast((resp && resp.error) || 'Apply failed', 'error');
+          if (btn) { btn.disabled = false; btn.textContent = '&#9989; Apply to Rewrite'; }
+        }
+      })
+      .catch(function (err) {
+        showToast('Apply failed: ' + (err.message || String(err)), 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '&#9989; Apply to Rewrite'; }
       });
   }
 
@@ -3964,6 +4305,283 @@
   window.__toggleInfraPanel = toggleInfraPanel;
   window.__runInfraAnalysis = runInfraAnalysis;
   window.__searchEntityInfra = searchEntityInfra;
+  window.__applyEntityToDraft = applyEntityToDraft;
+
+  // ─── AI Edit Tab ───────────────────────────────────────────────────
+
+  // Holds the current draft id while editor is open (re-uses currentDraft)
+  function _aiEditDraftId() {
+    return currentDraft && currentDraft.id ? String(currentDraft.id) : null;
+  }
+
+  // Load HTML from AI Output tab or HTML Editor into the editor pane
+  function initAiEditTab() {
+    var loadBtn  = document.getElementById('aiedit-load-btn');
+    // Guard: only wire listeners once per DOM element lifetime
+    if (loadBtn && loadBtn.dataset.init) return;
+
+    var saveBtn  = document.getElementById('aiedit-save-btn');
+    var patchBtn = document.getElementById('aiedit-patch-btn');
+    var checkBtn = document.getElementById('aiedit-check-btn');
+    var instrInput = document.getElementById('aiedit-instruction');
+
+    if (loadBtn) { loadBtn.dataset.init = '1';
+      loadBtn.addEventListener('click', function () {
+        var htmlEditor = document.getElementById('html-code-editor');
+        var aiOut = document.getElementById('ai-output-content');
+        var content = document.getElementById('aiedit-content');
+        if (!content) return;
+        // Prefer HTML editor if it has content, else fall back to AI output
+        var src = (htmlEditor && htmlEditor.value.trim()) ? htmlEditor.value.trim()
+          : (aiOut ? aiOut.innerHTML : '');
+        if (!src) { showToast('No content loaded yet. Run AI Rewrite first.', 'warn'); return; }
+        content.innerHTML = src;
+        showToast('Content loaded into editor', 'info');
+        // Auto-check coverage after loading
+        checkEntityCoverage();
+      });
+    }
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function () {
+        var content = document.getElementById('aiedit-content');
+        var htmlEditor = document.getElementById('html-code-editor');
+        if (!content || !htmlEditor) return;
+        var html = content.innerHTML;
+        htmlEditor.value = html;
+        // Switch to HTML editor tab
+        var htmlTab = document.querySelector('.editor-tab[data-tab="html-editor"]');
+        if (htmlTab) htmlTab.click();
+        showToast('Saved to HTML Editor', 'success');
+      });
+    }
+
+    if (patchBtn) {
+      patchBtn.addEventListener('click', function () {
+        applyAIPatch();
+      });
+    }
+
+    if (instrInput) {
+      instrInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') applyAIPatch();
+      });
+    }
+
+    if (checkBtn) {
+      checkBtn.addEventListener('click', function () {
+        checkEntityCoverage();
+      });
+    }
+  }
+
+  function applyAIPatch() {
+    var draftId = _aiEditDraftId();
+    if (!draftId) { showToast('No draft open', 'error'); return; }
+
+    var content = document.getElementById('aiedit-content');
+    var instrInput = document.getElementById('aiedit-instruction');
+    var patchBtn = document.getElementById('aiedit-patch-btn');
+    var statusEl = document.getElementById('aiedit-patch-status');
+
+    if (!content || !instrInput) return;
+    var html = content.innerHTML.trim();
+    if (!html || html.length < 10) { showToast('Load content first', 'warn'); return; }
+    var instruction = instrInput.value.trim();
+    if (!instruction) { showToast('Enter an editing instruction first', 'warn'); return; }
+
+    if (patchBtn) { patchBtn.disabled = true; patchBtn.innerHTML = '<span class="aiedit-spinner"></span> Editing…'; }
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Sending to AI…'; }
+
+    fetchApi('/api/drafts/' + draftId + '/ai-patch', {
+      method: 'POST',
+      body: JSON.stringify({ html: html, instruction: instruction }),
+    })
+      .then(function (resp) {
+        if (resp && resp.success && resp.html) {
+          content.innerHTML = resp.html;
+          if (statusEl) statusEl.textContent = '✓ Edit applied. Check Coverage to see entity impact.';
+          instrInput.value = '';
+          showToast('AI edit applied', 'success');
+          // Re-check coverage after patch
+          checkEntityCoverage();
+        } else {
+          if (statusEl) statusEl.textContent = '✗ ' + ((resp && resp.error) || 'AI patch failed');
+          showToast((resp && resp.error) || 'AI patch failed', 'error');
+        }
+      })
+      .catch(function (err) {
+        if (statusEl) statusEl.textContent = '✗ ' + (err.message || String(err));
+        showToast('AI patch error: ' + (err.message || String(err)), 'error');
+      })
+      .finally(function () {
+        if (patchBtn) { patchBtn.disabled = false; patchBtn.innerHTML = '&#129302; AI Edit'; }
+      });
+  }
+
+  // ─── Entity Coverage Checker ───────────────────────────────────────
+
+  function checkEntityCoverage() {
+    var draftId = _aiEditDraftId();
+    var coverageBody = document.getElementById('aiedit-coverage-body');
+    if (!coverageBody) return;
+
+    // Get the content HTML
+    var content = document.getElementById('aiedit-content');
+    var html = content ? content.innerHTML : '';
+    if (!html || html.trim().length < 10) {
+      coverageBody.innerHTML = '<p class="aiedit-empty">Load content first using the toolbar above.</p>';
+      return;
+    }
+
+    // Strip tags for plain-text matching
+    var plainText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+
+    // Get infranodus data from the draft
+    if (!draftId) { coverageBody.innerHTML = '<p class="aiedit-empty">No draft loaded.</p>'; return; }
+
+    fetchApi('/api/drafts/' + draftId + '/infranodus')
+      .then(function (resp) {
+        var d = (resp && resp.infraData) || null;
+        if (!d) {
+          coverageBody.innerHTML = '<p class="aiedit-empty">No InfraNodus data for this draft yet. Run analysis in the InfraNodus tab first.</p>';
+          return;
+        }
+        renderEntityCoverage(d, plainText, coverageBody, draftId);
+      })
+      .catch(function (err) {
+        coverageBody.innerHTML = '<p class="aiedit-empty" style="color:#ef4444">Failed to load InfraNodus data: ' + escapeHtml(err.message || '') + '</p>';
+      });
+  }
+
+  function renderEntityCoverage(d, plainText, coverageBody, draftId) {
+    // Collect all entities from infranodus data
+    var allEntities = [];
+    function addEntities(arr) {
+      if (!arr || !arr.length) return;
+      arr.forEach(function (e) {
+        if (e && typeof e === 'string' && allEntities.indexOf(e) === -1) allEntities.push(e);
+      });
+    }
+    addEntities(d.mainTopics);
+    addEntities(d.missingEntities);
+    addEntities(d.bigrams);
+
+    if (!allEntities.length) {
+      coverageBody.innerHTML = '<p class="aiedit-empty">No entities found in InfraNodus data. Run a deep analysis first.</p>';
+      return;
+    }
+
+    var present = [];
+    var missing = [];
+    allEntities.forEach(function (entity) {
+      var needle = entity.toLowerCase().replace(/[-_]/g, ' ');
+      var found = plainText.indexOf(needle) !== -1;
+      if (found) present.push(entity);
+      else missing.push(entity);
+    });
+
+    var total = allEntities.length;
+    var ratio = total > 0 ? Math.round((present.length / total) * 100) : 0;
+    var barClass = ratio >= 70 ? '' : (ratio >= 40 ? 'warn' : 'low');
+
+    var html = '';
+
+    // Summary bar
+    html += '<div class="aiedit-coverage-summary">' +
+      '<div class="aiedit-coverage-summary-label">' +
+        '<span>Entity Coverage</span>' +
+        '<strong style="color:' + (ratio >= 70 ? '#22c55e' : ratio >= 40 ? '#eab308' : '#ef4444') + '">' + ratio + '%</strong>' +
+      '</div>' +
+      '<div class="aiedit-coverage-bar-bg">' +
+        '<div class="aiedit-coverage-bar-fill ' + barClass + '" style="width:' + ratio + '%"></div>' +
+      '</div>' +
+      '<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">' +
+        present.length + ' of ' + total + ' entities found in content' +
+      '</div>' +
+    '</div>';
+
+    // Present entities
+    if (present.length) {
+      html += '<div class="aiedit-entity-section">' +
+        '<div class="aiedit-entity-section-title">&#9989; In Content (' + present.length + ')</div>' +
+        '<div class="aiedit-entity-list">' +
+        present.map(function (e) {
+          return '<span class="aiedit-entity-tag present">&#10003; ' + escapeHtml(e) + '</span>';
+        }).join('') +
+        '</div></div>';
+    }
+
+    // Missing entities
+    if (missing.length) {
+      html += '<div class="aiedit-entity-section">' +
+        '<div class="aiedit-entity-section-title">&#10060; Missing (' + missing.length + ')</div>' +
+        '<div class="aiedit-entity-list">' +
+        missing.map(function (e) {
+          return '<span class="aiedit-entity-tag missing">' + escapeHtml(e) +
+            '<button class="aiedit-add-btn" title="Add this entity via AI" ' +
+              'data-click="addEntityToContent" data-entity="' + escapeHtml(e) + '" data-draft-id="' + draftId + '">' +
+              '+ Add</button>' +
+            '</span>';
+        }).join('') +
+        '</div>';
+
+      // Add-all missing button
+      if (missing.length > 1) {
+        html += '<div class="aiedit-add-all-bar">' +
+          '<span class="note">Use AI to naturally weave in all missing entities</span>' +
+          '<button class="btn btn-xs btn-purple" data-click="addAllMissingEntities" data-draft-id="' + draftId + '">' +
+            '&#129302; Add All Missing' +
+          '</button>' +
+        '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Target keyword + advice
+    if (d.targetKeyword || d.gapAdvice) {
+      html += '<div class="aiedit-entity-section" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">';
+      if (d.targetKeyword) {
+        html += '<div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Target keyword: <strong style="color:#a855f7">' + escapeHtml(d.targetKeyword) + '</strong></div>';
+      }
+      if (d.gapAdvice) {
+        html += '<div style="font-size:12px; color:var(--text-secondary); line-height:1.5;">' + escapeHtml(d.gapAdvice.slice(0, 200)) + (d.gapAdvice.length > 200 ? '…' : '') + '</div>';
+      }
+      html += '</div>';
+    }
+
+    coverageBody.innerHTML = html;
+  }
+
+  function addEntityToContent(entity, draftId) {
+    var instrInput = document.getElementById('aiedit-instruction');
+    if (!instrInput) return;
+    instrInput.value = 'Naturally weave in the entity "' + entity + '" into the article where it fits best.';
+    instrInput.focus();
+    showToast('Instruction set — click AI Edit to apply', 'info');
+  }
+
+  function addAllMissingEntities(draftId) {
+    // Find all missing entities from the coverage display
+    var missing = [];
+    document.querySelectorAll('.aiedit-entity-tag.missing').forEach(function (el) {
+      var addBtn = el.querySelector('.aiedit-add-btn');
+      if (addBtn && addBtn.dataset.entity) missing.push(addBtn.dataset.entity);
+    });
+    if (!missing.length) { showToast('No missing entities', 'info'); return; }
+    var instrInput = document.getElementById('aiedit-instruction');
+    if (!instrInput) return;
+    instrInput.value = 'Naturally weave these missing entities into the article where they fit best: ' + missing.join(', ');
+    instrInput.focus();
+    showToast('Instruction set for ' + missing.length + ' entities — click AI Edit to apply', 'info');
+  }
+
+  // Expose for dispatch table
+  window.__applyAIPatch = applyAIPatch;
+  window.__checkEntityCoverage = checkEntityCoverage;
+  window.__addEntityToContent = addEntityToContent;
+  window.__addAllMissingEntities = addAllMissingEntities;
+  window.__initAiEditTab = initAiEditTab;
 
   // ─── Batch Action Bar (Manual Cluster from Feed / Drafts) ─────────
   function _getBatchSelectionCount() {
@@ -4187,6 +4805,7 @@
     'ai-output': 'tab-ai-output',
     'html-editor': 'tab-html-editor',
     preview: 'tab-preview',
+    'ai-edit': 'tab-ai-edit',
     infranodus: 'tab-infranodus'
   };
   var EDITOR_DEFAULT_TABS = { source: true, 'ai-output': true };
@@ -6001,6 +6620,9 @@
     'toggleDraftSelect':       function (el, e) { __toggleDraftSelect(Number(el.dataset.draftId), e); },
     'runInfraAnalysis':        function (el) { __runInfraAnalysis(Number(el.dataset.draftId)); },
     'searchEntityInfra':       function (el) { __searchEntityInfra(String(el.dataset.draftId)); },
+    'applyEntityToDraft':      function (el) { __applyEntityToDraft(String(el.dataset.draftId)); },
+    'addEntityToContent':      function (el) { __addEntityToContent(el.dataset.entity, String(el.dataset.draftId)); },
+    'addAllMissingEntities':   function (el) { __addAllMissingEntities(String(el.dataset.draftId)); },
     'switchToInfraTab':        function () { __switchToInfraTab(); },
     'toggleSelectMode':        function () { __toggleSelectMode(); },
     'batchDeleteFailed':       function () { __batchDeleteFailed(); },

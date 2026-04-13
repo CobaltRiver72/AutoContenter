@@ -263,8 +263,11 @@ class InfranodusAnalyzer extends EventEmitter {
     if (!this.enabled || !this.ready) return null;
     if (!articleText || articleText.length < 200) return null;
 
-    var text = articleText.slice(0, TEXT_LIMIT);
-    var cacheKey = this._hashText(text);
+    var text    = articleText.slice(0, TEXT_LIMIT);
+    var keyword = (options && options.targetKeyword) ? String(options.targetKeyword).trim().slice(0, 200) : null;
+
+    // Cache key includes keyword so same text + different keyword = fresh fetch
+    var cacheKey = this._hashText(text + (keyword ? '|kw:' + keyword : ''));
     var cached = this._getCache(cacheKey);
     if (cached) {
       this.logger.info(MODULE, 'Cache hit for text hash ' + cacheKey);
@@ -272,63 +275,132 @@ class InfranodusAnalyzer extends EventEmitter {
     }
 
     options = options || {};
-    var self = this;
+    var self    = this;
+    var country = 'US';
+    var lang    = 'EN';
 
     try {
-      // Run both endpoints in parallel. Each failure is caught independently
-      // so a single endpoint error doesn't wipe out the other result.
-      var results = await Promise.all([
+      // ─── Build parallel call list ────────────────────────────────────
+      // Slots 0–2 always run (text-based).
+      // Slots 3–7 run only when a targetKeyword is available (Google search).
+      var calls = [
+        // #1 graphAndStatements → topics / bridge concepts / gaps
         this.analyzeText(text, { aiTopics: true }).catch(function (e) {
-          self.logger.warn(MODULE, 'graphAndStatements failed: ' + e.message);
-          return null;
+          self.logger.warn(MODULE, 'graphAndStatements failed: ' + e.message); return null;
         }),
+        // #2 graphAndAdvice → article-level AI advice text
         this.analyzeWithAdvice(text, options.optimize || 'gaps', signal).catch(function (e) {
-          self.logger.warn(MODULE, 'graphAndAdvice failed: ' + e.message);
-          return null;
+          self.logger.warn(MODULE, 'graphAndAdvice failed: ' + e.message); return null;
         }),
-      ]);
+        // #3 dotGraphFromText → bigrams + cluster descriptions
+        this._callAPI(
+          '/api/v1/dotGraphFromText',
+          { text: text, aiTopics: true },
+          { optimize: 'gaps', includeGraph: false, includeGraphSummary: true, extendedGraphSummary: true },
+          signal
+        ).catch(function (e) { self.logger.warn(MODULE, 'dotGraphFromText failed: ' + e.message); return null; }),
+      ];
 
-      var stmtResult   = results[0]; // graphAndStatements  → topics + entities
-      var adviceResult = results[1]; // graphAndAdvice      → advice text
+      if (keyword) {
+        calls.push(
+          // #10 — AI advice on what currently ranks for the target keyword
+          this._callAPI(
+            '/api/v1/import/googleSearchResultsAiAdvice',
+            { searchQuery: keyword, aiTopics: true, requestMode: 'summary', importCountry: country, importLanguage: lang },
+            { doNotSave: true, addStats: true, optimize: 'gaps', includeGraphSummary: true, extendedGraphSummary: true },
+            signal
+          ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchResultsAiAdvice failed: ' + e.message); return null; }),
+          // #11 — related search queries / reader intent
+          this._callAPI(
+            '/api/v1/import/googleSearchIntentGraph',
+            { searchQuery: keyword, aiTopics: true, keywordsSource: 'related', importCountry: country, importLanguage: lang },
+            { doNotSave: true, addStats: true, includeGraphSummary: true, extendedGraphSummary: true },
+            signal
+          ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchIntentGraph failed: ' + e.message); return null; }),
+          // #12 — AI advice on search intent (what readers want)
+          this._callAPI(
+            '/api/v1/import/googleSearchIntentAiAdvice',
+            { searchQuery: keyword, aiTopics: true, requestMode: 'summary', keywordsSource: 'related', importCountry: country, importLanguage: lang },
+            { doNotSave: true, addStats: true, optimize: 'gaps', includeGraphSummary: true, extendedGraphSummary: true },
+            signal
+          ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchIntentAiAdvice failed: ' + e.message); return null; }),
+          // #13 — supply-vs-demand graph
+          this._callAPI(
+            '/api/v1/import/googleSearchVsIntentGraph',
+            { searchQuery: keyword, aiTopics: true },
+            { doNotSave: true, addStats: true, compareMode: 'difference', includeGraphSummary: true, extendedGraphSummary: true },
+            signal
+          ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchVsIntentGraph failed: ' + e.message); return null; }),
+          // #14 — AI advice on supply/demand gap (best SEO insight)
+          this._callAPI(
+            '/api/v1/import/googleSearchVsIntentAiAdvice',
+            { searchQuery: keyword, aiTopics: true, requestMode: 'summary', keywordsSource: 'related' },
+            { doNotSave: true, addStats: true, compareMode: 'difference', optimize: 'gaps', includeGraphSummary: true, extendedGraphSummary: true },
+            signal
+          ).catch(function (e) { self.logger.warn(MODULE, 'googleSearchVsIntentAiAdvice failed: ' + e.message); return null; })
+        );
+      }
+
+      var results = await Promise.all(calls);
+
+      var stmtResult         = results[0]; // #1
+      var adviceResult       = results[1]; // #2
+      var dotResult          = results[2]; // #3
+      var rankingAdvResult   = keyword ? results[3] : null; // #10
+      var intentGResult      = keyword ? results[4] : null; // #11
+      var intentAResult      = keyword ? results[5] : null; // #12
+      var vsIntentGResult    = keyword ? results[6] : null; // #13
+      var gapAdvResult       = keyword ? results[7] : null; // #14
 
       if (!stmtResult && !adviceResult) return null;
 
-      // ─── 1) AI advice — from graphAndAdvice only ───────────────────────
-      var advice = null;
-      if (adviceResult && Array.isArray(adviceResult.aiAdvice) && adviceResult.aiAdvice.length > 0) {
-        var firstAdvice = adviceResult.aiAdvice[0];
-        if (firstAdvice && typeof firstAdvice.text === 'string' && firstAdvice.text.length > 0) {
-          advice = firstAdvice.text.slice(0, 2000);
+      // ─── Reused helpers (same as searchEntity) ───────────────────────
+      function _extractAdvice(r, maxLen) {
+        if (!r || !Array.isArray(r.aiAdvice) || !r.aiAdvice.length) return null;
+        var t = r.aiAdvice[0];
+        return (t && typeof t.text === 'string' && t.text.length > 0) ? t.text.slice(0, maxLen || 2000) : null;
+      }
+      function _extractTopicsData(r) {
+        if (!r) return {};
+        return r.aiTopics || (r.graph && r.graph.aiTopics) || {};
+      }
+      function _extractMainTopics(r, max) {
+        var td = _extractTopicsData(r);
+        if (Array.isArray(td.mainTopics) && td.mainTopics.length) return td.mainTopics.slice(0, max || 10);
+        var stmts = (r && r.statements) || (r && r.entriesAndGraphOfContext && r.entriesAndGraphOfContext.statements) || [];
+        var out = [];
+        for (var si = 0; si < stmts.length && out.length < (max || 10); si++) {
+          var c = stmts[si] && stmts[si].content;
+          if (c && out.indexOf(c) === -1) out.push(c);
         }
+        return out;
       }
 
-      // ─── 2) graphSummary — prefer stmtResult, fall back to adviceResult ─
+      // ─── Article-level advice (#2) ────────────────────────────────────
+      var advice = _extractAdvice(adviceResult, 2000);
+
+      // ─── Keyword-level advice (#10, #12, #14) ────────────────────────
+      var rankingAdvice = _extractAdvice(rankingAdvResult, 2000);
+      var intentAdvice  = _extractAdvice(intentAResult,   2000);
+      var gapAdvice     = _extractAdvice(gapAdvResult,    2000);
+
+      // ─── graphSummary — best available ───────────────────────────────
       var graphSummary = null;
-      var summaryCandidate = stmtResult || adviceResult;
-      if (typeof summaryCandidate.graphSummary === 'string' && summaryCandidate.graphSummary.length > 0) {
-        graphSummary = summaryCandidate.graphSummary.slice(0, 1000);
-      } else if (summaryCandidate.graph && typeof summaryCandidate.graph.graphSummary === 'string' && summaryCandidate.graph.graphSummary.length > 0) {
-        graphSummary = summaryCandidate.graph.graphSummary.slice(0, 1000);
-      }
-      // If stmtResult had no summary, also check adviceResult
-      if (!graphSummary && stmtResult && adviceResult) {
-        if (typeof adviceResult.graphSummary === 'string' && adviceResult.graphSummary.length > 0) {
-          graphSummary = adviceResult.graphSummary.slice(0, 1000);
-        } else if (adviceResult.graph && typeof adviceResult.graph.graphSummary === 'string' && adviceResult.graph.graphSummary.length > 0) {
-          graphSummary = adviceResult.graph.graphSummary.slice(0, 1000);
-        }
+      var summaryOrder = [dotResult, stmtResult, adviceResult, rankingAdvResult];
+      for (var si = 0; si < summaryOrder.length; si++) {
+        var sc = summaryOrder[si];
+        if (!sc) continue;
+        if (typeof sc.graphSummary === 'string' && sc.graphSummary.length > 0) { graphSummary = sc.graphSummary.slice(0, 1500); break; }
+        if (sc.graph && typeof sc.graph.graphSummary === 'string' && sc.graph.graphSummary.length > 0) { graphSummary = sc.graph.graphSummary.slice(0, 1500); break; }
       }
 
-      // ─── 3) AI-extracted topics — from graphAndStatements only ────────
-      var aiTopicsData = {};
-      if (stmtResult) {
-        aiTopicsData = stmtResult.aiTopics || (stmtResult.graph && stmtResult.graph.aiTopics) || {};
-      }
-      var mainTopics        = Array.isArray(aiTopicsData.mainTopics)        ? aiTopicsData.mainTopics.slice(0, 10)        : [];
-      var contentGaps       = Array.isArray(aiTopicsData.contentGaps)       ? aiTopicsData.contentGaps.slice(0, 5)        : [];
-      var researchQuestions = Array.isArray(aiTopicsData.researchQuestions) ? aiTopicsData.researchQuestions.slice(0, 3) : [];
+      // ─── Topics / gaps / questions from #1 ───────────────────────────
+      var aiTopicsData      = _extractTopicsData(stmtResult);
+      var mainTopics        = Array.isArray(aiTopicsData.mainTopics)        ? aiTopicsData.mainTopics.slice(0, 10)       : [];
+      var contentGaps       = Array.isArray(aiTopicsData.contentGaps)       ? aiTopicsData.contentGaps.slice(0, 5)       : [];
+      var researchQuestions = Array.isArray(aiTopicsData.researchQuestions) ? aiTopicsData.researchQuestions.slice(0, 5) : [];
 
-      // ─── 4) Bridge concepts = entities never connected in the graph ────
+      // ─── Bridge concepts from #1 ─────────────────────────────────────
       var statsData = stmtResult ? (stmtResult.stats || (stmtResult.graph && stmtResult.graph.stats) || {}) : {};
       var missingEntities = [];
       if (Array.isArray(statsData.gaps)) {
@@ -336,32 +408,65 @@ class InfranodusAnalyzer extends EventEmitter {
           var gap = statsData.gaps[i];
           if (gap && Array.isArray(gap.bridgeConcepts)) {
             for (var j = 0; j < gap.bridgeConcepts.length; j++) {
-              if (missingEntities.indexOf(gap.bridgeConcepts[j]) === -1) {
-                missingEntities.push(gap.bridgeConcepts[j]);
-              }
+              if (missingEntities.indexOf(gap.bridgeConcepts[j]) === -1) missingEntities.push(gap.bridgeConcepts[j]);
             }
           }
         }
         missingEntities = missingEntities.slice(0, 10);
       }
 
+      // ─── Related queries (#11) + demand topics/gaps (#13) ────────────
+      var relatedQueries = _extractMainTopics(intentGResult, 12);
+      var demandTopics   = _extractMainTopics(vsIntentGResult, 12);
+      var vsTopicsData   = _extractTopicsData(vsIntentGResult);
+      var demandGaps     = Array.isArray(vsTopicsData.contentGaps) ? vsTopicsData.contentGaps.slice(0, 5) : [];
+
+      // ─── Bigrams + cluster descriptions from #3 ──────────────────────
+      var bigrams = [];
+      var clusterDescriptions = [];
+      if (dotResult) {
+        if (Array.isArray(dotResult.bigrams)) bigrams = dotResult.bigrams.slice(0, 15);
+        if (Array.isArray(dotResult.allClusters)) {
+          for (var ci = 0; ci < dotResult.allClusters.length; ci++) {
+            var cl = dotResult.allClusters[ci];
+            if (cl && typeof cl.text === 'string' && cl.text.trim()) clusterDescriptions.push(cl.text.trim());
+          }
+        }
+        if (!clusterDescriptions.length && typeof dotResult.clusterKeywords === 'string' && dotResult.clusterKeywords.trim()) {
+          clusterDescriptions = [dotResult.clusterKeywords.trim()];
+        }
+      }
+
       var enhancement = {
-        mainTopics:        mainTopics,
-        missingEntities:   missingEntities,
-        contentGaps:       contentGaps,
-        researchQuestions: researchQuestions,
-        advice:            advice,
-        graphSummary:      graphSummary,
-        analyzedAt:        new Date().toISOString(),
-        charsSent:         text.length,
+        // Text-analysis fields (always present)
+        mainTopics:           mainTopics,
+        missingEntities:      missingEntities,
+        contentGaps:          contentGaps,
+        researchQuestions:    researchQuestions,
+        advice:               advice,
+        graphSummary:         graphSummary,
+        bigrams:              bigrams,
+        clusterDescriptions:  clusterDescriptions,
+        // Keyword/SEO fields (present only when targetKeyword was supplied)
+        targetKeyword:        keyword || null,
+        rankingAdvice:        rankingAdvice,
+        intentAdvice:         intentAdvice,
+        gapAdvice:            gapAdvice,
+        relatedQueries:       relatedQueries,
+        demandTopics:         demandTopics,
+        demandGaps:           demandGaps,
+        // Meta
+        analyzedAt:           new Date().toISOString(),
+        charsSent:            text.length,
       };
 
       this.logger.info(MODULE,
         'enhanceArticle complete — topics:' + mainTopics.length +
         ' entities:' + missingEntities.length +
-        ' gaps:' + contentGaps.length +
-        ' advice:' + (advice ? 'yes' : 'no') +
-        ' summary:' + (graphSummary ? 'yes' : 'no')
+        ' bigrams:' + bigrams.length +
+        (keyword ? ' keyword:"' + keyword + '"' : '') +
+        ' rankingAdv:' + (rankingAdvice ? 'yes' : 'no') +
+        ' gapAdv:' + (gapAdvice ? 'yes' : 'no')
       );
 
       this._setCache(cacheKey, enhancement);

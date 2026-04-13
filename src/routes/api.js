@@ -3009,11 +3009,47 @@ function createApiRouter(deps) {
     });
   });
 
+  // ─── GET /api/drafts/:id/infranodus/history ───────────────────────────────
+  // Returns all InfraNodus analysis runs for a draft (newest first, max 50).
+
+  router.get('/drafts/:id/infranodus/history', function (req, res) {
+    var id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid draft id' });
+    try {
+      var rows = db.prepare(
+        'SELECT id, source, query, created_at FROM infranodus_history WHERE draft_id = ? ORDER BY created_at DESC LIMIT 50'
+      ).all(id);
+      res.json({ ok: true, history: rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/drafts/:id/infranodus/history/:historyId ────────────────────
+  // Returns full data_json for one history entry.
+
+  router.get('/drafts/:id/infranodus/history/:historyId', function (req, res) {
+    var id = parseId(req.params.id);
+    var hid = parseId(req.params.historyId);
+    if (!id || !hid) return res.status(400).json({ error: 'Invalid id' });
+    try {
+      var row = db.prepare(
+        'SELECT id, source, query, data_json, created_at FROM infranodus_history WHERE id = ? AND draft_id = ?'
+      ).get(hid, id);
+      if (!row) return res.status(404).json({ error: 'History entry not found' });
+      var data = {};
+      try { data = JSON.parse(row.data_json); } catch (e) {}
+      res.json({ ok: true, id: row.id, source: row.source, query: row.query, createdAt: row.created_at, data: data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/drafts/:id/analyze', async function (req, res) {
     var id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: 'Invalid draft id' });
 
-    var draft = db.prepare('SELECT id, extracted_content, rewritten_html FROM drafts WHERE id = ?')
+    var draft = db.prepare('SELECT id, extracted_content, rewritten_html, target_keyword FROM drafts WHERE id = ?')
       .get(id);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
@@ -3025,18 +3061,139 @@ function createApiRouter(deps) {
     }
 
     try {
-      // Pass full text — enhanceArticle internally truncates to TEXT_LIMIT (12 000 chars)
-      var infraData = await infranodus.enhanceArticle(text);
+      // Pass targetKeyword so Google search endpoints (#10-#14) also fire
+      var infraData = await infranodus.enhanceArticle(text, { targetKeyword: draft.target_keyword || '' });
       if (!infraData) {
         return res.status(502).json({ error: 'InfraNodus returned no data. Check your API key and that the article has enough content (200+ chars).' });
       }
+      var infraJson = JSON.stringify(infraData);
       db.prepare('UPDATE drafts SET infranodus_data = ?, updated_at = datetime(\'now\') WHERE id = ?')
-        .run(JSON.stringify(infraData), id);
+        .run(infraJson, id);
+      // Append to analysis history
+      db.prepare("INSERT INTO infranodus_history (draft_id, source, query, data_json) VALUES (?, 'article', ?, ?)")
+        .run(id, draft.target_keyword || null, infraJson);
       res.json({ success: true, infraData });
     } catch (err) {
       logger.error('api', 'POST /drafts/:id/analyze failed: ' + err.message);
       var safe = sanitizeForClient(err);
       res.status(safe.status).json({ error: safe.message });
+    }
+  });
+
+  // ─── POST /api/drafts/:id/infranodus-merge ────────────────────────────────
+  // Merges Entity Deep Search results into the draft's infranodus_data so the
+  // next AI rewrite uses the entity search data alongside article analysis.
+  // Keeps existing article-analysis fields; overlays SEO/keyword fields from
+  // the entity search result.
+
+  router.post('/drafts/:id/infranodus-merge', function (req, res) {
+    var id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid draft id' });
+
+    var entityData = req.body && req.body.entityData;
+    if (!entityData || typeof entityData !== 'object') {
+      return res.status(400).json({ error: 'entityData object required' });
+    }
+
+    var draft = db.prepare('SELECT id, infranodus_data FROM drafts WHERE id = ?').get(id);
+    if (!draft) return res.status(404).json({ error: 'Draft not found' });
+
+    // Parse existing stored analysis (may be null / empty)
+    var existing = {};
+    try { existing = JSON.parse(draft.infranodus_data || '{}') || {}; } catch (e) {}
+
+    // Deduplicate-merge two string arrays
+    function mergeUniq(a, b) {
+      var out = (a || []).slice();
+      (b || []).forEach(function (v) { if (v && out.indexOf(v) === -1) out.push(v); });
+      return out.slice(0, 15);
+    }
+
+    var merged = {
+      // ── Article text fields — keep existing, entity fills gaps ────────
+      mainTopics:          mergeUniq(existing.mainTopics,        entityData.mainTopics),
+      missingEntities:     mergeUniq(existing.missingEntities,   entityData.missingEntities),
+      contentGaps:         mergeUniq(existing.contentGaps,       entityData.contentGaps),
+      researchQuestions:   mergeUniq(existing.researchQuestions, entityData.researchQuestions),
+      advice:              existing.advice        || null,
+      graphSummary:        entityData.graphSummary || existing.graphSummary || null,
+      bigrams:             (entityData.bigrams && entityData.bigrams.length)
+                             ? entityData.bigrams
+                             : (existing.bigrams || []),
+      clusterDescriptions: (entityData.clusterDescriptions && entityData.clusterDescriptions.length)
+                             ? entityData.clusterDescriptions
+                             : (existing.clusterDescriptions || []),
+      // ── SEO / keyword fields — entity search always wins ─────────────
+      targetKeyword:       entityData.entity       || existing.targetKeyword || null,
+      rankingAdvice:       entityData.rankingAdvice || existing.rankingAdvice || null,
+      intentAdvice:        entityData.intentAdvice  || existing.intentAdvice  || null,
+      gapAdvice:           entityData.gapAdvice     || existing.gapAdvice     || null,
+      relatedQueries:      mergeUniq(existing.relatedQueries, entityData.relatedQueries),
+      demandTopics:        mergeUniq(existing.demandTopics,   entityData.demandTopics),
+      demandGaps:          mergeUniq(existing.demandGaps,     entityData.demandGaps),
+      // ── Meta ─────────────────────────────────────────────────────────
+      charsSent:           existing.charsSent || 0,
+      analyzedAt:          existing.analyzedAt || entityData.analyzedAt || new Date().toISOString(),
+      entityAppliedAt:     new Date().toISOString(),
+    };
+
+    var mergedJson = JSON.stringify(merged);
+    db.prepare("UPDATE drafts SET infranodus_data = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(mergedJson, id);
+    // Append to history
+    db.prepare("INSERT INTO infranodus_history (draft_id, source, query, data_json) VALUES (?, 'entity', ?, ?)")
+      .run(id, entityData.entity || null, mergedJson);
+    logger.info('api', 'InfraNodus entity merge applied to draft #' + id +
+      ' — entity:"' + (entityData.entity || '') + '"');
+    res.json({ success: true });
+  });
+
+  // ─── POST /api/drafts/:id/ai-patch ───────────────────────────────────────
+  // Targeted AI edit of an HTML content string.
+  // Body: { html, instruction, provider?, model? }
+  // Returns: { success, html }
+
+  router.post('/drafts/:id/ai-patch', async function (req, res) {
+    var id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid draft id' });
+
+    var html = req.body && req.body.html;
+    var instruction = req.body && req.body.instruction;
+
+    if (!html || typeof html !== 'string' || html.trim().length < 10) {
+      return res.status(400).json({ error: 'html is required (min 10 chars)' });
+    }
+    if (!instruction || typeof instruction !== 'string' || instruction.trim().length < 3) {
+      return res.status(400).json({ error: 'instruction is required' });
+    }
+
+    if (!rewriter || !rewriter.ready) {
+      return res.status(503).json({ error: 'AI rewriter not ready. Configure an API key in Settings.' });
+    }
+
+    // Load InfraNodus data for context
+    var draft = db.prepare('SELECT infranodus_data FROM drafts WHERE id = ?').get(id);
+    var infraData = {};
+    if (draft && draft.infranodus_data) {
+      try { infraData = JSON.parse(draft.infranodus_data) || {}; } catch (e) {}
+    }
+
+    var opts = {
+      provider: req.body.provider || undefined,
+      model: req.body.model || undefined,
+      infraData: infraData,
+    };
+
+    try {
+      var edited = await rewriter.patchContent(html.trim(), instruction.trim(), opts);
+      if (!edited || edited.length < 20) {
+        return res.status(500).json({ error: 'AI returned empty response' });
+      }
+      logger.info('api', 'AI patch applied to draft #' + id + ' — "' + instruction.slice(0, 60) + '"');
+      res.json({ success: true, html: edited });
+    } catch (err) {
+      logger.error('api', 'AI patch error: ' + err.message);
+      res.status(500).json({ error: err.message });
     }
   });
 
