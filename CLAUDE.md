@@ -53,3 +53,7 @@ public/
 - Master AI prompt is the `SYSTEM_PROMPT` constant in `rewriter.js`
 - `rewriteDraftContent()` in `draft-helpers.js` is the single rewrite entry point — never bypass it
 - Never skip local test before pushing to GitHub
+
+## Cancelled / out-of-scope
+- Blogspot platform: will NEVER be added. WordPress only.
+- Indian Vehicle Data SEO feature: cancelled, do not implement.

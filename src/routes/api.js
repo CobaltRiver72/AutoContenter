@@ -5548,7 +5548,7 @@ function createApiRouter(deps) {
       ).get() || {}).cnt || 0;
       var rows = db.prepare(
         "SELECT d.id, d.cluster_id, d.rewritten_title, d.source_domain, d.rewritten_word_count, " +
-        "d.ai_model_used, d.language, d.wp_category_ids, d.wp_primary_cat_id, d.wp_author_id_override, " +
+        "d.ai_model_used, d.source_language AS language, d.wp_category_ids, d.wp_primary_cat_id, d.wp_author_id_override, " +
         "d.updated_at, c.avg_similarity, c.article_count, c.trends_boosted " +
         "FROM drafts d LEFT JOIN clusters c ON d.cluster_id = c.id " +
         "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +

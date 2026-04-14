@@ -774,9 +774,13 @@ class Pipeline {
     try {
       if (!this.canPublishNow()) return;
 
-      // Find a cluster with primary draft in 'ready' status
+      // Find a cluster with primary draft in 'ready' status.
+      // c.article_count and c.avg_similarity MUST be in the SELECT — the
+      // autopilot gate below reads them from readyPrimary; if they're missing
+      // they come back undefined, default to 1/0, and every article is
+      // permanently rejected with "too few sources".
       var readyPrimary = this.db.prepare(
-        "SELECT d.*, c.topic, c.trends_boosted FROM drafts d " +
+        "SELECT d.*, c.topic, c.trends_boosted, c.article_count, c.avg_similarity FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
         "WHERE d.mode IN ('auto', 'manual_import') AND d.status = 'ready' AND d.cluster_role = 'primary' " +
         "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100 " +
@@ -790,7 +794,9 @@ class Pipeline {
 
       // ─── Autopilot gate ────────────────────────────────────────────────────
       if (this.autopilot && this.autopilot.isActive()) {
-        // Build minimal cluster/draft objects for the decision engine
+        // Build minimal cluster/draft objects for the decision engine.
+        // Use correct column names from the drafts table:
+        //   source_language (not language), rewritten_word_count (not word_count)
         var clusterForAutopilot = {
           id: readyPrimary.cluster_id,
           avg_similarity: readyPrimary.avg_similarity || 0,
@@ -798,11 +804,11 @@ class Pipeline {
         };
         var draftForAutopilot = {
           title: readyPrimary.rewritten_title || readyPrimary.source_title || '',
-          language: readyPrimary.language || 'en',
-          word_count: readyPrimary.word_count || 0,
-          tier: readyPrimary.source_tier || 3,
+          language: readyPrimary.source_language || 'en',
+          word_count: readyPrimary.rewritten_word_count || 0,
+          tier: 3,
           domain: readyPrimary.source_domain || '',
-          page_category: readyPrimary.page_category || '',
+          page_category: readyPrimary.source_category || '',
         };
         var decision = this.autopilot.shouldPublish(clusterForAutopilot, draftForAutopilot);
         this.autopilot.logDecision(
