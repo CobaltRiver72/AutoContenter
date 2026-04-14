@@ -2,6 +2,7 @@
 
 var { extractDraftContent } = require('../utils/draft-helpers');
 var _cfg = require('../utils/config');
+var { resolveTaxonomy } = require('../utils/publish-rule-engine');
 
 var MODULE = 'pipeline';
 
@@ -650,6 +651,7 @@ class Pipeline {
       ).all(clusterId);
 
       // Build the objects the publisher expects
+      var taxonomy = resolveTaxonomy(readyPrimary, this.db, require('../utils/config').getConfig());
       var rewrittenArticle = {
         title: readyPrimary.rewritten_title || readyPrimary.source_title,
         content: readyPrimary.rewritten_html,
@@ -664,6 +666,11 @@ class Pipeline {
         targetDomain: readyPrimary.target_domain || '',
         featuredImage: readyPrimary.featured_image || null,
         faq: [],
+        wpCategories:   taxonomy.categoryIds,
+        wpPrimaryCatId: taxonomy.primaryCategoryId,
+        wpTags:         taxonomy.tagIds,
+        wpAuthorId:     taxonomy.authorId,
+        wpPostStatus:   taxonomy.postStatus || null,
       };
 
       // Find featured image from any cluster draft

@@ -3098,7 +3098,7 @@ function createApiRouter(deps) {
       var updates = [];
       var params = [];
 
-      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status', 'featured_image', 'custom_ai_instructions', 'wp_category_ids', 'wp_primary_cat_id', 'wp_tag_ids', 'wp_author_id_override'];
+      var fields = ['target_keyword', 'target_domain', 'target_platform', 'target_language', 'schema_types', 'status', 'featured_image', 'custom_ai_instructions', 'wp_category_ids', 'wp_primary_cat_id', 'wp_tag_ids', 'wp_author_id_override', 'wp_post_status_override'];
       for (var i = 0; i < fields.length; i++) {
         if (body[fields[i]] !== undefined) {
           updates.push(fields[i] + ' = ?');
@@ -4301,6 +4301,7 @@ function createApiRouter(deps) {
             wpPrimaryCatId: taxonomy.primaryCategoryId,
             wpTags:         taxonomy.tagIds,
             wpAuthorId:     taxonomy.authorId,
+            wpPostStatus:   taxonomy.postStatus || null,
           };
 
           // Build a minimal cluster with articles for image extraction

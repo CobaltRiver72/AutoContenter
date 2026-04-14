@@ -440,6 +440,7 @@ function runMigrations() {
     try { db.exec('ALTER TABLE drafts ADD COLUMN wp_primary_cat_id INTEGER DEFAULT NULL'); } catch (e) { /* already exists */ }
     try { db.exec('ALTER TABLE drafts ADD COLUMN wp_tag_ids TEXT DEFAULT NULL'); } catch (e) { /* already exists */ }
     try { db.exec('ALTER TABLE drafts ADD COLUMN wp_author_id_override INTEGER DEFAULT NULL'); } catch (e) { /* already exists */ }
+    try { db.exec('ALTER TABLE drafts ADD COLUMN wp_post_status_override TEXT DEFAULT NULL'); } catch (e) { /* already exists */ }
 
     // InfraNodus analysis history — one row per analysis run so users can
     // pull past data without it being overwritten by future runs.

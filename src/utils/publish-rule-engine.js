@@ -78,7 +78,8 @@ function resolveTaxonomy(draft, db, config) {
     || (matchedRule && matchedRule.wp_author_id ? Number(matchedRule.wp_author_id) : null)
     || defaultAuthorId;
 
-  return { categoryIds: categoryIds, primaryCategoryId: primaryCategoryId, tagIds: tagIds, authorId: authorId };
+  var postStatus = draft.wp_post_status_override || null;
+  return { categoryIds: categoryIds, primaryCategoryId: primaryCategoryId, tagIds: tagIds, authorId: authorId, postStatus: postStatus };
 }
 
 module.exports = { resolveTaxonomy };

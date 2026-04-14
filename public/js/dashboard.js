@@ -4209,8 +4209,17 @@
           _populateTaxonomySelects();
           var statusEl = document.getElementById('wpTaxSyncStatus');
           if (statusEl && data.synced_at) statusEl.textContent = 'Last synced: ' + data.synced_at.slice(0, 16).replace('T', ' ');
+
+          // Update tab button labels with counts
+          var catBtn = document.querySelector('[data-tax-tab="category"]');
+          var tagBtn = document.querySelector('[data-tax-tab="tag"]');
+          var authBtn = document.querySelector('[data-tax-tab="author"]');
+          if (catBtn) catBtn.textContent = 'Categories (' + (data.categories || []).length + ')';
+          if (tagBtn) tagBtn.textContent = 'Tags (' + (data.tags || []).length + ')';
+          if (authBtn) authBtn.textContent = 'Authors (' + (data.authors || []).length + ')';
+
           var wrap = document.getElementById('wpTaxCacheWrap');
-          if (wrap && (data.categories.length || data.tags.length || data.authors.length)) {
+          if (wrap) {
             wrap.style.display = '';
             window.__showTaxTab('category');
           }
@@ -4221,27 +4230,41 @@
   }
 
   window.__showTaxTab = function (taxType) {
-    if (!_wpTaxonomy) return;
+    if (!_wpTaxonomy) { return; }
     var wrap = document.getElementById('wpTaxTableWrap');
     if (!wrap) return;
+
     // Update active state on tab buttons
     document.querySelectorAll('[data-tax-tab]').forEach(function (btn) {
       var isActive = btn.getAttribute('data-tax-tab') === taxType;
       btn.classList.toggle('btn-primary', isActive);
       btn.classList.toggle('btn-secondary', !isActive);
     });
-    var items = _wpTaxonomy[taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors'] || [];
-    if (!items.length) { wrap.innerHTML = '<p style="color:#666;font-size:12px;padding:4px;">None synced yet.</p>'; return; }
-    wrap.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
-      '<thead><tr><th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">Name</th>' +
-      (taxType !== 'author' ? '<th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">Slug</th>' : '') +
-      '<th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">ID</th></tr></thead><tbody>' +
+
+    var key = taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors';
+    var items = _wpTaxonomy[key] || [];
+    var typeLabel = taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors';
+
+    if (!items.length) {
+      wrap.innerHTML = '<p style="color:#888;font-size:12px;padding:6px 0;">No ' + typeLabel + ' found. ' +
+        (taxType === 'author' ? 'Ensure your WP credentials have permission to list users.' : 'Click Sync to refresh.') + '</p>';
+      return;
+    }
+
+    wrap.innerHTML = '<table class="data-table" style="font-size:12px;">' +
+      '<thead><tr>' +
+      '<th>Name</th>' +
+      (taxType !== 'author' ? '<th>Slug</th>' : '') +
+      '<th style="width:60px">ID</th>' +
+      '</tr></thead><tbody>' +
       items.map(function (item) {
         return '<tr>' +
-          '<td style="padding:3px 6px;color:#e6edf3;">' + escapeHtml(item.name) + '</td>' +
-          (taxType !== 'author' ? '<td style="padding:3px 6px;color:#6e7681;">/' + escapeHtml(item.slug) + '</td>' : '') +
-          '<td style="padding:3px 6px;color:#6e7681;">' + item.wp_id + '</td></tr>';
-      }).join('') + '</tbody></table>';
+          '<td>' + escapeHtml(item.name) + '</td>' +
+          (taxType !== 'author' ? '<td style="color:var(--text-muted);">/' + escapeHtml(item.slug) + '</td>' : '') +
+          '<td style="color:var(--text-muted);">' + item.wp_id + '</td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table>';
   };
 
   function _populateTaxonomySelects() {
@@ -4442,6 +4465,8 @@
     if (tagSel) Array.from(tagSel.options).forEach(function(o){ o.selected = tagIds.indexOf(Number(o.value)) !== -1; });
     if (primSel && draft.wp_primary_cat_id) primSel.value = String(draft.wp_primary_cat_id);
     if (authSel && draft.wp_author_id_override) authSel.value = String(draft.wp_author_id_override);
+    var statusSel = document.getElementById('editor-wp-post-status');
+    if (statusSel && draft.wp_post_status_override) statusSel.value = draft.wp_post_status_override;
 
     // Build resolved preview
     var resolvedEl = document.getElementById('editor-taxonomy-resolved');
@@ -6037,6 +6062,7 @@
         wp_primary_cat_id: editorPrimCat && editorPrimCat.value ? Number(editorPrimCat.value) : null,
         wp_tag_ids: editorTagIds.length ? JSON.stringify(editorTagIds) : null,
         wp_author_id_override: editorAuthor && editorAuthor.value ? Number(editorAuthor.value) : null,
+        wp_post_status_override: (function() { var s = document.getElementById('editor-wp-post-status'); return s && s.value ? s.value : null; })(),
       }
     }).catch(function (err) { showToast('Failed to save settings', 'error'); });
   }

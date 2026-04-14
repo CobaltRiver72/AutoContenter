@@ -571,7 +571,7 @@
                 <button class="btn btn-xs btn-secondary" data-tax-tab="tag" onclick="window.__showTaxTab('tag')">Tags</button>
                 <button class="btn btn-xs btn-secondary" data-tax-tab="author" onclick="window.__showTaxTab('author')">Authors</button>
               </div>
-              <div id="wpTaxTableWrap" style="max-height:180px;overflow-y:auto;background:#111;border-radius:6px;padding:8px;"></div>
+              <div id="wpTaxTableWrap" style="max-height:320px;overflow-y:auto;margin-top:4px;"></div>
             </div>
             <!-- Rules -->
             <div class="settings-group-title" style="margin-top:16px;">Publishing Rules</div>
@@ -1545,10 +1545,22 @@
             </div>
 
             <!-- Author -->
-            <div style="margin-bottom:16px;">
+            <div style="margin-bottom:12px;">
               <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Author</div>
               <select id="editor-wp-author" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:12px;">
                 <option value="">— use rule / global default —</option>
+              </select>
+            </div>
+
+            <!-- Post Status -->
+            <div style="margin-bottom:16px;">
+              <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Post Status <small style="color:#666;font-weight:400;">— override for this draft only</small></div>
+              <select id="editor-wp-post-status" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:12px;">
+                <option value="">— use global default (WP_POST_STATUS setting) —</option>
+                <option value="publish">Publish immediately</option>
+                <option value="draft">Save as Draft</option>
+                <option value="pending">Pending Review</option>
+                <option value="private">Private</option>
               </select>
             </div>
 

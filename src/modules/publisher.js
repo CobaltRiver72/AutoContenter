@@ -495,7 +495,7 @@ class WordPressPublisher {
       slug: rewrittenArticle.slug || '',
       content: postContent,
       excerpt: rewrittenArticle.excerpt,
-      status: this.config.WP_POST_STATUS || 'draft',
+      status: rewrittenArticle.wpPostStatus || this.config.WP_POST_STATUS || 'draft',
       author: wpAuthorId,
       categories: wpCategories,
       tags: wpTags,
