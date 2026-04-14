@@ -26,7 +26,7 @@ function _publishCooldownMs() { return (parseInt(_cfg.get('PUBLISH_COOLDOWN_MINU
  * All run in the same Node.js process. SQLite drafts table is the queue.
  */
 class Pipeline {
-  constructor(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot) {
+  constructor(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot, classifier) {
     this.config = config;
     this.db = db;
     this.rewriter = rewriter;
@@ -35,6 +35,7 @@ class Pipeline {
     this.extractor = extractor;
     this.infranodus = infranodus || null;
     this.autopilot = autopilot || null;
+    this.classifier = classifier || null;
 
     // Worker config is read fresh from config on each cycle via helper functions
     // above (_leaseMins, _rewriteConcurrency, etc.) for hot-reload support.
@@ -400,6 +401,97 @@ class Pipeline {
       this.stats.rewritesCompleted++;
       this.logger.info(MODULE, 'Rewrite complete: cluster #' + clusterId + ' -> "' +
         (rewritten.title || '').substring(0, 60) + '" (' + (rewritten.wordCount || 0) + ' words)');
+
+      // ─── Content Classification ──────────────────────────────────────────
+      if (this.classifier && _cfg.get('AUTHOR_ASSIGNMENT_ENABLED') !== 'false') {
+        try {
+          // Layer 1: local keyword scoring
+          var localScore = this.classifier.scoreLocally(
+            primaryDraft.source_title || '',
+            primaryDraft.extracted_text || '',
+            primaryDraft.source_domain || '',
+            primaryDraft.source_category || ''
+          );
+
+          // Layer 2: AI classification embedded in rewrite response
+          var aiCls = rewritten.aiCategory ? {
+            category: rewritten.aiCategory,
+            author:   rewritten.aiAuthorBeat,
+            tags:     rewritten.aiTags || [],
+            confidence: rewritten.aiConfidence || 0
+          } : null;
+
+          // Merge strategy
+          var l2Confident = aiCls && aiCls.confidence >= 0.8;
+          var finalCls;
+
+          if (localScore.allConfident && !l2Confident) {
+            finalCls = { category: localScore.category.key, author: localScore.author.username,
+              tags: localScore.tags, source: 'layer1_keyword',
+              l1Score: localScore.category.score, l2Conf: 0, reasons: localScore.matchReasons };
+          } else if (l2Confident) {
+            var mergedT = Array.from(new Set((aiCls.tags).concat(localScore.tags))).slice(0, 10);
+            finalCls = { category: aiCls.category, author: aiCls.author,
+              tags: mergedT, source: 'layer2_ai',
+              l1Score: localScore.category.score, l2Conf: aiCls.confidence,
+              reasons: ['ai_classification (conf:' + aiCls.confidence + ')'] };
+          } else if (localScore.allConfident) {
+            var mergedT2 = aiCls ? Array.from(new Set((aiCls.tags || []).concat(localScore.tags))).slice(0, 10) : localScore.tags;
+            finalCls = { category: localScore.category.key, author: localScore.author.username,
+              tags: mergedT2, source: 'layer1_primary',
+              l1Score: localScore.category.score, l2Conf: aiCls ? aiCls.confidence : 0,
+              reasons: localScore.matchReasons };
+          } else if (aiCls) {
+            finalCls = { category: aiCls.category, author: aiCls.author,
+              tags: aiCls.tags, source: 'layer2_ai_fallback',
+              l1Score: localScore.category.score, l2Conf: aiCls.confidence,
+              reasons: ['ai_fallback (l1_score:' + localScore.category.score + ')'] };
+          } else {
+            finalCls = { category: 'general', author: 'karan-verma',
+              tags: localScore.tags, source: 'default_fallback',
+              l1Score: 0, l2Conf: 0, reasons: ['no_confident_match'] };
+          }
+
+          // Resolve WP IDs and update draft only if no manual overrides exist
+          var catMap = this.classifier.getCategoryWpIdMap();
+          var authMap = this.classifier.getAuthorWpIdMap();
+          var wpCatId = catMap[finalCls.category] || null;
+          var wpAuthId = authMap[finalCls.author] || null;
+
+          var colParts = [], colVals = [];
+          if (wpCatId && !primaryDraft.wp_category_ids) {
+            colParts.push('wp_category_ids = ?', 'wp_primary_cat_id = ?');
+            colVals.push(JSON.stringify([wpCatId]), wpCatId);
+          }
+          if (wpAuthId && !primaryDraft.wp_author_id_override) {
+            colParts.push('wp_author_id_override = ?');
+            colVals.push(wpAuthId);
+          }
+          if (colParts.length) {
+            colVals.push(primaryDraft.id);
+            this.db.prepare('UPDATE drafts SET ' + colParts.join(', ') + ' WHERE id = ?')
+              .run(...colVals);
+          }
+
+          // Log to classification_log
+          this.classifier.logClassification({
+            draft_id: primaryDraft.id, cluster_id: clusterId,
+            title: rewritten.title || primaryDraft.source_title || '',
+            assigned_category: finalCls.category, assigned_author: finalCls.author,
+            assigned_tags: finalCls.tags, layer_used: finalCls.source,
+            l1_category_score: finalCls.l1Score,
+            l1_author_score: localScore.author ? localScore.author.score : 0,
+            l2_ai_confidence: finalCls.l2Conf, match_reasons: finalCls.reasons
+          });
+
+          this.logger.info(MODULE, 'Classified → cat:' + finalCls.category +
+            ' author:' + finalCls.author + ' tags:' + finalCls.tags.length +
+            ' src:' + finalCls.source);
+        } catch (clsErr) {
+          this.logger.warn(MODULE, 'Classification failed (non-fatal): ' + clsErr.message);
+        }
+      }
+      // ─── End classification ──────────────────────────────────────────────
 
     } catch (err) {
       this._activeControllers.delete(rewriteController);
