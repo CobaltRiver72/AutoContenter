@@ -1324,8 +1324,12 @@
         <div class="page-header">
           <h2 class="page-title">Autopilot</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-outline" id="autopilotSimulateBtn">🧪 Simulate</button>
-            <button class="btn btn-sm btn-ghost" id="autopilotRefreshBtn">↻ Refresh</button>
+            <button class="btn btn-sm btn-outline" id="autopilotSimulateBtn">
+              <svg data-lucide="flask-conical" class="icon"></svg> Simulate
+            </button>
+            <button class="btn btn-sm btn-ghost" id="autopilotRefreshBtn">
+              <svg data-lucide="refresh-cw" class="icon"></svg> Refresh
+            </button>
           </div>
         </div>
 
@@ -1379,32 +1383,34 @@
 
         <!-- Auto-Rewrite Engine Card -->
         <div class="card" style="margin-bottom:16px;">
-          <div class="card-title">Auto-Rewrite Engine</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:14px;">
-            <div class="settings-row">
-              <label class="settings-label">Daily Limit</label>
-              <input type="number" min="1" data-setting-key="AUTO_REWRITE_DAILY_LIMIT" class="settings-input" />
+          <h3 class="card-title">Auto-Rewrite Engine</h3>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;">
+            <div class="form-field">
+              <label class="form-label">Daily Limit</label>
+              <input type="number" min="1" data-setting-key="AUTO_REWRITE_DAILY_LIMIT" class="settings-input" style="width:100%;" />
             </div>
-            <div class="settings-row">
-              <label class="settings-label">Hourly Limit</label>
-              <input type="number" min="1" data-setting-key="AUTO_REWRITE_HOURLY_LIMIT" class="settings-input" />
+            <div class="form-field">
+              <label class="form-label">Hourly Limit</label>
+              <input type="number" min="1" data-setting-key="AUTO_REWRITE_HOURLY_LIMIT" class="settings-input" style="width:100%;" />
             </div>
-            <div class="settings-row">
-              <label class="settings-label">Min Sources</label>
-              <input type="number" min="1" data-setting-key="AUTO_REWRITE_MIN_SOURCES" class="settings-input" />
+            <div class="form-field">
+              <label class="form-label">Min Sources</label>
+              <input type="number" min="1" data-setting-key="AUTO_REWRITE_MIN_SOURCES" class="settings-input" style="width:100%;" />
             </div>
-            <div class="settings-row">
-              <label class="settings-label">Min Similarity (0–1)</label>
-              <input type="number" min="0" max="1" step="0.05" data-setting-key="AUTO_REWRITE_MIN_SIMILARITY" class="settings-input" />
+            <div class="form-field">
+              <label class="form-label">Min Similarity (0–1)</label>
+              <input type="number" min="0" max="1" step="0.05" data-setting-key="AUTO_REWRITE_MIN_SIMILARITY" class="settings-input" style="width:100%;" />
             </div>
           </div>
-          <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-bottom:12px;">
-            <label class="settings-label">Blocked Keywords (comma-separated)</label>
-            <textarea rows="2" data-setting-key="AUTO_REWRITE_BLOCKED_KEYWORDS" class="settings-input" style="width:100%;font-size:12px;"></textarea>
+          <div class="form-field" style="margin-bottom:16px;">
+            <label class="form-label">Blocked Keywords (comma-separated)</label>
+            <textarea rows="2" data-setting-key="AUTO_REWRITE_BLOCKED_KEYWORDS" class="settings-input" style="width:100%;font-size:12px;resize:vertical;"></textarea>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-sm" id="autoRewriteSaveBtn">Save</button>
-            <button class="btn btn-sm btn-ghost" id="cleanupStaleBtn">🗑 Cleanup Stale Drafts</button>
+            <button class="btn btn-sm btn-primary" id="autoRewriteSaveBtn">Save Settings</button>
+            <button class="btn btn-sm btn-ghost" id="cleanupStaleBtn">
+              <svg data-lucide="trash-2" class="icon"></svg> Cleanup Stale Drafts
+            </button>
           </div>
         </div>
 
