@@ -5704,7 +5704,8 @@
     'html-editor': 'tab-html-editor',
     preview: 'tab-preview',
     'ai-edit': 'tab-ai-edit',
-    infranodus: 'tab-infranodus'
+    infranodus: 'tab-infranodus',
+    'wp-publish': 'tab-wp-publish'
   };
   var EDITOR_DEFAULT_TABS = { source: true, 'ai-output': true };
 
@@ -6055,6 +6056,15 @@
               loadWpErrorLog('editorWpLogContent');
             }
           });
+      };
+    }
+
+    // WP Publish panel button — delegates to the same publish flow as bottom bar
+    var wpPublishPanelBtn = $('wpPublishPanelBtn');
+    if (wpPublishPanelBtn) {
+      wpPublishPanelBtn.onclick = function () {
+        var bottomPublishBtn = $('editorPublishBtn');
+        if (bottomPublishBtn) bottomPublishBtn.click();
       };
     }
   }
