@@ -5498,7 +5498,8 @@ function createApiRouter(deps) {
     try {
       var { get: cfgGet, set: cfgSet } = require('../utils/config');
       var current = cfgGet('AUTOPILOT_ENABLED');
-      var newValue = (current === 'true' || current === true) ? 'false' : 'true';
+      var isEnabled = current === true || current === 1 || String(current).toLowerCase() === 'true' || current === '1';
+      var newValue = isEnabled ? 'false' : 'true';
       cfgSet('AUTOPILOT_ENABLED', newValue, req.app.locals.db);
       var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
       res.json({ ok: true, enabled: newValue === 'true', status: ap ? ap.getStatus() : null });
@@ -5512,7 +5513,8 @@ function createApiRouter(deps) {
     try {
       var { get: cfgGet, set: cfgSet } = require('../utils/config');
       var current = cfgGet('AUTO_REWRITE_ENABLED');
-      var newValue = (current === 'true' || current === true) ? 'false' : 'true';
+      var isEnabled = current === true || current === 1 || String(current).toLowerCase() === 'true' || current === '1';
+      var newValue = isEnabled ? 'false' : 'true';
       cfgSet('AUTO_REWRITE_ENABLED', newValue, req.app.locals.db);
       var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
       var status = pipeline && typeof pipeline.getAutoRewriteStatus === 'function'
@@ -5552,7 +5554,7 @@ function createApiRouter(deps) {
         "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
         "ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
         "LIMIT ? OFFSET ?"
-      ).all(pp.limit, pp.offset);
+      ).all(pp.perPage, (pp.page - 1) * pp.perPage);
       res.json({ ok: true, data: rows, total: total, page: pp.page, perPage: pp.perPage });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -5582,7 +5584,8 @@ function createApiRouter(deps) {
     try {
       var db = req.app.locals.db;
       var { get: cfgGet } = require('../utils/config');
-      var maxAgeHours = parseInt(cfgGet('BACKLOG_MAX_AGE_HOURS'), 10) || 72;
+      var maxAgeHours = parseInt(cfgGet('BACKLOG_MAX_AGE_HOURS'), 10);
+      if (!maxAgeHours || maxAgeHours <= 0) maxAgeHours = 72;
       var result = db.prepare(
         "DELETE FROM drafts WHERE status IN ('draft', 'failed') " +
         "AND updated_at < datetime('now', '-' || ? || ' hours')"

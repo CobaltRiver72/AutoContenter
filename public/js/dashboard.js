@@ -2,7 +2,7 @@
 (function () {
   var saved = null;
   try { saved = localStorage.getItem('hdf-theme'); } catch (e) {}
-  var theme = saved || 'dark';
+  var theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
   document.documentElement.setAttribute('data-theme', theme);
 })();
 
@@ -7685,8 +7685,12 @@
   function initThemeToggle() {
     var btn = document.getElementById('theme-toggle');
     if (!btn) return;
+    // Sync icon visibility to current theme (already set by bootstrap IIFE) without re-writing localStorage
     var current = document.documentElement.getAttribute('data-theme') || 'dark';
-    _applyTheme(current);
+    var sunEl = document.getElementById('theme-icon-sun');
+    var moonEl = document.getElementById('theme-icon-moon');
+    if (sunEl)  sunEl.style.display  = current === 'dark'  ? 'none' : '';
+    if (moonEl) moonEl.style.display = current === 'light' ? 'none' : '';
     btn.addEventListener('click', function () {
       var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       _applyTheme(next);
