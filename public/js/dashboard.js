@@ -522,6 +522,7 @@
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
       case 'metals': loadMetalsPage(); break;
+      case 'lottery': loadLotteryPage(); break;
       case 'autopilot': loadAutopilot(); break;
     }
 
@@ -7555,7 +7556,8 @@
     'mergeIntoCluster':        function () { __mergeIntoCluster(); },
     'createManualCluster':     function () { __createManualCluster(); },
     'dismissParent':           function (el) { if (el.parentElement) el.parentElement.remove(); },
-    'stopOnly':                function (el, e) { e.stopPropagation(); }
+    'stopOnly':                function (el, e) { e.stopPropagation(); },
+    'switchLotteryTab':        function (el) { window.__switchLotteryTab(el.dataset.tab); }
   };
 
   var INPUT_ACTIONS = {
@@ -9164,6 +9166,178 @@
       .then(function () { showToast('Domain filters saved', 'success'); })
       .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); });
   }
+
+  // ─── Lottery page ──────────────────────────────────────────────────────────
+
+  function loadLotteryPage() {
+    loadLotterySlots();
+
+    var refreshBtn = $('lotteryRefreshBtn');
+    if (refreshBtn) refreshBtn.onclick = function () { loadLotteryPage(); showToast('Refreshed', 'info'); };
+
+    var fetchAllBtn = $('lotteryFetchAllBtn');
+    if (fetchAllBtn) fetchAllBtn.onclick = function () {
+      fetchAllBtn.disabled = true;
+      fetchAllBtn.textContent = 'Fetching...';
+      fetchApi('/api/lottery/fetch', { method: 'POST' })
+        .then(function (res) {
+          showToast((res.data && res.data.message) || 'Fetch triggered', 'success');
+          setTimeout(loadLotterySlots, 1200);
+        })
+        .catch(function (e) { showToast('Fetch failed: ' + e.message, 'error'); })
+        .finally(function () { fetchAllBtn.disabled = false; fetchAllBtn.textContent = '⚡ Fetch All'; });
+    };
+
+    var genBtn = $('lotteryGenPostsBtn');
+    if (genBtn) genBtn.onclick = function () {
+      genBtn.disabled = true;
+      genBtn.textContent = 'Generating...';
+      fetchApi('/api/lottery/generate-posts', { method: 'POST' })
+        .then(function (res) {
+          showToast((res.data && res.data.message) || 'Posts generated', 'success');
+          setTimeout(loadLotterySlots, 1200);
+        })
+        .catch(function (e) { showToast('Generate failed: ' + e.message, 'error'); })
+        .finally(function () { genBtn.disabled = false; genBtn.textContent = '📝 Generate Posts'; });
+    };
+  }
+
+  function loadLotterySlots() {
+    fetchApi('/api/lottery/summary')
+      .then(function (res) {
+        var summary = res.data || res;
+        var draws = summary.draws || {};
+        var date = summary.date || '—';
+
+        // Update stat bar
+        var fetched = ['1pm', '6pm', '8pm'].filter(function (k) {
+          return draws[k] && draws[k].status === 'success';
+        }).length;
+        var posted = ['1pm', '6pm', '8pm'].filter(function (k) {
+          return draws[k] && draws[k].wp_post_id;
+        }).length;
+        var elDate = $('lottery-stat-date');
+        var elFetched = $('lottery-stat-fetched');
+        var elPosted = $('lottery-stat-posted');
+        if (elDate) elDate.textContent = date;
+        if (elFetched) elFetched.textContent = fetched + '/3';
+        if (elPosted) elPosted.textContent = posted + '/3';
+
+        // Draw cards
+        var slots = [
+          { key: '1pm', label: '1 PM Draw', icon: '🌅' },
+          { key: '6pm', label: '6 PM Draw', icon: '🌆' },
+          { key: '8pm', label: '8 PM Draw', icon: '🌙' },
+        ];
+        var wrap = $('lottery-draws-wrap');
+        if (!wrap) return;
+        wrap.innerHTML = slots.map(function (s) {
+          var draw = draws[s.key] || { status: 'pending' };
+          var statusColor = draw.status === 'success' ? '#22c55e'
+            : draw.status === 'failed' ? '#ef4444'
+            : draw.status === 'fetching' ? '#f59e0b'
+            : '#6b7280';
+          var statusLabel = draw.status === 'success' ? '✅ Fetched'
+            : draw.status === 'failed' ? '❌ Failed'
+            : draw.status === 'fetching' ? '⏳ Fetching...'
+            : '⏰ Pending';
+          var wpLine = draw.wp_post_id
+            ? '<div style="font-size:12px;margin-bottom:10px;color:#3b82f6;">WP Post #' + draw.wp_post_id + '</div>'
+            : '<div style="font-size:12px;margin-bottom:10px;color:#6b7280;">No WP post yet</div>';
+          var nameLine = draw.draw_name
+            ? '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">' + draw.draw_name + '</div>'
+            : '';
+          return '<div class="card" style="text-align:center;padding:22px;">'
+            + '<div style="font-size:30px;margin-bottom:8px;">' + s.icon + '</div>'
+            + '<div style="font-size:15px;font-weight:700;">' + s.label + '</div>'
+            + nameLine
+            + '<div style="color:' + statusColor + ';font-weight:600;margin:10px 0 4px;">' + statusLabel + '</div>'
+            + wpLine
+            + '<button class="btn btn-sm btn-outline" onclick="window.__fetchLotterySlot(\'' + s.key + '\')">Fetch ' + s.key + '</button>'
+            + '</div>';
+        }).join('');
+      })
+      .catch(function (e) {
+        var wrap = $('lottery-draws-wrap');
+        if (wrap) wrap.innerHTML = '<div style="color:#ef4444;padding:16px;">Error loading summary: ' + e.message + '</div>';
+      });
+  }
+
+  window.__fetchLotterySlot = function (drawTime) {
+    showToast('Fetching ' + drawTime + ' draw...', 'info');
+    fetchApi('/api/lottery/fetch/' + drawTime, { method: 'POST' })
+      .then(function (res) {
+        showToast((res.data && res.data.message) || 'Done', 'success');
+        setTimeout(loadLotterySlots, 900);
+      })
+      .catch(function (e) { showToast('Fetch failed: ' + e.message, 'error'); });
+  };
+
+  function loadLotteryRecent() {
+    fetchApi('/api/lottery/recent?limit=30')
+      .then(function (res) {
+        var rows = res.data || res;
+        if (!Array.isArray(rows)) rows = [];
+        var tbody = $('lottery-recent-tbody');
+        if (!tbody) return;
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888">No results yet</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(function (r) {
+          var statusColor = r.status === 'success' ? '#22c55e' : r.status === 'failed' ? '#ef4444' : '#6b7280';
+          var wpCell = r.wp_post_id ? '#' + r.wp_post_id : '—';
+          return '<tr>'
+            + '<td>' + (r.draw_date || '—') + '</td>'
+            + '<td>' + (r.draw_time || '—') + '</td>'
+            + '<td>' + (r.draw_name || '—') + '</td>'
+            + '<td>' + (r.source || '—') + '</td>'
+            + '<td style="color:' + statusColor + ';font-weight:600;">' + (r.status || '—') + '</td>'
+            + '<td>' + wpCell + '</td>'
+            + '<td>' + (r.retry_count != null ? r.retry_count : '—') + '</td>'
+            + '<td>' + (r.fetched_at ? r.fetched_at.slice(0, 16) : '—') + '</td>'
+            + '</tr>';
+        }).join('');
+      });
+  }
+
+  function loadLotteryLogs() {
+    fetchApi('/api/lottery/logs?limit=50')
+      .then(function (res) {
+        var rows = res.data || res;
+        if (!Array.isArray(rows)) rows = [];
+        var tbody = $('lottery-logs-tbody');
+        if (!tbody) return;
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">No logs yet</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(function (r) {
+          var color = r.error_message ? '#ef4444' : '';
+          return '<tr style="color:' + color + ';">'
+            + '<td style="white-space:nowrap;">' + (r.created_at ? r.created_at.slice(0, 16) : '—') + '</td>'
+            + '<td>' + (r.fetch_type || '—') + '</td>'
+            + '<td>' + (r.cities_ok != null ? r.cities_ok : '—') + '</td>'
+            + '<td>' + (r.duration_ms != null ? r.duration_ms + 'ms' : '—') + '</td>'
+            + '<td style="word-break:break-word;max-width:200px;">' + (r.error_message || '') + '</td>'
+            + '<td style="word-break:break-word;max-width:300px;">' + (r.details || '') + '</td>'
+            + '</tr>';
+        }).join('');
+      });
+  }
+
+  window.__switchLotteryTab = function (tab) {
+    document.querySelectorAll('#lottery-tabs .tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    var tabs = { today: 'lottery-tab-today', recent: 'lottery-tab-recent', logs: 'lottery-tab-logs' };
+    Object.keys(tabs).forEach(function (k) {
+      var el = $(tabs[k]);
+      if (el) el.style.display = k === tab ? '' : 'none';
+    });
+    if (tab === 'recent') loadLotteryRecent();
+    if (tab === 'logs') loadLotteryLogs();
+  };
 
   // Wait for DOM
   if (document.readyState === 'loading') {

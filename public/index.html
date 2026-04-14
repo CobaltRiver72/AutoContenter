@@ -56,6 +56,9 @@
       <a href="#metals" class="nav-link" data-page="metals">
         🥇 Metals
       </a>
+      <a href="#lottery" class="nav-link" data-page="lottery">
+        🎰 Lottery
+      </a>
       <a href="#autopilot" class="nav-link" data-page="autopilot">
         🚀 Autopilot
       </a>
@@ -1241,6 +1244,69 @@
         </div>
       </section>
 
+      <!-- ═══════════════════════════ LOTTERY PAGE ══════════════════════════ -->
+      <section class="page hidden" id="page-lottery">
+        <div class="page-header">
+          <h2 class="page-title">🎰 Lottery Results</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm btn-purple" id="lotteryFetchAllBtn">⚡ Fetch All</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="lotteryGenPostsBtn">📝 Generate Posts</button>
+            <button class="btn btn-sm btn-ghost" id="lotteryRefreshBtn">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Summary stat bar -->
+        <div class="stats-grid" style="margin-bottom:16px;" id="lottery-slots-grid">
+          <div class="stat-card"><div class="stat-value" id="lottery-stat-date">—</div><div class="stat-label">IST Date</div></div>
+          <div class="stat-card"><div class="stat-value" id="lottery-stat-fetched">—</div><div class="stat-label">Draws Fetched</div></div>
+          <div class="stat-card"><div class="stat-value" id="lottery-stat-posted">—</div><div class="stat-label">WP Posts Created</div></div>
+        </div>
+
+        <!-- Tab navigation -->
+        <div class="page-tabs" id="lottery-tabs">
+          <button class="tab active" data-tab="today" data-click="switchLotteryTab">📅 Today</button>
+          <button class="tab" data-tab="recent" data-click="switchLotteryTab">📋 Recent Results</button>
+          <button class="tab" data-tab="logs" data-click="switchLotteryTab">🔍 Fetch Log</button>
+        </div>
+
+        <!-- Tab: Today's Draws -->
+        <div id="lottery-tab-today" class="tab-content">
+          <div id="lottery-draws-wrap" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:12px;">
+            <div style="color:#888;padding:16px;">Loading draws...</div>
+          </div>
+        </div>
+
+        <!-- Tab: Recent Results -->
+        <div id="lottery-tab-recent" class="tab-content" style="display:none">
+          <div style="overflow-x:auto;margin-top:12px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th><th>Draw</th><th>Name</th><th>Source</th><th>Status</th><th>WP Post</th><th>Retries</th><th>Fetched At</th>
+                </tr>
+              </thead>
+              <tbody id="lottery-recent-tbody">
+                <tr><td colspan="8" style="text-align:center;color:#888">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab: Fetch Log -->
+        <div id="lottery-tab-logs" class="tab-content" style="display:none">
+          <div style="overflow-x:auto;margin-top:12px;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Time</th><th>Type</th><th>OK</th><th>Duration</th><th>Error</th><th>Details</th></tr>
+              </thead>
+              <tbody id="lottery-logs-tbody">
+                <tr><td colspan="6" style="text-align:center;color:#888">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- ═══════════════════════════ AUTOPILOT PAGE ══════════════════════════ -->
       <section class="page hidden" id="page-autopilot">
         <div class="page-header">
@@ -1652,6 +1718,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=50"></script>
+  <script src="/js/dashboard.js?v=51"></script>
 </body>
 </html>
