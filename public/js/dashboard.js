@@ -6069,6 +6069,47 @@
         if (bottomPublishBtn) bottomPublishBtn.click();
       };
     }
+
+    // Queue for Autopilot button — saves WP overrides then marks draft ready
+    var queueBtn = $('editorQueueBtn');
+    if (queueBtn) {
+      queueBtn.onclick = function () {
+        if (queueBtn.disabled) return;
+        if (!currentDraftId) return;
+        var html = $('html-code-editor').value;
+        if (!html) { showToast('No HTML content — run AI Rewrite first', 'error'); return; }
+        if (!confirm('Queue this article for Autopilot? It will be published automatically on the next publish cycle.')) return;
+
+        queueBtn.disabled = true;
+        queueBtn.textContent = 'Queuing...';
+
+        // Save WP overrides first so they persist when autopilot publishes
+        saveEditorSettings();
+
+        fetchApi('/api/drafts/' + currentDraftId + '/queue', { method: 'POST' })
+          .then(function (data) {
+            queueBtn.disabled = false;
+            if (data.ok) {
+              queueBtn.innerHTML = '<svg data-lucide="check" class="icon"></svg> Queued';
+              $('editor-status').textContent = 'READY';
+              $('editor-status').style.background = '#22c55e';
+              if (currentDraft) currentDraft.status = 'ready';
+              showToast('Queued for Autopilot — will publish on next cycle', 'success');
+              _refreshIcons();
+            } else {
+              queueBtn.innerHTML = '<svg data-lucide="list-plus" class="icon"></svg> Queue for Autopilot';
+              showToast('Queue failed: ' + (data.error || 'Unknown'), 'error');
+              _refreshIcons();
+            }
+          })
+          .catch(function (err) {
+            queueBtn.disabled = false;
+            queueBtn.innerHTML = '<svg data-lucide="list-plus" class="icon"></svg> Queue for Autopilot';
+            showToast('Queue failed: ' + err.message, 'error');
+            _refreshIcons();
+          });
+      };
+    }
   }
 
   function saveEditorSettings() {
