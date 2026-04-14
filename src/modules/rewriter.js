@@ -388,6 +388,24 @@ function buildPrompt(article, cluster, settings) {
     '10. NEVER skip the in_brief block or the faqs section — both are mandatory.',
     '11. NEVER use hyphens or dashes (-, –, —) as punctuation within sentences or headlines. No em dashes, no en dashes, no hyphens used as separators or for parenthetical asides. Rewrite the sentence in plain English instead. Hyphenated compound adjectives (e.g. "well-known", "two-year") are the only exception.',
     customBlock,
+    '# CLASSIFICATION (fill the classification object in your JSON response)',
+    'primary_category — choose the single best fit. Use "general" only if no other category fits:',
+    '  * entertainment: Bollywood, movies, OTT (Netflix/Hotstar), celebrities, actors, music, awards',
+    '  * cricket: IPL, BCCI, ICC, test/ODI/T20, players, match analysis',
+    '  * auto: bikes, cars, EVs, telecom (Jio/Airtel), smartphones, gadgets',
+    '  * finance: stocks (Sensex/Nifty), tax, banking (RBI), mutual funds, economy, insurance',
+    '  * fuel-prices: petrol, diesel, LPG, CNG, crude oil prices',
+    '  * gold-silver: gold rates, silver prices, bullion, MCX commodities',
+    'author_beat — match by topic expertise:',
+    '  * priya-mehta: Entertainment, Bollywood, OTT, celebrities',
+    '  * arjun-sharma: Cricket, IPL, sports, player profiles',
+    '  * rahul-desai: Auto (bikes/cars/EVs), technology, telecom, gadgets',
+    '  * deepa-nair: Finance (stocks/tax/banking), fuel prices, gold/silver',
+    '  * karan-verma: General news, politics, trending, viral, education, health, anything else',
+    '  * Note: "net worth" articles — assign by subject (cricketer→arjun-sharma, actor→priya-mehta, businessman→deepa-nair)',
+    'tags: 5–8 proper tags. Use full names (Shah Rukh Khan, not SRK). Include people, teams, brands, events.',
+    'confidence: 0.9+ if clearly one category, 0.5–0.8 if somewhat ambiguous, <0.5 if very generic.',
+    '',
     '# SOURCE ARTICLES',
     sourceArticles,
     '',
@@ -411,7 +429,13 @@ function buildPrompt(article, cluster, settings) {
     '    {"type": "price", "title": "Box title taken from source", "rows": [["Column A", "Column B"], ["Row label", "Row value"]]}',
     '  ],',
     '  "language": "' + targetLang + '",',
-    '  "word_count_body": 487',
+    '  "word_count_body": 487,',
+    '  "classification": {',
+    '    "primary_category": "entertainment",',
+    '    "author_beat": "priya-mehta",',
+    '    "tags": ["Tag One", "Tag Two", "Tag Three", "Tag Four", "Tag Five"],',
+    '    "confidence": 0.92',
+    '  }',
     '}',
     '',
     'Required field types:',
@@ -422,6 +446,11 @@ function buildPrompt(article, cluster, settings) {
     '- data_boxes: array of data boxes extracted from the source articles. Each box: { "type": one of "price"/"stats"/"specs"/"comparison", "title": short descriptive string, "rows": 2D string array where the first sub-array is column headers and the rest are data rows }. Return [] if the source articles contain no concrete structured data. NEVER invent or estimate data — only include figures, prices, or statistics explicitly stated in the source articles.',
     '- language: "' + targetLang + '"',
     '- word_count_body: integer count of words in body_markdown',
+    '- classification: optional object — include it when you can confidently classify the article',
+    '  - primary_category: one of "entertainment", "cricket", "auto", "finance", "fuel-prices", "gold-silver", "general"',
+    '  - author_beat: one of "priya-mehta", "arjun-sharma", "rahul-desai", "deepa-nair", "karan-verma"',
+    '  - tags: array of 5–8 SEO-friendly tag strings with proper names (Shah Rukh Khan, not SRK)',
+    '  - confidence: number 0.0–1.0',
   ].join('\n');
 }
 
@@ -598,6 +627,19 @@ function parseModelOutput(text) {
     }
   }
 
+  // Extract AI classification if present — optional, never throws
+  var aiClassification = null;
+  if (parsed.classification && typeof parsed.classification === 'object') {
+    var cls = parsed.classification;
+    aiClassification = {
+      aiCategory: typeof cls.primary_category === 'string' ? cls.primary_category : null,
+      aiSecondaryCategories: Array.isArray(cls.secondary_categories) ? cls.secondary_categories : [],
+      aiAuthorBeat: typeof cls.author_beat === 'string' ? cls.author_beat : null,
+      aiTags: Array.isArray(cls.tags) ? cls.tags : [],
+      aiConfidence: typeof cls.confidence === 'number' ? cls.confidence : 0,
+    };
+  }
+
   return {
     headline: parsed.headline.trim(),
     inBrief: inBrief,
@@ -607,6 +649,7 @@ function parseModelOutput(text) {
     wordCountBody: parseInt(parsed.word_count_body, 10) || 0,
     signals: signals,
     dataBoxes: dataBoxes,
+    aiClassification: aiClassification,
   };
 }
 
@@ -691,7 +734,7 @@ function escapeHtmlText(text) {
 // provider methods to keep the shape consistent.
 function buildRewriteResult(parsed, tokensUsed) {
   var contentHtml = buildRewrittenHtml(parsed.inBrief, parsed.bodyMarkdown, parsed.faqs, parsed.dataBoxes || []);
-  return {
+  var result = {
     title: parsed.headline,
     content: contentHtml,
     bodyMarkdown: parsed.bodyMarkdown,
@@ -706,6 +749,18 @@ function buildRewriteResult(parsed, tokensUsed) {
     wordCount: parsed.wordCountBody || countWords(contentHtml),
     tokensUsed: tokensUsed,
   };
+
+  // Extract AI classification if present
+  var classification = parsed.aiClassification || null;
+  if (classification) {
+    result.aiCategory = classification.aiCategory || null;
+    result.aiSecondaryCategories = classification.aiSecondaryCategories || [];
+    result.aiAuthorBeat = classification.aiAuthorBeat || null;
+    result.aiTags = Array.isArray(classification.aiTags) ? classification.aiTags : [];
+    result.aiConfidence = typeof classification.aiConfidence === 'number' ? classification.aiConfidence : 0;
+  }
+
+  return result;
 }
 
 // ─── Rewriter Module ──────────────────────────────────────────────────────
