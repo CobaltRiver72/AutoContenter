@@ -3693,29 +3693,38 @@
         return;
       }
       if (document.hidden) return;
-      // Re-render the entire Published page to pick up status changes in cluster groups
-      fetchApi('/api/drafts')
-        .then(function (data) {
-          var drafts = data.data || [];
-          var hasActive = drafts.some(function (d) {
-            return d.status === 'fetching' || d.status === 'rewriting' || d.status === 'ready';
-          });
 
-          // Skip re-render if nothing changed — prevents destroying buttons
-          // mid-click and avoids needless DOM churn every 5 seconds.
-          var hash = drafts.length + ':' + drafts.map(function (d) {
-            return d.id + ':' + d.status + ':' + (d.updated_at || '');
+      // Step 1 — hit the tiny digest endpoint (~30 bytes/draft instead of
+      // ~500). Hash the response and bail out if nothing changed. The full
+      // drafts fetch + render only happens on a real state change.
+      fetchApi('/api/drafts/status-digest')
+        .then(function (digest) {
+          var rows = digest.data || [];
+          var hasActive = !!digest.hasActive;
+          var hash = rows.length + ':' + rows.map(function (r) {
+            return r.id + ':' + r.status + ':' + (r.updated_at || '');
           }).join('|');
-          if (hash !== _lastPublishedHash) {
-            _lastPublishedHash = hash;
+
+          if (hash === _lastPublishedHash) {
+            if (!hasActive) {
+              clearInterval(publishedPollInterval);
+              publishedPollInterval = null;
+            }
+            return;
+          }
+          _lastPublishedHash = hash;
+
+          // Step 2 — digest says something changed, fetch the full list and
+          // re-render. Uses the same renderDraftsView path as the initial load.
+          return fetchApi('/api/drafts').then(function (data) {
+            var drafts = data.data || [];
             var pollContainer = $('publishedList');
             renderDraftsView(pollContainer, drafts);
-          }
-
-          if (!hasActive) {
-            clearInterval(publishedPollInterval);
-            publishedPollInterval = null;
-          }
+            if (!hasActive) {
+              clearInterval(publishedPollInterval);
+              publishedPollInterval = null;
+            }
+          });
         })
         .catch(function () { /* silent */ });
     }, 5000);

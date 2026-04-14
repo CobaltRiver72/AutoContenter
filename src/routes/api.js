@@ -2757,6 +2757,29 @@ function createApiRouter(deps) {
     }
   });
 
+  // GET /api/drafts/status-digest — lightweight polling endpoint. Returns
+  // just the fields the published-page poll needs to detect whether the list
+  // has changed (id + status + updated_at). ~30 bytes per draft vs. ~500
+  // bytes for the full drafts listing. Poll hits this first; only fetches
+  // the full list when the digest hash actually changes.
+  router.get('/drafts/status-digest', function (req, res) {
+    try {
+      var rows = db.prepare(
+        "SELECT id, status, updated_at FROM drafts " +
+        "WHERE cluster_role = 'primary' OR cluster_role IS NULL " +
+        "ORDER BY id DESC"
+      ).all();
+      var hasActive = false;
+      for (var i = 0; i < rows.length; i++) {
+        var s = rows[i].status;
+        if (s === 'fetching' || s === 'rewriting' || s === 'ready') { hasActive = true; break; }
+      }
+      res.json({ success: true, data: rows, hasActive: hasActive });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // GET /api/drafts — List all drafts
   router.get('/drafts', function (req, res) {
     try {
