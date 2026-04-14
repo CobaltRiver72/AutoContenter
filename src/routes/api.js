@@ -5426,7 +5426,7 @@ function createApiRouter(deps) {
     }
   });
 
-  router.post('/autopilot/toggle', verifyCsrf, function (req, res) {
+  router.post('/autopilot/toggle', function (req, res) {
     try {
       var { get: cfgGet, set: cfgSet } = require('../utils/config');
       var current = cfgGet('AUTOPILOT_ENABLED');
