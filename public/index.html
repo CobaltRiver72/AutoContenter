@@ -1675,15 +1675,21 @@
               </div>
             </div>
           </div>
-        </div>
-        <!-- WP Publish tab -->
-        <div class="editor-tab-content" id="tab-wp-publish" style="display:none;">
-          <div style="max-width:520px;">
-            <div style="font-size:13px;font-weight:600;color:#e6edf3;margin-bottom:4px;">WordPress Publish Settings</div>
-            <div style="font-size:11px;color:#888;margin-bottom:14px;">Overrides the routing rules for this draft only. Leave blank to let the rules (or global defaults) decide.</div>
+          <!-- WP Publish tab — must be inside .editor-right so tab switching finds it -->
+          <div class="editor-tab-content" id="tab-wp-publish" style="display:none;">
+            <div style="max-width:560px;">
+              <!-- Publish action at the top -->
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border-subtle);">
+                <button class="btn btn-success" id="wpPublishPanelBtn" style="flex:1;">
+                  <svg data-lucide="upload-cloud" class="icon"></svg> Publish to WordPress
+                </button>
+                <span id="wp-panel-publish-status" style="font-size:11px;color:var(--text-tertiary);"></span>
+              </div>
 
-            <!-- Resolved preview -->
-            <div id="editor-taxonomy-resolved" style="font-size:11px;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px;margin-bottom:14px;color:#aaa;line-height:1.6;"></div>
+              <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Override Settings <small style="font-weight:400;color:var(--text-tertiary);">— leave blank to use routing rules / global defaults</small></div>
+
+            <!-- Resolved routing preview -->
+            <div id="editor-taxonomy-resolved" style="font-size:11px;background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 10px;margin-bottom:14px;color:var(--text-tertiary);line-height:1.6;"></div>
 
             <!-- Categories -->
             <div style="margin-bottom:12px;">
@@ -1734,7 +1740,8 @@
             </div>
           </div>
         </div>
-      </div>
+      </div><!-- /.editor-right -->
+      </div><!-- /.editor-panels -->
       <!-- Editor WP Error Log Drawer (above bottom bar) -->
       <div id="editorWpLog" class="editor-wp-log" style="display:none;">
         <div class="editor-wp-log-header">
