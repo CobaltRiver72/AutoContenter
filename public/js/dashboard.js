@@ -517,11 +517,13 @@
       case 'ready': loadReady(); break;
       case 'failed': loadFailedDrafts(); break;
       case 'published': loadPublished(); break;
-      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); break;
+      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); loadPipelineEngineSettings(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
       case 'metals': loadMetalsPage(); break;
+      case 'lottery': loadLotteryPage(); break;
+      case 'autopilot': loadAutopilot(); break;
     }
 
     // Close sidebar on mobile
@@ -1778,6 +1780,10 @@
     initRuleTemplates();
     initRuleSaveConnect();
     initRuleAdd();
+    loadFirehoseStatsWidget();
+    loadFirehoseConnSettings();
+    loadLangFilter();
+    loadDomainFilters();
 
     // Refresh button
     var refreshBtn = $('rulesRefreshBtn');
@@ -1785,9 +1791,24 @@
       refreshBtn.onclick = function () {
         loadFirehoseStatus();
         loadFirehoseRules();
+        loadFirehoseStatsWidget();
         showToast('Refreshed', 'info');
       };
     }
+
+    // Firehose connection settings save button (new card)
+    var fhConnSaveBtn = document.querySelector('#page-rules .card:nth-of-type(4) button');
+    // Use explicit id approach instead
+    var fhSaveAll = document.getElementById('fh-conn-save');
+    if (fhSaveAll) fhSaveAll.onclick = saveFirehoseConnSettings;
+
+    // Lang filter save
+    var langSaveBtn = $('fh-lang-save');
+    if (langSaveBtn) langSaveBtn.onclick = saveLangFilter;
+
+    // Domain filters save
+    var domainSaveBtn = $('fh-domain-save');
+    if (domainSaveBtn) domainSaveBtn.onclick = saveDomainFilters;
   }
 
   function loadFirehoseStatus() {
@@ -4189,8 +4210,17 @@
           _populateTaxonomySelects();
           var statusEl = document.getElementById('wpTaxSyncStatus');
           if (statusEl && data.synced_at) statusEl.textContent = 'Last synced: ' + data.synced_at.slice(0, 16).replace('T', ' ');
+
+          // Update tab button labels with counts
+          var catBtn = document.querySelector('[data-tax-tab="category"]');
+          var tagBtn = document.querySelector('[data-tax-tab="tag"]');
+          var authBtn = document.querySelector('[data-tax-tab="author"]');
+          if (catBtn) catBtn.textContent = 'Categories (' + (data.categories || []).length + ')';
+          if (tagBtn) tagBtn.textContent = 'Tags (' + (data.tags || []).length + ')';
+          if (authBtn) authBtn.textContent = 'Authors (' + (data.authors || []).length + ')';
+
           var wrap = document.getElementById('wpTaxCacheWrap');
-          if (wrap && (data.categories.length || data.tags.length || data.authors.length)) {
+          if (wrap) {
             wrap.style.display = '';
             window.__showTaxTab('category');
           }
@@ -4201,27 +4231,41 @@
   }
 
   window.__showTaxTab = function (taxType) {
-    if (!_wpTaxonomy) return;
+    if (!_wpTaxonomy) { return; }
     var wrap = document.getElementById('wpTaxTableWrap');
     if (!wrap) return;
+
     // Update active state on tab buttons
     document.querySelectorAll('[data-tax-tab]').forEach(function (btn) {
       var isActive = btn.getAttribute('data-tax-tab') === taxType;
       btn.classList.toggle('btn-primary', isActive);
       btn.classList.toggle('btn-secondary', !isActive);
     });
-    var items = _wpTaxonomy[taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors'] || [];
-    if (!items.length) { wrap.innerHTML = '<p style="color:#666;font-size:12px;padding:4px;">None synced yet.</p>'; return; }
-    wrap.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
-      '<thead><tr><th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">Name</th>' +
-      (taxType !== 'author' ? '<th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">Slug</th>' : '') +
-      '<th style="text-align:left;color:#888;padding:3px 6px;border-bottom:1px solid #30363d;">ID</th></tr></thead><tbody>' +
+
+    var key = taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors';
+    var items = _wpTaxonomy[key] || [];
+    var typeLabel = taxType === 'category' ? 'categories' : taxType === 'tag' ? 'tags' : 'authors';
+
+    if (!items.length) {
+      wrap.innerHTML = '<p style="color:#888;font-size:12px;padding:6px 0;">No ' + typeLabel + ' found. ' +
+        (taxType === 'author' ? 'Ensure your WP credentials have permission to list users.' : 'Click Sync to refresh.') + '</p>';
+      return;
+    }
+
+    wrap.innerHTML = '<table class="data-table" style="font-size:12px;">' +
+      '<thead><tr>' +
+      '<th>Name</th>' +
+      (taxType !== 'author' ? '<th>Slug</th>' : '') +
+      '<th style="width:60px">ID</th>' +
+      '</tr></thead><tbody>' +
       items.map(function (item) {
         return '<tr>' +
-          '<td style="padding:3px 6px;color:#e6edf3;">' + escapeHtml(item.name) + '</td>' +
-          (taxType !== 'author' ? '<td style="padding:3px 6px;color:#6e7681;">/' + escapeHtml(item.slug) + '</td>' : '') +
-          '<td style="padding:3px 6px;color:#6e7681;">' + item.wp_id + '</td></tr>';
-      }).join('') + '</tbody></table>';
+          '<td>' + escapeHtml(item.name) + '</td>' +
+          (taxType !== 'author' ? '<td style="color:var(--text-muted);">/' + escapeHtml(item.slug) + '</td>' : '') +
+          '<td style="color:var(--text-muted);">' + item.wp_id + '</td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table>';
   };
 
   function _populateTaxonomySelects() {
@@ -4422,6 +4466,8 @@
     if (tagSel) Array.from(tagSel.options).forEach(function(o){ o.selected = tagIds.indexOf(Number(o.value)) !== -1; });
     if (primSel && draft.wp_primary_cat_id) primSel.value = String(draft.wp_primary_cat_id);
     if (authSel && draft.wp_author_id_override) authSel.value = String(draft.wp_author_id_override);
+    var statusSel = document.getElementById('editor-wp-post-status');
+    if (statusSel && draft.wp_post_status_override) statusSel.value = draft.wp_post_status_override;
 
     // Build resolved preview
     var resolvedEl = document.getElementById('editor-taxonomy-resolved');
@@ -6017,6 +6063,7 @@
         wp_primary_cat_id: editorPrimCat && editorPrimCat.value ? Number(editorPrimCat.value) : null,
         wp_tag_ids: editorTagIds.length ? JSON.stringify(editorTagIds) : null,
         wp_author_id_override: editorAuthor && editorAuthor.value ? Number(editorAuthor.value) : null,
+        wp_post_status_override: (function() { var s = document.getElementById('editor-wp-post-status'); return s && s.value ? s.value : null; })(),
       }
     }).catch(function (err) { showToast('Failed to save settings', 'error'); });
   }
@@ -7509,7 +7556,8 @@
     'mergeIntoCluster':        function () { __mergeIntoCluster(); },
     'createManualCluster':     function () { __createManualCluster(); },
     'dismissParent':           function (el) { if (el.parentElement) el.parentElement.remove(); },
-    'stopOnly':                function (el, e) { e.stopPropagation(); }
+    'stopOnly':                function (el, e) { e.stopPropagation(); },
+    'switchLotteryTab':        function (el) { window.__switchLotteryTab(el.dataset.tab); }
   };
 
   var INPUT_ACTIONS = {
@@ -8677,6 +8725,50 @@
       .catch(function(err) {
         console.error('Sources stats failed:', err);
       });
+
+    loadTierManager();
+
+    var tierSaveBtn = $('tierSaveBtn');
+    if (tierSaveBtn) tierSaveBtn.onclick = saveTierManager;
+  }
+
+  function loadTierManager() {
+    fetchApi('/api/settings')
+      .then(function (res) {
+        var s = res.settings || {};
+        var t1 = $('tier1-domains');
+        var t2 = $('tier2-domains');
+        var t3 = $('tier3-domains');
+        if (t1) t1.value = (s.TIER1_SOURCES || '').split(',').filter(Boolean).join('\n');
+        if (t2) t2.value = (s.TIER2_SOURCES || '').split(',').filter(Boolean).join('\n');
+        if (t3) t3.value = (s.TIER3_SOURCES || '').split(',').filter(Boolean).join('\n');
+
+        var info = $('tier-active-domains');
+        if (info) {
+          var t1count = (s.TIER1_SOURCES || '').split(',').filter(Boolean).length;
+          var t2count = (s.TIER2_SOURCES || '').split(',').filter(Boolean).length;
+          var t3count = (s.TIER3_SOURCES || '').split(',').filter(Boolean).length;
+          info.textContent = 'T1: ' + t1count + ' domains · T2: ' + t2count + ' domains · T3: ' + t3count + ' domains';
+        }
+      });
+  }
+
+  function saveTierManager() {
+    var btn = $('tierSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    var t1el = $('tier1-domains');
+    var t2el = $('tier2-domains');
+    var t3el = $('tier3-domains');
+    var toList = function (el) {
+      return (el ? el.value : '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).join(',');
+    };
+    fetchApi('/api/settings', {
+      method: 'PUT',
+      body: { TIER1_SOURCES: toList(t1el), TIER2_SOURCES: toList(t2el), TIER3_SOURCES: toList(t3el) }
+    })
+      .then(function () { showToast('Source tiers saved', 'success'); loadTierManager(); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Tiers'; } });
   }
 
   function renderSourcesSummary(s) {
@@ -8833,6 +8925,419 @@
         '</div>';
     }).join('');
   }
+
+  // ─── Autopilot page ──────────────────────────────────────────────────────
+
+  function loadAutopilot() {
+    loadAutopilotStatus();
+    loadAutopilotSettings();
+    loadAutopilotDecisions();
+
+    var refreshBtn = $('autopilotRefreshBtn');
+    if (refreshBtn) refreshBtn.onclick = function () { loadAutopilot(); showToast('Refreshed', 'info'); };
+
+    var saveBtn = $('autopilotSettingsSaveBtn');
+    if (saveBtn) saveBtn.onclick = saveAutopilotSettings;
+  }
+
+  function loadAutopilotStatus() {
+    fetchApi('/api/autopilot/status')
+      .then(function (res) {
+        var s = res.data || res;
+        var dot = $('autopilot-status-dot');
+        var label = $('autopilot-status-label');
+        var reason = $('autopilot-status-reason');
+        var todayEl = $('autopilot-published-today');
+        var limitEl = $('autopilot-daily-limit');
+        var toggleBtn = $('autopilotToggleBtn');
+        if (!dot) return;
+
+        var active = s.active;
+        dot.className = 'status-dot ' + (active ? 'connected' : '');
+        label.textContent = active ? 'Active' : 'Inactive';
+        reason.textContent = s.nextPublishETA ? 'Next publish: ' + s.nextPublishETA : '';
+        todayEl.textContent = s.publishedToday !== undefined ? s.publishedToday : '—';
+        limitEl.textContent = s.dailyTarget || '—';
+
+        var enabled = s.enabled;
+        if (toggleBtn) {
+          toggleBtn.textContent = enabled ? 'Disable' : 'Enable';
+          toggleBtn.className = 'btn btn-sm ' + (enabled ? 'btn-warning' : 'btn-primary');
+          toggleBtn.onclick = function () { toggleAutopilot(!enabled); };
+        }
+      })
+      .catch(function () {
+        var label = $('autopilot-status-label');
+        if (label) label.textContent = 'Status unavailable';
+      });
+  }
+
+  function toggleAutopilot(enable) {
+    fetchApi('/api/autopilot/toggle', { method: 'POST', body: { enable: enable } })
+      .then(function () {
+        showToast('Autopilot ' + (enable ? 'enabled' : 'disabled'), 'success');
+        loadAutopilotStatus();
+      })
+      .catch(function (e) { showToast('Toggle failed: ' + e.message, 'error'); });
+  }
+
+  var _apSettingKeys = [
+    'AUTOPILOT_START_HOUR', 'AUTOPILOT_END_HOUR', 'AUTOPILOT_WEEKENDS',
+    'AUTOPILOT_DAILY_TARGET', 'AUTOPILOT_MIN_WORDS', 'AUTOPILOT_MIN_SIMILARITY',
+    'AUTOPILOT_MIN_TIER', 'PUBLISH_LANGUAGE', 'AUTOPILOT_BLOCKED_KEYWORDS',
+    'AUTOPILOT_BLOCKED_CATEGORIES', 'AUTOPILOT_BLOCKED_DOMAINS', 'AUTOPILOT_ALLOWED_DOMAINS'
+  ];
+
+  function loadAutopilotSettings() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var settings = data.settings || {};
+        _apSettingKeys.forEach(function (key) {
+          var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
+          if (el && settings[key] !== undefined) el.value = settings[key];
+        });
+      });
+  }
+
+  function saveAutopilotSettings() {
+    var btn = $('autopilotSettingsSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    var body = {};
+    _apSettingKeys.forEach(function (key) {
+      var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
+      if (el) body[key] = el.value;
+    });
+    fetchApi('/api/settings', { method: 'PUT', body: body })
+      .then(function () { showToast('Autopilot settings saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Autopilot Settings'; } });
+  }
+
+  function loadAutopilotDecisions() {
+    var container = $('autopilot-decisions-list');
+    if (!container) return;
+    fetchApi('/api/autopilot/decisions?limit=30')
+      .then(function (res) {
+        var data = res.data || res;
+        if (!Array.isArray(data) || !data.length) {
+          container.innerHTML = '<p class="placeholder-text">No decisions recorded yet.</p>';
+          return;
+        }
+        container.innerHTML = '<div style="overflow-x:auto;"><table class="data-table"><thead><tr>' +
+          '<th>Time</th><th>Title</th><th>Decision</th><th>Reason</th>' +
+          '</tr></thead><tbody>' +
+          data.map(function (d) {
+            var badge = d.approved
+              ? '<span style="color:#10b981;font-weight:600;">PUBLISH</span>'
+              : '<span style="color:#ef4444;font-weight:600;">SKIP</span>';
+            return '<tr>' +
+              '<td style="white-space:nowrap;color:var(--text-muted);font-size:12px;">' + timeAgo(d.created_at) + '</td>' +
+              '<td>' + escapeHtml(d.draft_title || '—') + '</td>' +
+              '<td>' + badge + '</td>' +
+              '<td style="font-size:12px;color:var(--text-muted);">' + escapeHtml(d.reason || '') + '</td>' +
+              '</tr>';
+          }).join('') +
+          '</tbody></table></div>';
+      })
+      .catch(function () { container.innerHTML = '<p class="placeholder-text">Failed to load decisions.</p>'; });
+  }
+
+  // ─── Pipeline Engine settings (Settings page) ─────────────────────────────
+
+  var _pipelineSettingKeys = [
+    'EXTRACTION_POLL_MS', 'PUBLISH_POLL_MS', 'REWRITE_CONCURRENCY', 'REWRITE_MAX_RETRIES',
+    'LEASE_MINUTES', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES',
+    'CLUSTERING_DEBOUNCE_MS', 'CLUSTERING_MAX_WAIT_MS', 'CLUSTER_QUEUE_MAX',
+    'MAX_TOKENS', 'TEMPERATURE', 'WP_TIMEOUT_MS'
+  ];
+
+  function loadPipelineEngineSettings() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var settings = data.settings || {};
+        _pipelineSettingKeys.forEach(function (key) {
+          var el = document.querySelector('#pipeline-engine-section [data-setting-key="' + key + '"]');
+          if (el && settings[key] !== undefined) el.value = settings[key];
+        });
+      });
+
+    var saveBtn = $('pipelineEngineSaveBtn');
+    if (saveBtn) saveBtn.onclick = savePipelineEngineSettings;
+  }
+
+  function savePipelineEngineSettings() {
+    var btn = $('pipelineEngineSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    var body = {};
+    _pipelineSettingKeys.forEach(function (key) {
+      var el = document.querySelector('#pipeline-engine-section [data-setting-key="' + key + '"]');
+      if (el) body[key] = el.value;
+    });
+    fetchApi('/api/settings', { method: 'PUT', body: body })
+      .then(function () { showToast('Pipeline settings saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Pipeline Settings'; } });
+  }
+
+  // ─── Firehose page enhancements ───────────────────────────────────────────
+
+  function loadFirehoseStatsWidget() {
+    var el = $('firehose-stats-widget');
+    if (!el) return;
+    fetchApi('/api/firehose/status')
+      .then(function (data) {
+        var s = data.stats || {};
+        el.innerHTML =
+          fhStat((s.articlesReceived || 0).toLocaleString(), 'Received') +
+          fhStat((s.articlesQueued || 0).toLocaleString(), 'Queued') +
+          fhStat((s.articlesDroppedByLanguage || 0).toLocaleString(), 'Dropped (Lang)') +
+          fhStat((s.articlesDroppedByDomain || 0).toLocaleString(), 'Dropped (Domain)') +
+          fhStat((s.reconnects || 0), 'Reconnects') +
+          fhStat((s.parseErrors || 0), 'Parse Errors');
+      })
+      .catch(function () { if (el) el.innerHTML = '<p class="placeholder-text">Stats unavailable</p>'; });
+  }
+
+  function fhStat(val, label) {
+    return '<div class="fh-stat"><div class="fh-stat-val">' + val + '</div><div class="fh-stat-label">' + label + '</div></div>';
+  }
+
+  var _fhConnKeys = ['FIREHOSE_SINCE', 'FIREHOSE_TIMEOUT', 'FIREHOSE_RECONNECT_MIN', 'FIREHOSE_RECONNECT_MAX'];
+
+  function loadFirehoseConnSettings() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var settings = data.settings || {};
+        _fhConnKeys.forEach(function (key) {
+          var el = document.querySelector('[data-setting-key="' + key + '"]');
+          if (el && settings[key] !== undefined) el.value = settings[key];
+        });
+      });
+  }
+
+  function saveFirehoseConnSettings() {
+    var body = {};
+    _fhConnKeys.forEach(function (key) {
+      var el = document.querySelector('[data-setting-key="' + key + '"]');
+      if (el) body[key] = el.value;
+    });
+    fetchApi('/api/settings', { method: 'PUT', body: body })
+      .then(function () { showToast('Connection settings saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); });
+  }
+
+  function loadLangFilter() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var val = (data.settings || {}).FIREHOSE_ALLOWED_LANGS || 'en,hi';
+        var langs = val.split(',').map(function (l) { return l.trim(); });
+        var checkboxes = document.querySelectorAll('#fh-lang-checkboxes input[type=checkbox]');
+        checkboxes.forEach(function (cb) { cb.checked = langs.indexOf(cb.value) !== -1; });
+      });
+  }
+
+  function saveLangFilter() {
+    var checked = document.querySelectorAll('#fh-lang-checkboxes input[type=checkbox]:checked');
+    var langs = [];
+    checked.forEach(function (cb) { langs.push(cb.value); });
+    if (!langs.length) { showToast('Select at least one language', 'error'); return; }
+    fetchApi('/api/settings', { method: 'PUT', body: { FIREHOSE_ALLOWED_LANGS: langs.join(',') } })
+      .then(function () { showToast('Language filter saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); });
+  }
+
+  function loadDomainFilters() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var s = data.settings || {};
+        var blocked = $('fh-blocked-domains');
+        var allowed = $('fh-allowed-domains');
+        if (blocked) blocked.value = (s.FIREHOSE_BLOCKED_DOMAINS || '').split(',').filter(Boolean).join('\n');
+        if (allowed) allowed.value = (s.FIREHOSE_ALLOWED_DOMAINS || '').split(',').filter(Boolean).join('\n');
+      });
+  }
+
+  function saveDomainFilters() {
+    var blockedEl = $('fh-blocked-domains');
+    var allowedEl = $('fh-allowed-domains');
+    var blockedVal = (blockedEl ? blockedEl.value : '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).join(',');
+    var allowedVal = (allowedEl ? allowedEl.value : '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).join(',');
+    fetchApi('/api/settings', { method: 'PUT', body: { FIREHOSE_BLOCKED_DOMAINS: blockedVal, FIREHOSE_ALLOWED_DOMAINS: allowedVal } })
+      .then(function () { showToast('Domain filters saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); });
+  }
+
+  // ─── Lottery page ──────────────────────────────────────────────────────────
+
+  function loadLotteryPage() {
+    loadLotterySlots();
+
+    var refreshBtn = $('lotteryRefreshBtn');
+    if (refreshBtn) refreshBtn.onclick = function () { loadLotteryPage(); showToast('Refreshed', 'info'); };
+
+    var fetchAllBtn = $('lotteryFetchAllBtn');
+    if (fetchAllBtn) fetchAllBtn.onclick = function () {
+      fetchAllBtn.disabled = true;
+      fetchAllBtn.textContent = 'Fetching...';
+      fetchApi('/api/lottery/fetch', { method: 'POST' })
+        .then(function (res) {
+          showToast((res.data && res.data.message) || 'Fetch triggered', 'success');
+          setTimeout(loadLotterySlots, 1200);
+        })
+        .catch(function (e) { showToast('Fetch failed: ' + e.message, 'error'); })
+        .finally(function () { fetchAllBtn.disabled = false; fetchAllBtn.textContent = '⚡ Fetch All'; });
+    };
+
+    var genBtn = $('lotteryGenPostsBtn');
+    if (genBtn) genBtn.onclick = function () {
+      genBtn.disabled = true;
+      genBtn.textContent = 'Generating...';
+      fetchApi('/api/lottery/generate-posts', { method: 'POST' })
+        .then(function (res) {
+          showToast((res.data && res.data.message) || 'Posts generated', 'success');
+          setTimeout(loadLotterySlots, 1200);
+        })
+        .catch(function (e) { showToast('Generate failed: ' + e.message, 'error'); })
+        .finally(function () { genBtn.disabled = false; genBtn.textContent = '📝 Generate Posts'; });
+    };
+  }
+
+  function loadLotterySlots() {
+    fetchApi('/api/lottery/summary')
+      .then(function (res) {
+        var summary = res.data || res;
+        var draws = summary.draws || {};
+        var date = summary.date || '—';
+
+        // Update stat bar
+        var fetched = ['1pm', '6pm', '8pm'].filter(function (k) {
+          return draws[k] && draws[k].status === 'success';
+        }).length;
+        var posted = ['1pm', '6pm', '8pm'].filter(function (k) {
+          return draws[k] && draws[k].wp_post_id;
+        }).length;
+        var elDate = $('lottery-stat-date');
+        var elFetched = $('lottery-stat-fetched');
+        var elPosted = $('lottery-stat-posted');
+        if (elDate) elDate.textContent = date;
+        if (elFetched) elFetched.textContent = fetched + '/3';
+        if (elPosted) elPosted.textContent = posted + '/3';
+
+        // Draw cards
+        var slots = [
+          { key: '1pm', label: '1 PM Draw', icon: '🌅' },
+          { key: '6pm', label: '6 PM Draw', icon: '🌆' },
+          { key: '8pm', label: '8 PM Draw', icon: '🌙' },
+        ];
+        var wrap = $('lottery-draws-wrap');
+        if (!wrap) return;
+        wrap.innerHTML = slots.map(function (s) {
+          var draw = draws[s.key] || { status: 'pending' };
+          var statusColor = draw.status === 'success' ? '#22c55e'
+            : draw.status === 'failed' ? '#ef4444'
+            : draw.status === 'fetching' ? '#f59e0b'
+            : '#6b7280';
+          var statusLabel = draw.status === 'success' ? '✅ Fetched'
+            : draw.status === 'failed' ? '❌ Failed'
+            : draw.status === 'fetching' ? '⏳ Fetching...'
+            : '⏰ Pending';
+          var wpLine = draw.wp_post_id
+            ? '<div style="font-size:12px;margin-bottom:10px;color:#3b82f6;">WP Post #' + draw.wp_post_id + '</div>'
+            : '<div style="font-size:12px;margin-bottom:10px;color:#6b7280;">No WP post yet</div>';
+          var nameLine = draw.draw_name
+            ? '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">' + draw.draw_name + '</div>'
+            : '';
+          return '<div class="card" style="text-align:center;padding:22px;">'
+            + '<div style="font-size:30px;margin-bottom:8px;">' + s.icon + '</div>'
+            + '<div style="font-size:15px;font-weight:700;">' + s.label + '</div>'
+            + nameLine
+            + '<div style="color:' + statusColor + ';font-weight:600;margin:10px 0 4px;">' + statusLabel + '</div>'
+            + wpLine
+            + '<button class="btn btn-sm btn-outline" onclick="window.__fetchLotterySlot(\'' + s.key + '\')">Fetch ' + s.key + '</button>'
+            + '</div>';
+        }).join('');
+      })
+      .catch(function (e) {
+        var wrap = $('lottery-draws-wrap');
+        if (wrap) wrap.innerHTML = '<div style="color:#ef4444;padding:16px;">Error loading summary: ' + e.message + '</div>';
+      });
+  }
+
+  window.__fetchLotterySlot = function (drawTime) {
+    showToast('Fetching ' + drawTime + ' draw...', 'info');
+    fetchApi('/api/lottery/fetch/' + drawTime, { method: 'POST' })
+      .then(function (res) {
+        showToast((res.data && res.data.message) || 'Done', 'success');
+        setTimeout(loadLotterySlots, 900);
+      })
+      .catch(function (e) { showToast('Fetch failed: ' + e.message, 'error'); });
+  };
+
+  function loadLotteryRecent() {
+    fetchApi('/api/lottery/recent?limit=30')
+      .then(function (res) {
+        var rows = res.data || res;
+        if (!Array.isArray(rows)) rows = [];
+        var tbody = $('lottery-recent-tbody');
+        if (!tbody) return;
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888">No results yet</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(function (r) {
+          var statusColor = r.status === 'success' ? '#22c55e' : r.status === 'failed' ? '#ef4444' : '#6b7280';
+          var wpCell = r.wp_post_id ? '#' + r.wp_post_id : '—';
+          return '<tr>'
+            + '<td>' + (r.draw_date || '—') + '</td>'
+            + '<td>' + (r.draw_time || '—') + '</td>'
+            + '<td>' + (r.draw_name || '—') + '</td>'
+            + '<td>' + (r.source || '—') + '</td>'
+            + '<td style="color:' + statusColor + ';font-weight:600;">' + (r.status || '—') + '</td>'
+            + '<td>' + wpCell + '</td>'
+            + '<td>' + (r.retry_count != null ? r.retry_count : '—') + '</td>'
+            + '<td>' + (r.fetched_at ? r.fetched_at.slice(0, 16) : '—') + '</td>'
+            + '</tr>';
+        }).join('');
+      });
+  }
+
+  function loadLotteryLogs() {
+    fetchApi('/api/lottery/logs?limit=50')
+      .then(function (res) {
+        var rows = res.data || res;
+        if (!Array.isArray(rows)) rows = [];
+        var tbody = $('lottery-logs-tbody');
+        if (!tbody) return;
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888">No logs yet</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(function (r) {
+          var color = r.error_message ? '#ef4444' : '';
+          return '<tr style="color:' + color + ';">'
+            + '<td style="white-space:nowrap;">' + (r.created_at ? r.created_at.slice(0, 16) : '—') + '</td>'
+            + '<td>' + (r.fetch_type || '—') + '</td>'
+            + '<td>' + (r.cities_ok != null ? r.cities_ok : '—') + '</td>'
+            + '<td>' + (r.duration_ms != null ? r.duration_ms + 'ms' : '—') + '</td>'
+            + '<td style="word-break:break-word;max-width:200px;">' + (r.error_message || '') + '</td>'
+            + '<td style="word-break:break-word;max-width:300px;">' + (r.details || '') + '</td>'
+            + '</tr>';
+        }).join('');
+      });
+  }
+
+  window.__switchLotteryTab = function (tab) {
+    document.querySelectorAll('#lottery-tabs .tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    var tabs = { today: 'lottery-tab-today', recent: 'lottery-tab-recent', logs: 'lottery-tab-logs' };
+    Object.keys(tabs).forEach(function (k) {
+      var el = $(tabs[k]);
+      if (el) el.style.display = k === tab ? '' : 'none';
+    });
+    if (tab === 'recent') loadLotteryRecent();
+    if (tab === 'logs') loadLotteryLogs();
+  };
 
   // Wait for DOM
   if (document.readyState === 'loading') {

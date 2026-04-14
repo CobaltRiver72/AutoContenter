@@ -4108,3 +4108,55 @@ select:focus {
   padding: 12px 8px;
   text-align: center;
 }
+
+/* ── Firehose stats widget ───────────────────────────────────────────────── */
+.firehose-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+  padding: 4px 0;
+}
+.fh-stat {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.fh-stat-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+.fh-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ── Language checkbox grid ──────────────────────────────────────────────── */
+.lang-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+.lang-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  transition: background 0.15s;
+}
+.lang-check:hover { background: var(--bg3); }
+.lang-check input { accent-color: var(--accent); }
+
+/* ── Autopilot page ──────────────────────────────────────────────────────── */
+#page-autopilot .status-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+#page-autopilot .status-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }

@@ -4,8 +4,9 @@ var axios = require('axios');
 var path = require('path');
 var { assertSafeUrl, safeAxiosOptions, sanitizeAxiosError } = require('../utils/safe-http');
 
-// Timeout for WordPress API calls
-var WP_TIMEOUT_MS = 60000;
+// Timeout for WordPress API calls — read from config at call time for hot-reload
+var _cfg = require('../utils/config');
+function _wpTimeoutMs() { return parseInt(_cfg.get('WP_TIMEOUT_MS'), 10) || 60000; }
 
 // Regex patterns to extract the first image URL from article content
 var MD_IMAGE_RE = /!\[[^\]]*\]\(([^)]+)\)/;
@@ -361,7 +362,7 @@ class WordPressPublisher {
     var url1 = self._restUrl(restPath);
     self.logger.info('publisher', 'WP API Method 1: ' + method + ' ' + url1);
     try {
-      var res1 = await axios({ method: method, url: url1, data: data, headers: headers, timeout: WP_TIMEOUT_MS });
+      var res1 = await axios({ method: method, url: url1, data: data, headers: headers, timeout: _wpTimeoutMs() });
       self.logger.info('publisher', 'Method 1 succeeded (' + res1.status + ')');
       return res1;
     } catch (err1) {
@@ -380,7 +381,7 @@ class WordPressPublisher {
           var url2 = self.config.WP_URL.replace(/\/+$/, '') + '/?rest_route=' + encodeURIComponent(restPath);
           var headers2 = Object.assign({ 'Content-Type': 'application/json', 'Authorization': authHeader2 }, extraHeaders || {});
 
-          var res2 = await axios({ method: method, url: url2, data: data, headers: headers2, timeout: WP_TIMEOUT_MS });
+          var res2 = await axios({ method: method, url: url2, data: data, headers: headers2, timeout: _wpTimeoutMs() });
           self.logger.info('publisher', 'Method 2 succeeded (' + res2.status + ')');
           return res2;
         } catch (err2) {
@@ -397,7 +398,7 @@ class WordPressPublisher {
     var url3 = self._wpJsonUrl(restPath);
     self.logger.info('publisher', 'WP API Method 3: ' + method + ' ' + url3);
     try {
-      var res3 = await axios({ method: method, url: url3, data: data, headers: headers, timeout: WP_TIMEOUT_MS });
+      var res3 = await axios({ method: method, url: url3, data: data, headers: headers, timeout: _wpTimeoutMs() });
       self.logger.info('publisher', 'Method 3 succeeded (' + res3.status + ')');
       return res3;
     } catch (err3) {
@@ -494,7 +495,7 @@ class WordPressPublisher {
       slug: rewrittenArticle.slug || '',
       content: postContent,
       excerpt: rewrittenArticle.excerpt,
-      status: this.config.WP_POST_STATUS || 'draft',
+      status: rewrittenArticle.wpPostStatus || this.config.WP_POST_STATUS || 'draft',
       author: wpAuthorId,
       categories: wpCategories,
       tags: wpTags,

@@ -195,6 +195,19 @@ function runMigrations() {
       )
     `);
 
+    // Autopilot decisions log table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS autopilot_decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cluster_id INTEGER,
+        draft_title TEXT,
+        approved INTEGER NOT NULL DEFAULT 0,
+        reason TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_autopilot_decisions_created ON autopilot_decisions(created_at)');
+
     // Add extracted_content column if it doesn't exist
     try {
       db.exec('ALTER TABLE articles ADD COLUMN extracted_content TEXT');
@@ -427,6 +440,7 @@ function runMigrations() {
     try { db.exec('ALTER TABLE drafts ADD COLUMN wp_primary_cat_id INTEGER DEFAULT NULL'); } catch (e) { /* already exists */ }
     try { db.exec('ALTER TABLE drafts ADD COLUMN wp_tag_ids TEXT DEFAULT NULL'); } catch (e) { /* already exists */ }
     try { db.exec('ALTER TABLE drafts ADD COLUMN wp_author_id_override INTEGER DEFAULT NULL'); } catch (e) { /* already exists */ }
+    try { db.exec('ALTER TABLE drafts ADD COLUMN wp_post_status_override TEXT DEFAULT NULL'); } catch (e) { /* already exists */ }
 
     // InfraNodus analysis history — one row per analysis run so users can
     // pull past data without it being overwritten by future runs.
@@ -757,6 +771,60 @@ function runMigrations() {
           console.log('[db] Fixed metals Port Blair state name');
         }
       } catch (e) { /* metals_cities may not exist yet */ }
+    })();
+
+    // ─── Seed autopilot + pipeline defaults (INSERT OR IGNORE — never overwrites) ─
+    (function seedAutopilotDefaults() {
+      var defaults = {
+        AUTOPILOT_ENABLED: 'false',
+        AUTOPILOT_DAILY_TARGET: '50',
+        AUTOPILOT_START_HOUR: '6',
+        AUTOPILOT_END_HOUR: '23',
+        AUTOPILOT_WEEKENDS: 'true',
+        AUTOPILOT_MIN_SIMILARITY: '0.70',
+        AUTOPILOT_MIN_TIER: '0',
+        AUTOPILOT_MIN_WORDS: '300',
+        AUTOPILOT_BLOCKED_KEYWORDS: 'horoscope,rashifal,zodiac,numerology,angel number,wishes,greetings,lottery,panchang',
+        AUTOPILOT_BLOCKED_DOMAINS: '',
+        AUTOPILOT_ALLOWED_DOMAINS: '',
+        AUTOPILOT_BLOCKED_CATEGORIES: '',
+        AUTOPILOT_AUTO_CATEGORIZE: 'true',
+        PUBLISH_LANGUAGE: 'en',
+        REWRITE_LANGUAGE: 'en',
+        FIREHOSE_SINCE: '1h',
+        FIREHOSE_TIMEOUT: '300',
+        FIREHOSE_RECONNECT_MIN: '2000',
+        FIREHOSE_RECONNECT_MAX: '60000',
+        FIREHOSE_ALLOWED_DOMAINS: '',
+        FIREHOSE_BLOCKED_DOMAINS: '',
+        FIREHOSE_ALLOWED_LANGS: 'en,hi',
+        FIREHOSE_CUSTOM_TEMPLATES: '',
+        EXTRACTION_POLL_MS: '500',
+        EXTRACTION_TIMEOUT_MS: '10000',
+        EXTRACTION_MAX_SIZE_MB: '5',
+        CLUSTERING_DEBOUNCE_MS: '3000',
+        CLUSTERING_MAX_WAIT_MS: '10000',
+        CLUSTER_QUEUE_MAX: '500',
+        MAX_BUFFER_FOR_SIMILARITY: '100',
+        REWRITE_CONCURRENCY: '3',
+        REWRITE_POLL_MS: '5000',
+        LEASE_MINUTES: '8',
+        REWRITE_MAX_RETRIES: '3',
+        PUBLISH_POLL_MS: '30000',
+        WP_TIMEOUT_MS: '60000',
+        BATCH_PUBLISH_DELAY_MS: '2000',
+        INFRANODUS_CACHE_TTL_MINUTES: '30',
+        INFRANODUS_TEXT_LIMIT: '12000',
+        INFRANODUS_AUTO_ANALYZE: 'true',
+        INFRANODUS_GOOGLE_ENABLED: 'false',
+      };
+      var insertDefault = db.prepare(
+        "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))"
+      );
+      var keys = Object.keys(defaults);
+      for (var i = 0; i < keys.length; i++) {
+        insertDefault.run(keys[i], defaults[keys[i]]);
+      }
     })();
 
     console.log('[db] Schema migrations completed successfully');

@@ -56,6 +56,12 @@
       <a href="#metals" class="nav-link" data-page="metals">
         🥇 Metals
       </a>
+      <a href="#lottery" class="nav-link" data-page="lottery">
+        🎰 Lottery
+      </a>
+      <a href="#autopilot" class="nav-link" data-page="autopilot">
+        🚀 Autopilot
+      </a>
     </nav>
     <div class="sidebar-footer">
       <a href="/logout" class="nav-link logout-link">
@@ -227,6 +233,80 @@
             <div style="margin-top:12px">
               <button class="btn" id="ruleAddBtn">Add Rule</button>
             </div>
+          </div>
+        </div>
+
+        <!-- Firehose Stats -->
+        <div class="card">
+          <h3 class="card-title">Firehose Stats</h3>
+          <div id="firehose-stats-widget" class="firehose-stats-grid">
+            <p class="placeholder-text">Loading...</p>
+          </div>
+        </div>
+
+        <!-- Connection Settings -->
+        <div class="card">
+          <h3 class="card-title">Connection Settings</h3>
+          <div class="settings-group">
+            <div class="settings-row">
+              <label class="settings-label">SSE Replay Window</label>
+              <select data-setting-key="FIREHOSE_SINCE" id="fh-since" class="settings-input">
+                <option value="30m">30 minutes</option>
+                <option value="1h">1 hour</option>
+                <option value="2h">2 hours</option>
+                <option value="6h">6 hours</option>
+                <option value="12h">12 hours</option>
+                <option value="24h">24 hours</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">SSE Timeout (seconds)</label>
+              <input type="number" min="60" max="600" data-setting-key="FIREHOSE_TIMEOUT" id="fh-timeout" class="settings-input" value="300" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Reconnect Min Delay (ms)</label>
+              <input type="number" min="1000" max="10000" data-setting-key="FIREHOSE_RECONNECT_MIN" id="fh-reconnect-min" class="settings-input" value="2000" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Reconnect Max Delay (ms)</label>
+              <input type="number" min="10000" max="120000" data-setting-key="FIREHOSE_RECONNECT_MAX" id="fh-reconnect-max" class="settings-input" value="60000" />
+            </div>
+            <button class="btn btn-sm btn-primary" id="fh-conn-save" style="margin-top:12px;">Save Connection Settings</button>
+          </div>
+        </div>
+
+        <!-- Language Filter -->
+        <div class="card">
+          <h3 class="card-title">Language Filter</h3>
+          <p class="card-desc" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Only articles in checked languages will enter the pipeline.</p>
+          <div id="fh-lang-checkboxes" class="lang-checkbox-grid">
+            <label class="lang-check"><input type="checkbox" value="en" /> English</label>
+            <label class="lang-check"><input type="checkbox" value="hi" /> Hindi</label>
+            <label class="lang-check"><input type="checkbox" value="ta" /> Tamil</label>
+            <label class="lang-check"><input type="checkbox" value="te" /> Telugu</label>
+            <label class="lang-check"><input type="checkbox" value="bn" /> Bengali</label>
+            <label class="lang-check"><input type="checkbox" value="mr" /> Marathi</label>
+            <label class="lang-check"><input type="checkbox" value="gu" /> Gujarati</label>
+            <label class="lang-check"><input type="checkbox" value="kn" /> Kannada</label>
+            <label class="lang-check"><input type="checkbox" value="ml" /> Malayalam</label>
+            <label class="lang-check"><input type="checkbox" value="pa" /> Punjabi</label>
+          </div>
+          <button class="btn btn-sm btn-primary" id="fh-lang-save" style="margin-top:12px;">Save Language Filter</button>
+        </div>
+
+        <!-- Domain Filters -->
+        <div class="card">
+          <h3 class="card-title">Domain Filters</h3>
+          <div class="settings-group">
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+              <label class="settings-label">Blocked Domains (one per line — always drop these)</label>
+              <textarea data-setting-key="FIREHOSE_BLOCKED_DOMAINS" id="fh-blocked-domains" rows="4" class="settings-input" style="width:100%;font-size:12px;" placeholder="e.g. spammynews.com"></textarea>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;margin-top:10px;">
+              <label class="settings-label">Allowed Domains Only (one per line — empty = allow all)</label>
+              <textarea data-setting-key="FIREHOSE_ALLOWED_DOMAINS" id="fh-allowed-domains" rows="4" class="settings-input" style="width:100%;font-size:12px;" placeholder="Leave empty to allow all domains"></textarea>
+            </div>
+            <button class="btn btn-sm btn-primary" id="fh-domain-save" style="margin-top:12px;">Save Domain Filters</button>
           </div>
         </div>
       </section>
@@ -494,7 +574,7 @@
                 <button class="btn btn-xs btn-secondary" data-tax-tab="tag" onclick="window.__showTaxTab('tag')">Tags</button>
                 <button class="btn btn-xs btn-secondary" data-tax-tab="author" onclick="window.__showTaxTab('author')">Authors</button>
               </div>
-              <div id="wpTaxTableWrap" style="max-height:180px;overflow-y:auto;background:#111;border-radius:6px;padding:8px;"></div>
+              <div id="wpTaxTableWrap" style="max-height:320px;overflow-y:auto;margin-top:4px;"></div>
             </div>
             <!-- Rules -->
             <div class="settings-group-title" style="margin-top:16px;">Publishing Rules</div>
@@ -648,6 +728,70 @@
           </div>
         </div>
 
+        <!-- Pipeline Engine Settings -->
+        <div class="settings-form" id="pipeline-engine-section">
+          <div class="settings-group">
+            <div class="settings-group-title" id="pipelineEngineToggle" style="cursor:pointer;user-select:none;" onclick="(function(){var b=document.getElementById('pipelineEngineBody');var a=document.getElementById('pipelineEngineArrow');if(b){b.style.display=b.style.display==='none'?'':'none';a.textContent=b.style.display===''?'▼':'▶';}})()">
+              Pipeline Engine &nbsp;<span id="pipelineEngineArrow" style="font-size:10px;color:var(--text-muted);">▶</span>
+            </div>
+            <div id="pipelineEngineBody" style="display:none;">
+              <div class="settings-row">
+                <label class="settings-label">Extraction Poll (ms)</label>
+                <input type="number" min="100" max="5000" data-setting-key="EXTRACTION_POLL_MS" class="settings-input" value="500" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Publish Poll (ms)</label>
+                <input type="number" min="5000" max="300000" data-setting-key="PUBLISH_POLL_MS" class="settings-input" value="30000" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Rewrite Concurrency</label>
+                <input type="number" min="1" max="10" data-setting-key="REWRITE_CONCURRENCY" class="settings-input" value="3" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Rewrite Max Retries</label>
+                <input type="number" min="1" max="10" data-setting-key="REWRITE_MAX_RETRIES" class="settings-input" value="3" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Lease Minutes</label>
+                <input type="number" min="1" max="60" data-setting-key="LEASE_MINUTES" class="settings-input" value="8" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Max Publish / Hour</label>
+                <input type="number" min="1" max="30" data-setting-key="MAX_PUBLISH_PER_HOUR" class="settings-input" value="4" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Publish Cooldown (min)</label>
+                <input type="number" min="1" max="120" data-setting-key="PUBLISH_COOLDOWN_MINUTES" class="settings-input" value="10" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Clustering Debounce (ms)</label>
+                <input type="number" min="5000" max="300000" data-setting-key="CLUSTERING_DEBOUNCE_MS" class="settings-input" value="60000" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Clustering Max Wait (ms)</label>
+                <input type="number" min="30000" max="1800000" data-setting-key="CLUSTERING_MAX_WAIT_MS" class="settings-input" value="300000" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Cluster Queue Max</label>
+                <input type="number" min="10" max="1000" data-setting-key="CLUSTER_QUEUE_MAX" class="settings-input" value="100" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Max Tokens (AI)</label>
+                <input type="number" min="1000" max="32000" data-setting-key="MAX_TOKENS" class="settings-input" value="8192" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Temperature (AI)</label>
+                <input type="number" min="0" max="2" step="0.05" data-setting-key="TEMPERATURE" class="settings-input" value="0.4" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">WP Timeout (ms)</label>
+                <input type="number" min="5000" max="300000" data-setting-key="WP_TIMEOUT_MS" class="settings-input" value="60000" />
+              </div>
+              <button class="btn btn-sm btn-primary" id="pipelineEngineSaveBtn" style="margin-top:10px;">Save Pipeline Settings</button>
+            </div>
+          </div>
+        </div>
+
         <!-- WordPress Diagnostics Panel -->
         <div id="wpDiagPanel" class="wp-diag-panel" style="display:none;">
           <div class="wp-diag-header">
@@ -761,7 +905,7 @@
         </div>
 
         <!-- Stale domains + new domains row -->
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
           <div class="card">
             <div class="card-title">🕸️ Stale Domains (silent 24h+)</div>
             <div id="sources-stale-list" style="font-size:13px;"></div>
@@ -769,6 +913,34 @@
           <div class="card">
             <div class="card-title">🆕 New Domains Today</div>
             <div id="sources-new-list" style="font-size:13px;"></div>
+          </div>
+        </div>
+
+        <!-- Tier Manager -->
+        <div class="card">
+          <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>Source Tier Manager</span>
+            <button class="btn btn-sm btn-primary" id="tierSaveBtn">Save Tiers</button>
+          </div>
+          <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px;">
+            Tier 1 sources get highest priority in autopilot quality checks. One domain per line.
+          </p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px;">Tier 1 — Top Authority</div>
+              <textarea id="tier1-domains" data-setting-key="TIER1_SOURCES" rows="10" class="settings-input" style="width:100%;font-size:12px;resize:vertical;" placeholder="ndtv.com&#10;thehindu.com&#10;indianexpress.com"></textarea>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:6px;">Tier 2 — Established</div>
+              <textarea id="tier2-domains" data-setting-key="TIER2_SOURCES" rows="10" class="settings-input" style="width:100%;font-size:12px;resize:vertical;" placeholder="hindustantimes.com&#10;timesofindia.com"></textarea>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#a16207;margin-bottom:6px;">Tier 3 — Regional / Niche</div>
+              <textarea id="tier3-domains" data-setting-key="TIER3_SOURCES" rows="10" class="settings-input" style="width:100%;font-size:12px;resize:vertical;" placeholder="Any other domain"></textarea>
+            </div>
+          </div>
+          <div style="margin-top:12px;">
+            <div id="tier-active-domains" style="font-size:12px;color:var(--text-muted);"></div>
           </div>
         </div>
       </section>
@@ -1072,6 +1244,198 @@
         </div>
       </section>
 
+      <!-- ═══════════════════════════ LOTTERY PAGE ══════════════════════════ -->
+      <section class="page hidden" id="page-lottery">
+        <div class="page-header">
+          <h2 class="page-title">🎰 Lottery Results</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm btn-purple" id="lotteryFetchAllBtn">⚡ Fetch All</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="lotteryGenPostsBtn">📝 Generate Posts</button>
+            <button class="btn btn-sm btn-ghost" id="lotteryRefreshBtn">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Summary stat bar -->
+        <div class="stats-grid" style="margin-bottom:16px;" id="lottery-slots-grid">
+          <div class="stat-card"><div class="stat-value" id="lottery-stat-date">—</div><div class="stat-label">IST Date</div></div>
+          <div class="stat-card"><div class="stat-value" id="lottery-stat-fetched">—</div><div class="stat-label">Draws Fetched</div></div>
+          <div class="stat-card"><div class="stat-value" id="lottery-stat-posted">—</div><div class="stat-label">WP Posts Created</div></div>
+        </div>
+
+        <!-- Tab navigation -->
+        <div class="page-tabs" id="lottery-tabs">
+          <button class="tab active" data-tab="today" data-click="switchLotteryTab">📅 Today</button>
+          <button class="tab" data-tab="recent" data-click="switchLotteryTab">📋 Recent Results</button>
+          <button class="tab" data-tab="logs" data-click="switchLotteryTab">🔍 Fetch Log</button>
+        </div>
+
+        <!-- Tab: Today's Draws -->
+        <div id="lottery-tab-today" class="tab-content">
+          <div id="lottery-draws-wrap" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:12px;">
+            <div style="color:#888;padding:16px;">Loading draws...</div>
+          </div>
+        </div>
+
+        <!-- Tab: Recent Results -->
+        <div id="lottery-tab-recent" class="tab-content" style="display:none">
+          <div style="overflow-x:auto;margin-top:12px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th><th>Draw</th><th>Name</th><th>Source</th><th>Status</th><th>WP Post</th><th>Retries</th><th>Fetched At</th>
+                </tr>
+              </thead>
+              <tbody id="lottery-recent-tbody">
+                <tr><td colspan="8" style="text-align:center;color:#888">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab: Fetch Log -->
+        <div id="lottery-tab-logs" class="tab-content" style="display:none">
+          <div style="overflow-x:auto;margin-top:12px;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Time</th><th>Type</th><th>OK</th><th>Duration</th><th>Error</th><th>Details</th></tr>
+              </thead>
+              <tbody id="lottery-logs-tbody">
+                <tr><td colspan="6" style="text-align:center;color:#888">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ AUTOPILOT PAGE ══════════════════════════ -->
+      <section class="page hidden" id="page-autopilot">
+        <div class="page-header">
+          <h2 class="page-title">Autopilot</h2>
+          <div class="page-actions">
+            <button class="btn btn-sm btn-ghost" id="autopilotRefreshBtn">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="card" style="margin-bottom:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+            <div style="display:flex;align-items:center;gap:14px;">
+              <span class="status-dot" id="autopilot-status-dot"></span>
+              <div>
+                <div style="font-size:15px;font-weight:700;" id="autopilot-status-label">Loading...</div>
+                <div style="font-size:12px;color:var(--text-muted);" id="autopilot-status-reason"></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:12px;color:var(--text-muted);">Published today:</span>
+              <span style="font-size:22px;font-weight:700;color:var(--accent);" id="autopilot-published-today">—</span>
+              <span style="font-size:12px;color:var(--text-muted);">/</span>
+              <span style="font-size:14px;font-weight:600;color:var(--text-secondary);" id="autopilot-daily-limit">—</span>
+              <button class="btn btn-sm btn-primary" id="autopilotToggleBtn" style="margin-left:10px;">Enable</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings Grid -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+
+          <div class="card">
+            <div class="card-title">Schedule</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <label class="settings-label">Start Hour (0–23)</label>
+                <input type="number" min="0" max="23" data-setting-key="AUTOPILOT_START_HOUR" class="settings-input" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">End Hour (0–23)</label>
+                <input type="number" min="0" max="23" data-setting-key="AUTOPILOT_END_HOUR" class="settings-input" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Allow Weekends</label>
+                <select data-setting-key="AUTOPILOT_WEEKENDS" class="settings-input">
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Daily Target</label>
+                <input type="number" min="1" max="200" data-setting-key="AUTOPILOT_DAILY_TARGET" class="settings-input" />
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Quality Gates</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <label class="settings-label">Min Word Count</label>
+                <input type="number" min="100" data-setting-key="AUTOPILOT_MIN_WORDS" class="settings-input" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Min Similarity (0–1)</label>
+                <input type="number" min="0" max="1" step="0.05" data-setting-key="AUTOPILOT_MIN_SIMILARITY" class="settings-input" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Min Authority Tier</label>
+                <select data-setting-key="AUTOPILOT_MIN_TIER" class="settings-input">
+                  <option value="0">Any</option>
+                  <option value="1">Tier 1 (Top)</option>
+                  <option value="2">Tier 2</option>
+                  <option value="3">Tier 3</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Publish Language</label>
+                <select data-setting-key="PUBLISH_LANGUAGE" class="settings-input">
+                  <option value="en">English Only</option>
+                  <option value="hi">Hindi Only</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Content Blocks</div>
+            <div class="settings-group">
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                <label class="settings-label">Blocked Keywords (comma-separated)</label>
+                <textarea data-setting-key="AUTOPILOT_BLOCKED_KEYWORDS" rows="3" class="settings-input" style="width:100%;font-size:12px;"></textarea>
+              </div>
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;margin-top:8px;">
+                <label class="settings-label">Blocked Categories (comma-separated)</label>
+                <textarea data-setting-key="AUTOPILOT_BLOCKED_CATEGORIES" rows="3" class="settings-input" style="width:100%;font-size:12px;"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Domain Rules</div>
+            <div class="settings-group">
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                <label class="settings-label">Blocked Domains (comma-separated)</label>
+                <textarea data-setting-key="AUTOPILOT_BLOCKED_DOMAINS" rows="3" class="settings-input" style="width:100%;font-size:12px;"></textarea>
+              </div>
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;margin-top:8px;">
+                <label class="settings-label">Allowed Domains Only (empty = all)</label>
+                <textarea data-setting-key="AUTOPILOT_ALLOWED_DOMAINS" rows="3" class="settings-input" style="width:100%;font-size:12px;"></textarea>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <button class="btn" id="autopilotSettingsSaveBtn">Save Autopilot Settings</button>
+
+        <!-- Decision Log -->
+        <div class="card" style="margin-top:16px;">
+          <div class="card-title">Recent Decisions</div>
+          <div id="autopilot-decisions-list">
+            <p class="placeholder-text">Loading...</p>
+          </div>
+        </div>
+      </section>
+
     </main>
   </div>
 
@@ -1247,10 +1611,22 @@
             </div>
 
             <!-- Author -->
-            <div style="margin-bottom:16px;">
+            <div style="margin-bottom:12px;">
               <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Author</div>
               <select id="editor-wp-author" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:12px;">
                 <option value="">— use rule / global default —</option>
+              </select>
+            </div>
+
+            <!-- Post Status -->
+            <div style="margin-bottom:16px;">
+              <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:4px;">Post Status <small style="color:#666;font-weight:400;">— override for this draft only</small></div>
+              <select id="editor-wp-post-status" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:12px;">
+                <option value="">— use global default (WP_POST_STATUS setting) —</option>
+                <option value="publish">Publish immediately</option>
+                <option value="draft">Save as Draft</option>
+                <option value="pending">Pending Review</option>
+                <option value="private">Private</option>
               </select>
             </div>
 
@@ -1342,6 +1718,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=49"></script>
+  <script src="/js/dashboard.js?v=51"></script>
 </body>
 </html>
