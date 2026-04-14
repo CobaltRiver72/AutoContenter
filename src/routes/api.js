@@ -5596,16 +5596,40 @@ function createApiRouter(deps) {
     }
   });
 
-  // POST /api/drafts/:id/queue — add a ready draft to autopilot queue (it's already ready; this is a no-op marker)
+  // POST /api/drafts/:id/queue — mark a rewritten draft as ready for autopilot publish
   router.post('/drafts/:id/queue', function (req, res) {
     try {
       var draftId = parseInt(req.params.id, 10);
       if (!draftId) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
       var db = req.app.locals.db;
-      var draft = db.prepare("SELECT id, status FROM drafts WHERE id = ?").get(draftId);
+      var draft = db.prepare(
+        "SELECT id, status, rewritten_html, cluster_id, cluster_role FROM drafts WHERE id = ?"
+      ).get(draftId);
       if (!draft) return res.status(404).json({ ok: false, error: 'Draft not found' });
-      if (draft.status !== 'ready') return res.status(400).json({ ok: false, error: 'Draft must be in ready state to queue (current: ' + draft.status + ')' });
-      res.json({ ok: true, message: 'Draft is in the autopilot queue', draftId: draftId });
+      if (!draft.rewritten_html || draft.rewritten_html.length < 100) {
+        return res.status(400).json({ ok: false, error: 'No rewritten content — run AI Rewrite first before queuing' });
+      }
+      if (draft.status === 'published') {
+        return res.status(400).json({ ok: false, error: 'Already published — use Update on WP to re-publish' });
+      }
+
+      db.transaction(function () {
+        // Transition draft to ready with primary role so the publish loop picks it up
+        db.prepare(
+          "UPDATE drafts SET status = 'ready', cluster_role = 'primary', " +
+          "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
+          "updated_at = datetime('now') WHERE id = ?"
+        ).run(draftId);
+
+        // Set cluster to queued so the autopilot publish loop finds it
+        if (draft.cluster_id) {
+          db.prepare(
+            "UPDATE clusters SET status = 'queued' WHERE id = ? AND status NOT IN ('published')"
+          ).run(draft.cluster_id);
+        }
+      })();
+
+      res.json({ ok: true, message: 'Queued for autopilot — will publish on next cycle', draftId: draftId });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
