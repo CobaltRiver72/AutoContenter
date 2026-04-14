@@ -1,8 +1,18 @@
 'use strict';
 
 var { extractDraftContent } = require('../utils/draft-helpers');
+var _cfg = require('../utils/config');
 
 var MODULE = 'pipeline';
+
+// Hot-reload config helpers — read fresh from SQLite on every call
+function _leaseMins()        { return parseInt(_cfg.get('LEASE_MINUTES'), 10) || 8; }
+function _rewriteConcurrency(){ return parseInt(_cfg.get('REWRITE_CONCURRENCY'), 10) || 3; }
+function _rewriteMaxRetries() { return parseInt(_cfg.get('REWRITE_MAX_RETRIES'), 10) || 3; }
+function _extractionPollMs()  { return parseInt(_cfg.get('EXTRACTION_POLL_MS'), 10) || 500; }
+function _publishPollMs()     { return parseInt(_cfg.get('PUBLISH_POLL_MS'), 10) || 30000; }
+function _maxPublishPerHour() { return parseInt(_cfg.get('MAX_PUBLISH_PER_HOUR'), 10) || 4; }
+function _publishCooldownMs() { return (parseInt(_cfg.get('PUBLISH_COOLDOWN_MINUTES'), 10) || 10) * 60000; }
 
 /**
  * Pipeline V2: Decoupled multi-stage workers.
@@ -15,7 +25,7 @@ var MODULE = 'pipeline';
  * All run in the same Node.js process. SQLite drafts table is the queue.
  */
 class Pipeline {
-  constructor(config, db, rewriter, publisher, logger, extractor, infranodus) {
+  constructor(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot) {
     this.config = config;
     this.db = db;
     this.rewriter = rewriter;
@@ -23,22 +33,16 @@ class Pipeline {
     this.logger = logger;
     this.extractor = extractor;
     this.infranodus = infranodus || null;
+    this.autopilot = autopilot || null;
 
-    // Worker config
-    this.EXTRACTION_POLL_MS = 500;      // Check for work every 500ms
-    this.REWRITE_CONCURRENCY = 3;
-    this.REWRITE_POLL_MS = 5000;
-    this.PUBLISH_POLL_MS = 30000;
-    // Slow domains (paywalled / heavy JS) and Anthropic-mediated extraction
-    // can occasionally cross the 3-minute mark, leaving the lease to expire
-    // mid-work. 8 minutes gives extraction enough headroom without leaving
-    // genuinely stuck drafts locked for too long.
-    this.LEASE_MINUTES = 8;
+    // Worker config is read fresh from config on each cycle via helper functions
+    // above (_leaseMins, _rewriteConcurrency, etc.) for hot-reload support.
 
     // Track active workers
     this._extractionRunning = false;
     this._rewriteRunning = false;
     this._publishRunning = false;
+    this._stopped = false;
 
     // Publish rate limiting (in-memory, same as old scheduler)
     this.publishHistory = [];
@@ -90,12 +94,12 @@ class Pipeline {
 
       if (!draft) return;
 
-      // Lock this one draft (lease window must match this.LEASE_MINUTES)
+      // Lock this one draft (lease window must match _leaseMins())
       var lockResult = this.db.prepare(
         "UPDATE drafts SET locked_by = 'extractor', locked_at = datetime('now'), " +
         "lease_expires_at = datetime('now', '+' || ? || ' minutes') " +
         "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
-      ).run(this.LEASE_MINUTES, draft.id);
+      ).run(_leaseMins(), draft.id);
 
       if (lockResult.changes === 0) return;
 
@@ -213,7 +217,7 @@ class Pipeline {
         "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
         "LIMIT ?"
-      ).all(this.REWRITE_CONCURRENCY);
+      ).all(_rewriteConcurrency());
 
       if (readyClusters.length === 0) return;
 
@@ -275,7 +279,7 @@ class Pipeline {
         "UPDATE drafts SET status = 'rewriting', locked_by = 'rewriter', locked_at = datetime('now'), " +
         "lease_expires_at = datetime('now', '+' || ? || ' minutes'), updated_at = datetime('now') " +
         "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
-      ).run(this.LEASE_MINUTES, primaryDraft.id);
+      ).run(_leaseMins(), primaryDraft.id);
 
       if (rewriteLockResult.changes === 0) {
         this.logger.debug(MODULE, 'Rewrite lock race lost for draft #' + primaryDraft.id + ' (cluster #' + clusterId + ')');
@@ -402,7 +406,7 @@ class Pipeline {
       this.stats.rewritesFailed++;
 
       var retryCount = (primaryDraft.retry_count || 0) + 1;
-      if (retryCount >= 3) {
+      if (retryCount >= _rewriteMaxRetries()) {
         this.db.prepare(
           "UPDATE drafts SET status = 'failed', error_message = ?, retry_count = ?, " +
           "locked_by = NULL, lease_expires_at = NULL, updated_at = datetime('now') WHERE id = ?"
@@ -459,7 +463,7 @@ class Pipeline {
       "UPDATE drafts SET status = 'rewriting', locked_by = 'rewriter', locked_at = datetime('now'), " +
       "lease_expires_at = datetime('now', '+' || ? || ' minutes'), updated_at = datetime('now') " +
       "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
-    ).run(this.LEASE_MINUTES, primary.id);
+    ).run(_leaseMins(), primary.id);
 
     if (manualLockResult.changes === 0) {
       this.logger.debug(MODULE, 'Manual rewrite lock race lost for cluster #' + clusterId + ' (draft #' + primary.id + ')');
@@ -525,7 +529,7 @@ class Pipeline {
           "UPDATE drafts SET status = 'rewriting', locked_by = 'rewriter', locked_at = datetime('now'), " +
           "lease_expires_at = datetime('now', '+' || ? || ' minutes'), updated_at = datetime('now') " +
           "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
-        ).run(this.LEASE_MINUTES, batchPrimary.id);
+        ).run(_leaseMins(), batchPrimary.id);
 
         if (batchLockResult.changes === 0) {
           this.logger.debug(MODULE, 'Batch rewrite lock race lost for cluster #' + clusterId + ' (draft #' + batchPrimary.id + ')');
@@ -582,9 +586,41 @@ class Pipeline {
 
       if (!readyPrimary) return;
 
+      // ─── Autopilot gate ────────────────────────────────────────────────────
+      if (this.autopilot && this.autopilot.isActive()) {
+        // Build minimal cluster/draft objects for the decision engine
+        var clusterForAutopilot = {
+          id: readyPrimary.cluster_id,
+          avg_similarity: readyPrimary.avg_similarity || 0,
+          article_count: readyPrimary.article_count || 1,
+        };
+        var draftForAutopilot = {
+          title: readyPrimary.rewritten_title || readyPrimary.source_title || '',
+          language: readyPrimary.language || 'en',
+          word_count: readyPrimary.word_count || 0,
+          tier: readyPrimary.source_tier || 3,
+          domain: readyPrimary.source_domain || '',
+          page_category: readyPrimary.page_category || '',
+        };
+        var decision = this.autopilot.shouldPublish(clusterForAutopilot, draftForAutopilot);
+        this.autopilot.logDecision(
+          readyPrimary.cluster_id,
+          draftForAutopilot.title,
+          decision.approved,
+          decision.reason
+        );
+        if (!decision.approved) {
+          this.logger.info(MODULE, 'Autopilot skipped cluster #' + readyPrimary.cluster_id +
+            ' "' + draftForAutopilot.title.substring(0, 50) + '" — ' + decision.reason);
+          // Release the optimistic lock we haven't taken yet — nothing to unlock
+          return;
+        }
+      }
+      // ─── End autopilot gate ────────────────────────────────────────────────
+
       var clusterId = readyPrimary.cluster_id;
 
-      // Atomic CAS lock (lease window must match this.LEASE_MINUTES).
+      // Atomic CAS lock (lease window must match _leaseMins()).
       // The WHERE clause guarantees only one worker wins the race — if another
       // worker grabbed this draft between our SELECT and UPDATE, changes === 0
       // and we skip this draft on this tick.
@@ -593,7 +629,7 @@ class Pipeline {
         "lease_expires_at = datetime('now', '+' || ? || ' minutes'), " +
         "updated_at = datetime('now') " +
         "WHERE id = ? AND (locked_by IS NULL OR lease_expires_at < datetime('now'))"
-      ).run(this.LEASE_MINUTES, readyPrimary.id);
+      ).run(_leaseMins(), readyPrimary.id);
 
       if (publishLockResult.changes === 0) {
         this.logger.debug(MODULE, 'Publish lock race lost for draft #' + readyPrimary.id);
@@ -680,7 +716,7 @@ class Pipeline {
         this.stats.publishesFailed++;
 
         var retryCount = (readyPrimary.retry_count || 0) + 1;
-        if (retryCount >= 3) {
+        if (retryCount >= _rewriteMaxRetries()) {
           this.db.prepare(
             "UPDATE drafts SET status = 'failed', error_message = ?, retry_count = ?, " +
             "locked_by = NULL, lease_expires_at = NULL, updated_at = datetime('now') WHERE id = ?"
@@ -735,12 +771,8 @@ class Pipeline {
       var now = Date.now();
       var oneHourAgo = now - 60 * 60 * 1000;
 
-      var maxPerHour = parseInt(this.config.MAX_PUBLISH_PER_HOUR, 10);
-      if (isNaN(maxPerHour) || maxPerHour <= 0) maxPerHour = 4;
-
-      var cooldownMinutes = parseInt(this.config.PUBLISH_COOLDOWN_MINUTES, 10);
-      if (isNaN(cooldownMinutes) || cooldownMinutes < 0) cooldownMinutes = 10;
-      var cooldownMs = cooldownMinutes * 60 * 1000;
+      var maxPerHour = _maxPublishPerHour();
+      var cooldownMs = _publishCooldownMs();
 
       this.publishHistory = this.publishHistory.filter(function (ts) { return ts > oneHourAgo; });
 
@@ -802,13 +834,19 @@ class Pipeline {
     // Sequential extraction — no ramp-up needed
     this.logger.info(MODULE, 'Sequential extraction queue — 1 article at a time, ~1-2 per second');
 
-    // Extraction loop — fast, high concurrency
-    this._extractionTimer = setInterval(function () {
-      self._extractionLoop().catch(function (err) {
-        self.logger.error(MODULE, 'Extraction loop crash: ' + err.message);
-        self._extractionRunning = false;
-      });
-    }, this.EXTRACTION_POLL_MS);
+    // Extraction loop — self-rescheduling setTimeout reads poll interval from config
+    // on each tick so EXTRACTION_POLL_MS changes take effect without restart.
+    function scheduleExtraction() {
+      self._extractionTimer = setTimeout(function () {
+        self._extractionLoop().catch(function (err) {
+          self.logger.error(MODULE, 'Extraction loop crash: ' + err.message);
+          self._extractionRunning = false;
+        }).finally(function () {
+          if (!self._stopped) scheduleExtraction();
+        });
+      }, _extractionPollMs());
+    }
+    scheduleExtraction();
 
     // ─── REWRITE LOOP DISABLED — Manual trigger only ─────────────
     // The rewrite loop no longer auto-polls. Rewriting is triggered
@@ -818,21 +856,28 @@ class Pipeline {
     this._rewriteTimer = null;
     this.logger.info(MODULE, 'Rewrite loop: MANUAL MODE (no auto-polling)');
 
-    // Publish loop — strict rate limit
-    this._publishTimer = setInterval(function () {
-      self._publishLoop().catch(function (err) {
-        self.logger.error(MODULE, 'Publish loop crash: ' + err.message);
-        self._publishRunning = false;
-      });
-    }, this.PUBLISH_POLL_MS);
+    // Publish loop — self-rescheduling setTimeout reads poll interval from config
+    // on each tick so PUBLISH_POLL_MS changes take effect without restart.
+    function schedulePublish() {
+      self._publishTimer = setTimeout(function () {
+        self._publishLoop().catch(function (err) {
+          self.logger.error(MODULE, 'Publish loop crash: ' + err.message);
+          self._publishRunning = false;
+        }).finally(function () {
+          if (!self._stopped) schedulePublish();
+        });
+      }, _publishPollMs());
+    }
+    schedulePublish();
 
     this.logger.info(MODULE, 'All worker loops started (extraction: sequential queue, rewrite: manual, publish: auto)');
   }
 
   stop() {
-    if (this._extractionTimer) { clearInterval(this._extractionTimer); this._extractionTimer = null; }
+    this._stopped = true;
+    if (this._extractionTimer) { clearTimeout(this._extractionTimer); this._extractionTimer = null; }
     if (this._rewriteTimer) { clearInterval(this._rewriteTimer); this._rewriteTimer = null; }
-    if (this._publishTimer) { clearInterval(this._publishTimer); this._publishTimer = null; }
+    if (this._publishTimer) { clearTimeout(this._publishTimer); this._publishTimer = null; }
     this.logger.info(MODULE, 'Pipeline stopped');
   }
 

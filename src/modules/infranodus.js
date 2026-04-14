@@ -23,8 +23,10 @@ var { sanitizeAxiosError } = require('../utils/safe-http');
 
 var MODULE = 'infranodus';
 var API_BASE = 'https://infranodus.com';
-var CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — in-memory only, cleared on shutdown
-var TEXT_LIMIT = 12000;             // chars; raised from 5 000 to capture full articles
+// Read at use time for hot-reload
+var _cfg = require('../utils/config');
+function _cacheTtlMs() { return (parseInt(_cfg.get('INFRANODUS_CACHE_TTL_MINUTES'), 10) || 30) * 60 * 1000; }
+function _textLimit()  { return parseInt(_cfg.get('INFRANODUS_TEXT_LIMIT'), 10) || 12000; }
 
 class InfranodusAnalyzer extends EventEmitter {
   constructor(config, db, logger) {
@@ -75,7 +77,7 @@ class InfranodusAnalyzer extends EventEmitter {
   _getCache(key) {
     var entry = this._cache.get(key);
     if (!entry) return null;
-    if (Date.now() - entry.ts > CACHE_TTL_MS) {
+    if (Date.now() - entry.ts > _cacheTtlMs()) {
       this._cache.delete(key);
       return null;
     }
@@ -263,7 +265,7 @@ class InfranodusAnalyzer extends EventEmitter {
     if (!this.enabled || !this.ready) return null;
     if (!articleText || articleText.length < 200) return null;
 
-    var text    = articleText.slice(0, TEXT_LIMIT);
+    var text    = articleText.slice(0, _textLimit());
     var keyword = (options && options.targetKeyword) ? String(options.targetKeyword).trim().slice(0, 200) : null;
 
     // Cache key includes keyword so same text + different keyword = fresh fetch

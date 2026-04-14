@@ -32,6 +32,7 @@ var { WordPressPublisher } = require('./modules/publisher');
 var { Pipeline } = require('./workers/pipeline');
 var { ContentExtractor } = require('./modules/extractor');
 var { InfranodusAnalyzer } = require('./modules/infranodus');
+var AutopilotEngine = require('./modules/autopilot');
 var { FuelModule } = require('./modules/fuel');
 var { MetalsModule } = require('./modules/metals');
 var { LotteryModule } = require('./modules/lottery');
@@ -51,7 +52,8 @@ var rewriter = new ArticleRewriter(config, logger);
 var publisher = new WordPressPublisher(config, logger);
 var extractor = new ContentExtractor(config, db, logger);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
-var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus);
+var autopilot = new AutopilotEngine({ get: _cfgMod.get }, db, logger);
+var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot);
 var fuel = new FuelModule(config, db, logger);
 var metals = new MetalsModule(config, db, logger);
 var lottery = new LotteryModule(config, db, logger);
@@ -60,10 +62,12 @@ var lottery = new LotteryModule(config, db, logger);
 var _clusteringQueue = [];
 var _clusteringTimer = null;
 var _clusteringProcessing = false;
-var CLUSTERING_DEBOUNCE_MS = 3000;
-var CLUSTERING_MAX_WAIT_MS = 10000;
 var _clusteringFirstEventAt = null;
-var CLUSTER_QUEUE_MAX = 500;
+// Read from config at queue time for hot-reload
+var _cfgMod = require('./utils/config');
+function _clusteringDebounceMs() { return parseInt(_cfgMod.get('CLUSTERING_DEBOUNCE_MS'), 10) || 3000; }
+function _clusteringMaxWaitMs()  { return parseInt(_cfgMod.get('CLUSTERING_MAX_WAIT_MS'), 10) || 10000; }
+function _clusterQueueMax()      { return parseInt(_cfgMod.get('CLUSTER_QUEUE_MAX'), 10) || 500; }
 
 async function boot() {
   // ─── Wire up event listeners BEFORE any module init ──────────────────────
@@ -83,7 +87,7 @@ async function boot() {
       }
 
       // Queue article for batch similarity processing instead of immediate
-      if (_clusteringQueue.length >= CLUSTER_QUEUE_MAX) {
+      if (_clusteringQueue.length >= _clusterQueueMax()) {
         logger.warn('index', 'Clustering queue full, dropping article', { url: article.url });
         return;
       }
@@ -97,10 +101,10 @@ async function boot() {
 
       // Force process if we've been waiting too long
       var waitedMs = Date.now() - _clusteringFirstEventAt;
-      if (waitedMs >= CLUSTERING_MAX_WAIT_MS) {
+      if (waitedMs >= _clusteringMaxWaitMs()) {
         processSimilarityBatch();
       } else {
-        _clusteringTimer = setTimeout(processSimilarityBatch, CLUSTERING_DEBOUNCE_MS);
+        _clusteringTimer = setTimeout(processSimilarityBatch, _clusteringDebounceMs());
       }
     } catch (err) {
       logger.error('index', 'Error buffering firehose article: ' + err.message);
@@ -128,8 +132,8 @@ async function boot() {
     try {
       // Load buffer articles ONCE for the entire batch
       var bufferArticles = buffer.getRecentArticlesForSimilarity(
-        config.BUFFER_HOURS,
-        config.MAX_BUFFER_FOR_SIMILARITY || 100
+        parseFloat(_cfgMod.get('BUFFER_HOURS')) || 2.5,
+        parseInt(_cfgMod.get('MAX_BUFFER_FOR_SIMILARITY'), 10) || 100
       );
 
       for (var i = 0; i < batch.length; i++) {
@@ -229,10 +233,11 @@ async function boot() {
   app.locals.modules = {
     firehose: firehose, trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
-    scheduler: scheduler, infranodus: infranodus,
+    scheduler: scheduler, infranodus: infranodus, autopilot: autopilot,
     fuel: fuel, metals: metals, lottery: lottery,
     wpPublisher: wpPub, fuelPosts: fuelPosts, metalsPosts: metalsPosts, lotteryPosts: lotteryPosts,
   };
+  app.locals.db = db;
 
   // Trust Hostinger reverse proxy
   app.set('trust proxy', 1);

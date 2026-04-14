@@ -517,11 +517,12 @@
       case 'ready': loadReady(); break;
       case 'failed': loadFailedDrafts(); break;
       case 'published': loadPublished(); break;
-      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); break;
+      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); loadPipelineEngineSettings(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
       case 'metals': loadMetalsPage(); break;
+      case 'autopilot': loadAutopilot(); break;
     }
 
     // Close sidebar on mobile
@@ -1778,6 +1779,10 @@
     initRuleTemplates();
     initRuleSaveConnect();
     initRuleAdd();
+    loadFirehoseStatsWidget();
+    loadFirehoseConnSettings();
+    loadLangFilter();
+    loadDomainFilters();
 
     // Refresh button
     var refreshBtn = $('rulesRefreshBtn');
@@ -1785,9 +1790,24 @@
       refreshBtn.onclick = function () {
         loadFirehoseStatus();
         loadFirehoseRules();
+        loadFirehoseStatsWidget();
         showToast('Refreshed', 'info');
       };
     }
+
+    // Firehose connection settings save button (new card)
+    var fhConnSaveBtn = document.querySelector('#page-rules .card:nth-of-type(4) button');
+    // Use explicit id approach instead
+    var fhSaveAll = document.getElementById('fh-conn-save');
+    if (fhSaveAll) fhSaveAll.onclick = saveFirehoseConnSettings;
+
+    // Lang filter save
+    var langSaveBtn = $('fh-lang-save');
+    if (langSaveBtn) langSaveBtn.onclick = saveLangFilter;
+
+    // Domain filters save
+    var domainSaveBtn = $('fh-domain-save');
+    if (domainSaveBtn) domainSaveBtn.onclick = saveDomainFilters;
   }
 
   function loadFirehoseStatus() {
@@ -8677,6 +8697,50 @@
       .catch(function(err) {
         console.error('Sources stats failed:', err);
       });
+
+    loadTierManager();
+
+    var tierSaveBtn = $('tierSaveBtn');
+    if (tierSaveBtn) tierSaveBtn.onclick = saveTierManager;
+  }
+
+  function loadTierManager() {
+    fetchApi('/api/settings')
+      .then(function (res) {
+        var s = res.settings || {};
+        var t1 = $('tier1-domains');
+        var t2 = $('tier2-domains');
+        var t3 = $('tier3-domains');
+        if (t1) t1.value = (s.TIER1_SOURCES || '').split(',').filter(Boolean).join('\n');
+        if (t2) t2.value = (s.TIER2_SOURCES || '').split(',').filter(Boolean).join('\n');
+        if (t3) t3.value = (s.TIER3_SOURCES || '').split(',').filter(Boolean).join('\n');
+
+        var info = $('tier-active-domains');
+        if (info) {
+          var t1count = (s.TIER1_SOURCES || '').split(',').filter(Boolean).length;
+          var t2count = (s.TIER2_SOURCES || '').split(',').filter(Boolean).length;
+          var t3count = (s.TIER3_SOURCES || '').split(',').filter(Boolean).length;
+          info.textContent = 'T1: ' + t1count + ' domains · T2: ' + t2count + ' domains · T3: ' + t3count + ' domains';
+        }
+      });
+  }
+
+  function saveTierManager() {
+    var btn = $('tierSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    var t1el = $('tier1-domains');
+    var t2el = $('tier2-domains');
+    var t3el = $('tier3-domains');
+    var toList = function (el) {
+      return (el ? el.value : '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).join(',');
+    };
+    fetchApi('/api/settings', {
+      method: 'PUT',
+      body: { TIER1_SOURCES: toList(t1el), TIER2_SOURCES: toList(t2el), TIER3_SOURCES: toList(t3el) }
+    })
+      .then(function () { showToast('Source tiers saved', 'success'); loadTierManager(); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Tiers'; } });
   }
 
   function renderSourcesSummary(s) {
@@ -8832,6 +8896,247 @@
         '<span style="color:#10b981;font-size:12px;">' + r.count + ' articles</span>' +
         '</div>';
     }).join('');
+  }
+
+  // ─── Autopilot page ──────────────────────────────────────────────────────
+
+  function loadAutopilot() {
+    loadAutopilotStatus();
+    loadAutopilotSettings();
+    loadAutopilotDecisions();
+
+    var refreshBtn = $('autopilotRefreshBtn');
+    if (refreshBtn) refreshBtn.onclick = function () { loadAutopilot(); showToast('Refreshed', 'info'); };
+
+    var saveBtn = $('autopilotSettingsSaveBtn');
+    if (saveBtn) saveBtn.onclick = saveAutopilotSettings;
+  }
+
+  function loadAutopilotStatus() {
+    fetchApi('/api/autopilot/status')
+      .then(function (res) {
+        var s = res.data || res;
+        var dot = $('autopilot-status-dot');
+        var label = $('autopilot-status-label');
+        var reason = $('autopilot-status-reason');
+        var todayEl = $('autopilot-published-today');
+        var limitEl = $('autopilot-daily-limit');
+        var toggleBtn = $('autopilotToggleBtn');
+        if (!dot) return;
+
+        var active = s.active;
+        dot.className = 'status-dot ' + (active ? 'connected' : '');
+        label.textContent = active ? 'Active' : 'Inactive';
+        reason.textContent = s.nextPublishETA ? 'Next publish: ' + s.nextPublishETA : '';
+        todayEl.textContent = s.publishedToday !== undefined ? s.publishedToday : '—';
+        limitEl.textContent = s.dailyTarget || '—';
+
+        var enabled = s.enabled;
+        if (toggleBtn) {
+          toggleBtn.textContent = enabled ? 'Disable' : 'Enable';
+          toggleBtn.className = 'btn btn-sm ' + (enabled ? 'btn-warning' : 'btn-primary');
+          toggleBtn.onclick = function () { toggleAutopilot(!enabled); };
+        }
+      })
+      .catch(function () {
+        var label = $('autopilot-status-label');
+        if (label) label.textContent = 'Status unavailable';
+      });
+  }
+
+  function toggleAutopilot(enable) {
+    fetchApi('/api/autopilot/toggle', { method: 'POST', body: { enable: enable } })
+      .then(function () {
+        showToast('Autopilot ' + (enable ? 'enabled' : 'disabled'), 'success');
+        loadAutopilotStatus();
+      })
+      .catch(function (e) { showToast('Toggle failed: ' + e.message, 'error'); });
+  }
+
+  var _apSettingKeys = [
+    'AUTOPILOT_START_HOUR', 'AUTOPILOT_END_HOUR', 'AUTOPILOT_WEEKENDS',
+    'AUTOPILOT_DAILY_TARGET', 'AUTOPILOT_MIN_WORDS', 'AUTOPILOT_MIN_SIMILARITY',
+    'AUTOPILOT_MIN_TIER', 'PUBLISH_LANGUAGE', 'AUTOPILOT_BLOCKED_KEYWORDS',
+    'AUTOPILOT_BLOCKED_CATEGORIES', 'AUTOPILOT_BLOCKED_DOMAINS', 'AUTOPILOT_ALLOWED_DOMAINS'
+  ];
+
+  function loadAutopilotSettings() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var settings = data.settings || {};
+        _apSettingKeys.forEach(function (key) {
+          var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
+          if (el && settings[key] !== undefined) el.value = settings[key];
+        });
+      });
+  }
+
+  function saveAutopilotSettings() {
+    var btn = $('autopilotSettingsSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    var body = {};
+    _apSettingKeys.forEach(function (key) {
+      var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
+      if (el) body[key] = el.value;
+    });
+    fetchApi('/api/settings', { method: 'PUT', body: body })
+      .then(function () { showToast('Autopilot settings saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Autopilot Settings'; } });
+  }
+
+  function loadAutopilotDecisions() {
+    var container = $('autopilot-decisions-list');
+    if (!container) return;
+    fetchApi('/api/autopilot/decisions?limit=30')
+      .then(function (res) {
+        var data = res.data || res;
+        if (!Array.isArray(data) || !data.length) {
+          container.innerHTML = '<p class="placeholder-text">No decisions recorded yet.</p>';
+          return;
+        }
+        container.innerHTML = '<div style="overflow-x:auto;"><table class="data-table"><thead><tr>' +
+          '<th>Time</th><th>Title</th><th>Decision</th><th>Reason</th>' +
+          '</tr></thead><tbody>' +
+          data.map(function (d) {
+            var badge = d.approved
+              ? '<span style="color:#10b981;font-weight:600;">PUBLISH</span>'
+              : '<span style="color:#ef4444;font-weight:600;">SKIP</span>';
+            return '<tr>' +
+              '<td style="white-space:nowrap;color:var(--text-muted);font-size:12px;">' + timeAgo(d.created_at) + '</td>' +
+              '<td>' + escapeHtml(d.draft_title || '—') + '</td>' +
+              '<td>' + badge + '</td>' +
+              '<td style="font-size:12px;color:var(--text-muted);">' + escapeHtml(d.reason || '') + '</td>' +
+              '</tr>';
+          }).join('') +
+          '</tbody></table></div>';
+      })
+      .catch(function () { container.innerHTML = '<p class="placeholder-text">Failed to load decisions.</p>'; });
+  }
+
+  // ─── Pipeline Engine settings (Settings page) ─────────────────────────────
+
+  var _pipelineSettingKeys = [
+    'EXTRACTION_POLL_MS', 'PUBLISH_POLL_MS', 'REWRITE_CONCURRENCY', 'REWRITE_MAX_RETRIES',
+    'LEASE_MINUTES', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES',
+    'CLUSTERING_DEBOUNCE_MS', 'CLUSTERING_MAX_WAIT_MS', 'CLUSTER_QUEUE_MAX',
+    'MAX_TOKENS', 'TEMPERATURE', 'WP_TIMEOUT_MS'
+  ];
+
+  function loadPipelineEngineSettings() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var settings = data.settings || {};
+        _pipelineSettingKeys.forEach(function (key) {
+          var el = document.querySelector('#pipeline-engine-section [data-setting-key="' + key + '"]');
+          if (el && settings[key] !== undefined) el.value = settings[key];
+        });
+      });
+
+    var saveBtn = $('pipelineEngineSaveBtn');
+    if (saveBtn) saveBtn.onclick = savePipelineEngineSettings;
+  }
+
+  function savePipelineEngineSettings() {
+    var btn = $('pipelineEngineSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    var body = {};
+    _pipelineSettingKeys.forEach(function (key) {
+      var el = document.querySelector('#pipeline-engine-section [data-setting-key="' + key + '"]');
+      if (el) body[key] = el.value;
+    });
+    fetchApi('/api/settings', { method: 'PUT', body: body })
+      .then(function () { showToast('Pipeline settings saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Pipeline Settings'; } });
+  }
+
+  // ─── Firehose page enhancements ───────────────────────────────────────────
+
+  function loadFirehoseStatsWidget() {
+    var el = $('firehose-stats-widget');
+    if (!el) return;
+    fetchApi('/api/firehose/status')
+      .then(function (data) {
+        var s = data.stats || {};
+        el.innerHTML =
+          fhStat((s.articlesReceived || 0).toLocaleString(), 'Received') +
+          fhStat((s.articlesQueued || 0).toLocaleString(), 'Queued') +
+          fhStat((s.articlesDroppedByLanguage || 0).toLocaleString(), 'Dropped (Lang)') +
+          fhStat((s.articlesDroppedByDomain || 0).toLocaleString(), 'Dropped (Domain)') +
+          fhStat((s.reconnects || 0), 'Reconnects') +
+          fhStat((s.parseErrors || 0), 'Parse Errors');
+      })
+      .catch(function () { if (el) el.innerHTML = '<p class="placeholder-text">Stats unavailable</p>'; });
+  }
+
+  function fhStat(val, label) {
+    return '<div class="fh-stat"><div class="fh-stat-val">' + val + '</div><div class="fh-stat-label">' + label + '</div></div>';
+  }
+
+  var _fhConnKeys = ['FIREHOSE_SINCE', 'FIREHOSE_TIMEOUT', 'FIREHOSE_RECONNECT_MIN', 'FIREHOSE_RECONNECT_MAX'];
+
+  function loadFirehoseConnSettings() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var settings = data.settings || {};
+        _fhConnKeys.forEach(function (key) {
+          var el = document.querySelector('[data-setting-key="' + key + '"]');
+          if (el && settings[key] !== undefined) el.value = settings[key];
+        });
+      });
+  }
+
+  function saveFirehoseConnSettings() {
+    var body = {};
+    _fhConnKeys.forEach(function (key) {
+      var el = document.querySelector('[data-setting-key="' + key + '"]');
+      if (el) body[key] = el.value;
+    });
+    fetchApi('/api/settings', { method: 'PUT', body: body })
+      .then(function () { showToast('Connection settings saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); });
+  }
+
+  function loadLangFilter() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var val = (data.settings || {}).FIREHOSE_ALLOWED_LANGS || 'en,hi';
+        var langs = val.split(',').map(function (l) { return l.trim(); });
+        var checkboxes = document.querySelectorAll('#fh-lang-checkboxes input[type=checkbox]');
+        checkboxes.forEach(function (cb) { cb.checked = langs.indexOf(cb.value) !== -1; });
+      });
+  }
+
+  function saveLangFilter() {
+    var checked = document.querySelectorAll('#fh-lang-checkboxes input[type=checkbox]:checked');
+    var langs = [];
+    checked.forEach(function (cb) { langs.push(cb.value); });
+    if (!langs.length) { showToast('Select at least one language', 'error'); return; }
+    fetchApi('/api/settings', { method: 'PUT', body: { FIREHOSE_ALLOWED_LANGS: langs.join(',') } })
+      .then(function () { showToast('Language filter saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); });
+  }
+
+  function loadDomainFilters() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var s = data.settings || {};
+        var blocked = $('fh-blocked-domains');
+        var allowed = $('fh-allowed-domains');
+        if (blocked) blocked.value = (s.FIREHOSE_BLOCKED_DOMAINS || '').split(',').filter(Boolean).join('\n');
+        if (allowed) allowed.value = (s.FIREHOSE_ALLOWED_DOMAINS || '').split(',').filter(Boolean).join('\n');
+      });
+  }
+
+  function saveDomainFilters() {
+    var blockedEl = $('fh-blocked-domains');
+    var allowedEl = $('fh-allowed-domains');
+    var blockedVal = (blockedEl ? blockedEl.value : '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).join(',');
+    var allowedVal = (allowedEl ? allowedEl.value : '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).join(',');
+    fetchApi('/api/settings', { method: 'PUT', body: { FIREHOSE_BLOCKED_DOMAINS: blockedVal, FIREHOSE_ALLOWED_DOMAINS: allowedVal } })
+      .then(function () { showToast('Domain filters saved', 'success'); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); });
   }
 
   // Wait for DOM

@@ -1639,6 +1639,24 @@ function createApiRouter(deps) {
         'PORT',
         'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY',
         'WP_SITE_URL',
+        // Autopilot
+        'AUTOPILOT_ENABLED', 'AUTOPILOT_DAILY_TARGET', 'AUTOPILOT_START_HOUR', 'AUTOPILOT_END_HOUR',
+        'AUTOPILOT_WEEKENDS', 'AUTOPILOT_MIN_SIMILARITY', 'AUTOPILOT_MIN_TIER', 'AUTOPILOT_MIN_WORDS',
+        'AUTOPILOT_BLOCKED_KEYWORDS', 'AUTOPILOT_BLOCKED_DOMAINS', 'AUTOPILOT_ALLOWED_DOMAINS',
+        'AUTOPILOT_BLOCKED_CATEGORIES', 'AUTOPILOT_AUTO_CATEGORIZE',
+        'PUBLISH_LANGUAGE', 'REWRITE_LANGUAGE',
+        // Firehose
+        'FIREHOSE_SINCE', 'FIREHOSE_TIMEOUT', 'FIREHOSE_RECONNECT_MIN', 'FIREHOSE_RECONNECT_MAX',
+        'FIREHOSE_ALLOWED_DOMAINS', 'FIREHOSE_BLOCKED_DOMAINS', 'FIREHOSE_CUSTOM_TEMPLATES',
+        'FIREHOSE_ALLOWED_LANGS', 'ALLOWED_LANGUAGES',
+        // Pipeline engine
+        'EXTRACTION_POLL_MS', 'EXTRACTION_TIMEOUT_MS', 'EXTRACTION_MAX_SIZE_MB', 'JINA_ENABLED',
+        'CLUSTERING_DEBOUNCE_MS', 'CLUSTERING_MAX_WAIT_MS', 'CLUSTER_QUEUE_MAX', 'MAX_BUFFER_FOR_SIMILARITY',
+        'REWRITE_CONCURRENCY', 'REWRITE_POLL_MS', 'LEASE_MINUTES', 'REWRITE_MAX_RETRIES',
+        'MAX_TOKENS', 'TEMPERATURE',
+        'PUBLISH_POLL_MS', 'WP_TIMEOUT_MS', 'BATCH_PUBLISH_DELAY_MS',
+        // InfraNodus
+        'INFRANODUS_CACHE_TTL_MINUTES', 'INFRANODUS_TEXT_LIMIT', 'INFRANODUS_AUTO_ANALYZE', 'INFRANODUS_GOOGLE_ENABLED',
       ];
 
       var BLOCKED_KEYS = [
@@ -5379,6 +5397,42 @@ function createApiRouter(deps) {
       var lottery = req.app.locals.modules.lottery;
       if (!lottery) return res.json({ ok: false, error: 'Lottery module not loaded' });
       res.json({ ok: true, data: lottery.getSchedule() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── Autopilot API ───────────────────────────────────────────────────────
+
+  router.get('/autopilot/status', function (req, res) {
+    try {
+      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
+      if (!ap) return res.json({ ok: true, data: { enabled: false, active: false } });
+      res.json({ ok: true, data: ap.getStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  router.get('/autopilot/decisions', function (req, res) {
+    try {
+      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
+      var limit = parseInt(req.query.limit, 10) || 100;
+      if (!ap) return res.json({ ok: true, data: [] });
+      res.json({ ok: true, data: ap.getRecentDecisions(limit) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  router.post('/autopilot/toggle', verifyCsrf, function (req, res) {
+    try {
+      var { get: cfgGet, set: cfgSet } = require('../utils/config');
+      var current = cfgGet('AUTOPILOT_ENABLED');
+      var newValue = (current === 'true' || current === true) ? 'false' : 'true';
+      cfgSet('AUTOPILOT_ENABLED', newValue, req.app.locals.db);
+      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
+      res.json({ ok: true, enabled: newValue === 'true', status: ap ? ap.getStatus() : null });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

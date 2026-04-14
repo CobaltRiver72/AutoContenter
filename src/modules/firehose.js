@@ -6,8 +6,13 @@ const { URL } = require('url');
 
 const MODULE = 'firehose';
 const BASE_URL = 'https://api.firehose.com';
+
+// Reconnect bounds — read from config at reconnect time for hot-reload
+var _cfg = require('../utils/config');
+function _minReconnectMs() { return parseInt(_cfg.get('FIREHOSE_RECONNECT_MIN'), 10) || 2000; }
+function _maxReconnectMs() { return parseInt(_cfg.get('FIREHOSE_RECONNECT_MAX'), 10) || 60000; }
+// Keep legacy constants for inline use in rate-limit throttle check (always 2 s minimum)
 const MIN_RECONNECT_MS = 2000;
-const MAX_RECONNECT_MS = 60000; // 1 minute cap for exponential backoff
 
 class FirehoseListener extends EventEmitter {
   /**
@@ -26,19 +31,16 @@ class FirehoseListener extends EventEmitter {
     this._lastEventId = null;
     this._articlesReceived = 0;
     this._articlesDroppedByLang = 0;
+    this._articlesDroppedByDomain = 0;
     this._lastArticleAt = null;
     this._reconnectTimer = null;
     this._lastConnectAttempt = 0;
     this._stopped = false;
     this._reconnectAttempts = 0;
 
-    // Language gate — only accept these ISO codes from the firehose stream.
-    // Override via ALLOWED_LANGUAGES=en,hi,bn in env. Hindi and English only by default.
-    var rawLangs = (config && config.ALLOWED_LANGUAGES) || 'en,hi';
-    this._allowedLangs = String(rawLangs)
-      .split(',')
-      .map(function (l) { return l.trim().toLowerCase(); })
-      .filter(Boolean);
+    // _allowedLangs is read fresh from config in handleUpdate() for hot-reload.
+    // Keep a boot-time snapshot only as an emergency fallback if config is unavailable.
+    this._allowedLangs = ['en', 'hi'];
     // Module independence
     this.enabled = false;
     this.status = 'disabled';
@@ -77,9 +79,10 @@ class FirehoseListener extends EventEmitter {
       // Close any existing connection
       this._closeEventSource();
 
-      // Build stream URL
+      // Build stream URL — read timeout and since window from config for hot-reload
       const streamUrl = new URL('/v1/stream', BASE_URL);
-      streamUrl.searchParams.set('timeout', '300');
+      const sseTimeout = parseInt(_cfg.get('FIREHOSE_TIMEOUT'), 10) || 300;
+      streamUrl.searchParams.set('timeout', String(sseTimeout));
 
       // Load last event ID for resume
       const lastId = this.getLastEventId();
@@ -90,8 +93,9 @@ class FirehoseListener extends EventEmitter {
         // Reconnect: resume from exact position via Last-Event-ID
         headers['Last-Event-ID'] = lastId;
       } else {
-        // First connect ever: replay the last hour of articles
-        streamUrl.searchParams.set('since', '1h');
+        // First connect ever: replay the configured window of articles
+        const sinceWindow = _cfg.get('FIREHOSE_SINCE') || '1h';
+        streamUrl.searchParams.set('since', sinceWindow);
       }
 
       this.logger.info(MODULE, `Connecting to ${streamUrl.toString()}`, {
@@ -178,10 +182,12 @@ class FirehoseListener extends EventEmitter {
       clearTimeout(this._reconnectTimer);
     }
 
-    // Exponential backoff with full jitter: delay is random in [MIN_RECONNECT_MS, base]
-    // where base grows as 2^attempt, capped at MAX_RECONNECT_MS.
-    var base = Math.min(MIN_RECONNECT_MS * Math.pow(2, this._reconnectAttempts), MAX_RECONNECT_MS);
-    var delay = Math.floor(Math.random() * base) + MIN_RECONNECT_MS;
+    // Exponential backoff with full jitter: delay is random in [minMs, base]
+    // where base grows as 2^attempt, capped at maxMs. Both read from config for hot-reload.
+    var minMs = _minReconnectMs();
+    var maxMs = _maxReconnectMs();
+    var base = Math.min(minMs * Math.pow(2, this._reconnectAttempts), maxMs);
+    var delay = Math.floor(Math.random() * base) + minMs;
     this._reconnectAttempts++;
     this.logger.info(MODULE, `Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
     this._reconnectTimer = setTimeout(() => this.connect(), delay);
@@ -256,11 +262,13 @@ class FirehoseListener extends EventEmitter {
     };
 
     // ─── Language Gate ─────────────────────────────────────────────────────
-    // Drop articles whose declared language isn't in the allow-list. For
-    // articles with no language metadata, sniff Devanagari Unicode range
-    // (U+0900..U+097F) in title + first 500 chars of content. Three or
-    // more Devanagari chars in a row → Hindi; otherwise default to English.
-    if (article.language && this._allowedLangs.indexOf(article.language) === -1) {
+    // Re-read allowed langs from config each time for hot-reload.
+    var rawLangs = _cfg.get('ALLOWED_LANGUAGES') || 'en,hi';
+    var allowedLangs = String(rawLangs).split(',').map(function(l){ return l.trim().toLowerCase(); }).filter(Boolean);
+    if (!allowedLangs.length) allowedLangs = ['en', 'hi'];
+    this._allowedLangs = allowedLangs; // keep in sync for getStats()
+
+    if (article.language && allowedLangs.indexOf(article.language) === -1) {
       this._articlesDroppedByLang++;
       this.logger.debug(MODULE,
         '[lang-filter] Dropped ' + article.language + ' article: "' + (article.title || article.url) + '"'
@@ -276,13 +284,28 @@ class FirehoseListener extends EventEmitter {
         article.language = 'en';
       }
       // Re-check against the allow-list in case the operator excluded en/hi.
-      if (this._allowedLangs.indexOf(article.language) === -1) {
+      if (allowedLangs.indexOf(article.language) === -1) {
         this._articlesDroppedByLang++;
         return;
       }
       this.logger.debug(MODULE, '[lang-detect] Assigned language=' + article.language + ' to "' + (article.title || article.url) + '"');
     }
     // ─── End Language Gate ─────────────────────────────────────────────────
+
+    // ─── Domain Gate ───────────────────────────────────────────────────────
+    var blockedDomains = String(_cfg.get('FIREHOSE_BLOCKED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
+    var allowedDomains = String(_cfg.get('FIREHOSE_ALLOWED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
+    if (blockedDomains.length && blockedDomains.indexOf(domain) !== -1) {
+      this._articlesDroppedByDomain++;
+      this.logger.debug(MODULE, '[domain-filter] Blocked domain: ' + domain);
+      return;
+    }
+    if (allowedDomains.length && allowedDomains.indexOf(domain) === -1) {
+      this._articlesDroppedByDomain++;
+      this.logger.debug(MODULE, '[domain-filter] Domain not in allow-list: ' + domain);
+      return;
+    }
+    // ─── End Domain Gate ───────────────────────────────────────────────────
 
     this._articlesReceived++;
     this._lastArticleAt = new Date().toISOString();
@@ -369,6 +392,7 @@ class FirehoseListener extends EventEmitter {
       stats: {
         articlesReceived: this._articlesReceived,
         articlesDroppedByLang: this._articlesDroppedByLang,
+        articlesDroppedByDomain: this._articlesDroppedByDomain,
         allowedLangs: this._allowedLangs,
         lastEventId: this._lastEventId,
         connected: this._connected,
@@ -396,6 +420,7 @@ class FirehoseListener extends EventEmitter {
       lastEventId: this._lastEventId || this.getLastEventId(),
       articlesReceived: this._articlesReceived,
       articlesDroppedByLang: this._articlesDroppedByLang,
+      articlesDroppedByDomain: this._articlesDroppedByDomain,
       allowedLangs: this._allowedLangs,
       lastArticleAt: this._lastArticleAt,
       stopped: this._stopped,

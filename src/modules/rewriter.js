@@ -1173,14 +1173,18 @@ class ArticleRewriter {
   // ─── Raw provider call (returns plain text, for patchContent) ───────────
 
   async _callProviderRaw(provider, apiKey, model, systemPrompt, userPrompt, signal) {
+    var _cfgRaw = require('../utils/config');
+    var rawMaxTokens = parseInt(_cfgRaw.get('MAX_TOKENS'), 10) || 8192;
+    var rawTemperature = parseFloat(_cfgRaw.get('TEMPERATURE')) || 0.4;
+
     if (provider === 'anthropic') {
       var Anthropic = require('@anthropic-ai/sdk');
       var client = new Anthropic({ apiKey: apiKey.trim() });
       var reqOpts = signal ? { signal: signal } : {};
       var resp = await client.messages.create({
         model: model,
-        max_tokens: 8192,
-        temperature: 0.4,
+        max_tokens: rawMaxTokens,
+        temperature: rawTemperature,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       }, reqOpts);
@@ -1198,8 +1202,8 @@ class ArticleRewriter {
       var reqOpts2 = signal ? { signal: signal } : {};
       var resp2 = await oai.chat.completions.create({
         model: model,
-        max_tokens: 8192,
-        temperature: 0.4,
+        max_tokens: rawMaxTokens,
+        temperature: rawTemperature,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
