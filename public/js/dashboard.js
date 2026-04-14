@@ -514,7 +514,7 @@
       case 'rules': loadRules(); break;
       case 'trends': loadTrends(); break;
       case 'clusters': loadClusters(); break;
-      case 'ready': loadReady(); break;
+      case 'ready': navigateTo('autopilot'); break; // redirected to Autopilot queue
       case 'failed': loadFailedDrafts(); break;
       case 'published': loadPublished(); break;
       case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); loadPipelineEngineSettings(); break;
@@ -7526,6 +7526,13 @@
     'toggleClusterSources':    function (el) { toggleClusterSources(el); },
     'toggleExpandContent':     function (el) { toggleExpandContent(el); },
     'publishReady':            function (el) { __publishReady(Number(el.dataset.draftId)); },
+    'rejectQueued':            function (el) {
+      var id = Number(el.dataset.draftId);
+      if (!confirm('Reject this draft? It will be marked as failed.')) return;
+      fetchApi('/api/autopilot/queue/' + id + '/reject', { method: 'POST' })
+        .then(function () { showToast('Draft rejected', 'success'); loadAutopilotQueue(); })
+        .catch(function (e) { showToast('Reject failed: ' + e.message, 'error'); });
+    },
     'openEditor':              function (el) { __openEditor(Number(el.dataset.draftId)); },
     'retryFailedDraft':        function (el) { __retryFailedDraft(Number(el.dataset.draftId)); },
     'retryExtract':            function (el) { __retryExtract(Number(el.dataset.draftId)); },
@@ -8930,7 +8937,10 @@
 
   function loadAutopilot() {
     loadAutopilotStatus();
+    loadAutoRewriteStatus();
     loadAutopilotSettings();
+    loadAutoRewriteSettings();
+    loadAutopilotQueue();
     loadAutopilotDecisions();
 
     var refreshBtn = $('autopilotRefreshBtn');
@@ -8941,6 +8951,32 @@
 
     var saveBtn = $('autopilotSettingsSaveBtn');
     if (saveBtn) saveBtn.onclick = saveAutopilotSettings;
+
+    var arSaveBtn = $('autoRewriteSaveBtn');
+    if (arSaveBtn) arSaveBtn.onclick = saveAutoRewriteSettings;
+
+    var cleanupBtn = $('cleanupStaleBtn');
+    if (cleanupBtn && !cleanupBtn.__wired) {
+      cleanupBtn.__wired = true;
+      cleanupBtn.onclick = function () {
+        if (!confirm('Delete all stuck/failed drafts older than the configured max age?')) return;
+        fetchApi('/api/drafts/cleanup-stale', { method: 'POST' })
+          .then(function (d) { showToast('Deleted ' + (d.deleted || 0) + ' stale drafts', 'success'); loadAutopilotQueue(); })
+          .catch(function (e) { showToast('Cleanup failed: ' + e.message, 'error'); });
+      };
+    }
+
+    var queueRefreshBtn = $('queueRefreshBtn');
+    if (queueRefreshBtn && !queueRefreshBtn.__wired) {
+      queueRefreshBtn.__wired = true;
+      queueRefreshBtn.onclick = function () { loadAutopilotQueue(); };
+    }
+
+    var queuePublishAllBtn = $('queuePublishAllBtn');
+    if (queuePublishAllBtn && !queuePublishAllBtn.__wired) {
+      queuePublishAllBtn.__wired = true;
+      queuePublishAllBtn.onclick = function () { window.__publishAllReady(); };
+    }
   }
 
   function runAutopilotSimulate() {
@@ -9042,38 +9078,74 @@
       .then(function (res) {
         var s = res.data || res;
         var dot = $('autopilot-status-dot');
-        var label = $('autopilot-status-label');
         var reason = $('autopilot-status-reason');
+        var statusLabel = $('autopilot-status-label');
         var todayEl = $('autopilot-published-today');
         var limitEl = $('autopilot-daily-limit');
         var toggleBtn = $('autopilotToggleBtn');
         if (!dot) return;
 
         var active = s.active;
-        dot.className = 'status-dot ' + (active ? 'connected' : '');
-        label.textContent = active ? 'Active' : 'Inactive';
-        reason.textContent = s.nextPublishETA ? 'Next publish: ' + s.nextPublishETA : '';
-        todayEl.textContent = s.publishedToday !== undefined ? s.publishedToday : '—';
-        limitEl.textContent = s.dailyTarget || '—';
-
         var enabled = s.enabled;
+        dot.className = 'status-dot ' + (active ? 'connected' : '');
+        if (reason) reason.textContent = active ? (s.nextPublishETA ? 'Next: ' + s.nextPublishETA : 'Active') : (enabled ? 'Outside window' : 'Disabled');
+        if (statusLabel) statusLabel.textContent = '';
+        if (todayEl) todayEl.textContent = s.publishedToday !== undefined ? s.publishedToday : '—';
+        if (limitEl) limitEl.textContent = s.dailyTarget || '—';
+
         if (toggleBtn) {
-          toggleBtn.textContent = enabled ? 'Disable' : 'Enable';
+          toggleBtn.textContent = enabled ? 'ON' : 'OFF';
           toggleBtn.className = 'btn btn-sm ' + (enabled ? 'btn-warning' : 'btn-primary');
           toggleBtn.onclick = function () { toggleAutopilot(!enabled); };
         }
       })
       .catch(function () {
-        var label = $('autopilot-status-label');
-        if (label) label.textContent = 'Status unavailable';
+        var reason = $('autopilot-status-reason');
+        if (reason) reason.textContent = 'Status unavailable';
       });
   }
 
   function toggleAutopilot(enable) {
     fetchApi('/api/autopilot/toggle', { method: 'POST', body: { enable: enable } })
       .then(function () {
-        showToast('Autopilot ' + (enable ? 'enabled' : 'disabled'), 'success');
+        showToast('Auto-Publish ' + (enable ? 'enabled' : 'disabled'), 'success');
         loadAutopilotStatus();
+      })
+      .catch(function (e) { showToast('Toggle failed: ' + e.message, 'error'); });
+  }
+
+  function loadAutoRewriteStatus() {
+    fetchApi('/api/auto-rewrite/status')
+      .then(function (res) {
+        var s = res.data || res;
+        var dot = $('auto-rewrite-status-dot');
+        var sub = $('auto-rewrite-status-sub');
+        var toggleBtn = $('autoRewriteToggleBtn');
+        var todayStat = $('auto-rewrite-today-stat');
+        var pendingStat = $('auto-rewrite-pending-stat');
+
+        var enabled = s.enabled === true || s.enabled === 'true';
+        if (dot) dot.className = 'status-dot ' + (enabled ? 'connected' : '');
+        if (sub) sub.textContent = enabled
+          ? (s.rewrittenToday || 0) + '/' + (s.dailyLimit || '?') + ' today'
+          : 'Disabled';
+        if (todayStat) todayStat.textContent = s.rewrittenToday !== undefined ? s.rewrittenToday : '—';
+        if (pendingStat) pendingStat.textContent = s.pendingClusters !== undefined ? s.pendingClusters : '—';
+
+        if (toggleBtn) {
+          toggleBtn.textContent = enabled ? 'ON' : 'OFF';
+          toggleBtn.className = 'btn btn-sm ' + (enabled ? 'btn-warning' : 'btn-primary');
+          toggleBtn.onclick = function () { toggleAutoRewrite(!enabled); };
+        }
+      })
+      .catch(function () {});
+  }
+
+  function toggleAutoRewrite(enable) {
+    fetchApi('/api/auto-rewrite/toggle', { method: 'POST' })
+      .then(function () {
+        showToast('Auto-Rewrite ' + (enable ? 'enabled' : 'disabled'), 'success');
+        loadAutoRewriteStatus();
       })
       .catch(function (e) { showToast('Toggle failed: ' + e.message, 'error'); });
   }
@@ -9108,6 +9180,96 @@
       .then(function () { showToast('Autopilot settings saved', 'success'); })
       .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
       .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Autopilot Settings'; } });
+  }
+
+  var _arSettingKeys = [
+    'AUTO_REWRITE_DAILY_LIMIT', 'AUTO_REWRITE_HOURLY_LIMIT',
+    'AUTO_REWRITE_MIN_SOURCES', 'AUTO_REWRITE_MIN_SIMILARITY',
+    'AUTO_REWRITE_BLOCKED_KEYWORDS',
+  ];
+
+  function loadAutoRewriteSettings() {
+    fetchApi('/api/settings')
+      .then(function (data) {
+        var settings = data.settings || {};
+        _arSettingKeys.forEach(function (key) {
+          var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
+          if (el && settings[key] !== undefined) el.value = settings[key];
+        });
+      });
+  }
+
+  function saveAutoRewriteSettings() {
+    var btn = $('autoRewriteSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    var body = {};
+    _arSettingKeys.forEach(function (key) {
+      var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
+      if (el) body[key] = el.value;
+    });
+    fetchApi('/api/settings', { method: 'PUT', body: body })
+      .then(function () { showToast('Auto-Rewrite settings saved', 'success'); loadAutoRewriteStatus(); })
+      .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save'; } });
+  }
+
+  var _queueCurrentPage = 1;
+  function loadAutopilotQueue(page) {
+    if (typeof page === 'number' && page > 0) _queueCurrentPage = page;
+    var container = $('autopilot-queue-list');
+    var pagination = $('autopilot-queue-pagination');
+    var countLabel = $('queue-count-label');
+    if (container) container.innerHTML = '<p class="placeholder-text">Loading...</p>';
+
+    fetchApi('/api/autopilot/queue?page=' + _queueCurrentPage)
+      .then(function (data) {
+        var rows = data.data || [];
+        var total = data.total || 0;
+        if (countLabel) countLabel.textContent = '(' + total + ')';
+
+        if (!rows.length) {
+          if (container) container.innerHTML = '<div class="feed-empty">' +
+            '<div class="feed-empty-icon">&#9889;</div>' +
+            '<div class="feed-empty-title">Queue is empty</div>' +
+            '<div class="feed-empty-desc">AI-rewritten articles will appear here once ready.</div>' +
+            '</div>';
+          return;
+        }
+
+        var html = '<div style="overflow-x:auto;"><table class="data-table"><thead><tr>' +
+          '<th>Title</th><th>Domain</th><th>Words</th><th>Similarity</th><th>Sources</th><th>Language</th><th>Actions</th>' +
+          '</tr></thead><tbody>';
+
+        rows.forEach(function (d) {
+          var title = d.rewritten_title || '(untitled)';
+          var sim = d.avg_similarity ? (parseFloat(d.avg_similarity) * 100).toFixed(0) + '%' : '—';
+          var trend = d.trends_boosted ? ' <span class="badge badge-trend">&#128293;</span>' : '';
+          html += '<tr>' +
+            '<td><strong>' + escapeHtml(String(title).substring(0, 70)) + '</strong>' + trend + '</td>' +
+            '<td>' + escapeHtml(d.source_domain || '') + '</td>' +
+            '<td>' + (d.rewritten_word_count || '—') + '</td>' +
+            '<td>' + sim + '</td>' +
+            '<td>' + (d.article_count || 1) + '</td>' +
+            '<td>' + escapeHtml(d.language || 'en') + '</td>' +
+            '<td style="white-space:nowrap;">' +
+              '<button class="btn btn-sm btn-primary" data-click="publishReady" data-draft-id="' + d.id + '">Publish</button> ' +
+              '<button class="btn btn-sm btn-ghost" data-click="rejectQueued" data-draft-id="' + d.id + '">Reject</button> ' +
+              '<button class="btn btn-sm" data-click="openEditor" data-draft-id="' + d.id + '">Preview</button>' +
+            '</td>' +
+          '</tr>';
+        });
+
+        html += '</tbody></table></div>';
+        if (container) container.innerHTML = html;
+
+        if (pagination) {
+          var totalPages = Math.ceil(total / (data.perPage || 20));
+          renderPaginationById('autopilot-queue-pagination', data.page || 1, totalPages, loadAutopilotQueue);
+        }
+      })
+      .catch(function (err) {
+        if (container) container.innerHTML = '<p class="placeholder-text">Failed to load queue: ' + escapeHtml(err.message) + '</p>';
+      });
   }
 
   function loadAutopilotDecisions() {

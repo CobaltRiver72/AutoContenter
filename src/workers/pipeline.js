@@ -15,6 +15,20 @@ function _publishPollMs()     { return parseInt(_cfg.get('PUBLISH_POLL_MS'), 10)
 function _maxPublishPerHour() { return parseInt(_cfg.get('MAX_PUBLISH_PER_HOUR'), 10) || 4; }
 function _publishCooldownMs() { return (parseInt(_cfg.get('PUBLISH_COOLDOWN_MINUTES'), 10) || 10) * 60000; }
 
+function _autoRewriteEnabled() {
+  var v = _cfg.get('AUTO_REWRITE_ENABLED');
+  return v === true || v === 1 || String(v).toLowerCase() === 'true' || v === '1';
+}
+function _autoRewritePollMs()     { return parseInt(_cfg.get('REWRITE_POLL_MS'), 10) || 5000; }
+function _autoRewriteDailyLimit() { return parseInt(_cfg.get('AUTO_REWRITE_DAILY_LIMIT'), 10) || 100; }
+function _autoRewriteHourlyLimit(){ return parseInt(_cfg.get('AUTO_REWRITE_HOURLY_LIMIT'), 10) || 20; }
+function _autoRewriteMinSources() { return parseInt(_cfg.get('AUTO_REWRITE_MIN_SOURCES'), 10) || 2; }
+function _autoRewriteMinSim()     { return parseFloat(_cfg.get('AUTO_REWRITE_MIN_SIMILARITY')) || 0.30; }
+function _autoRewriteBlockedKw()  {
+  var v = _cfg.get('AUTO_REWRITE_BLOCKED_KEYWORDS') || '';
+  return String(v).split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+}
+
 /**
  * Pipeline V2: Decoupled multi-stage workers.
  *
@@ -202,14 +216,46 @@ class Pipeline {
     this._rewriteRunning = true;
 
     try {
+      // Guard: auto-rewrite must be enabled
+      if (!_autoRewriteEnabled()) return;
+
+      // Daily limit check
+      var dailyLimit = _autoRewriteDailyLimit();
+      var rewrittenToday = this._getRewriteCountToday();
+      if (rewrittenToday >= dailyLimit) {
+        this.logger.info(MODULE, 'Auto-rewrite: daily limit reached (' + rewrittenToday + '/' + dailyLimit + ')');
+        return;
+      }
+
+      // Hourly limit check
+      var hourlyLimit = _autoRewriteHourlyLimit();
+      var rewrittenThisHour = this._getRewriteCountThisHour();
+      if (rewrittenThisHour >= hourlyLimit) {
+        this.logger.info(MODULE, 'Auto-rewrite: hourly limit reached (' + rewrittenThisHour + '/' + hourlyLimit + ')');
+        return;
+      }
+
+      var minSources = _autoRewriteMinSources();
+      var minSim = _autoRewriteMinSim();
+      var blockedKw = _autoRewriteBlockedKw();
+
+      // Slots available this tick (bounded by rate limits and concurrency)
+      var slotsAvailable = Math.min(
+        _rewriteConcurrency(),
+        dailyLimit - rewrittenToday,
+        hourlyLimit - rewrittenThisHour
+      );
+
       // Find clusters where ALL drafts are extracted (status = 'draft')
-      // and the primary draft is not locked
+      // and the primary draft is not locked, with quality pre-filters
       var readyClusters = this.db.prepare(
         "SELECT d.cluster_id, c.topic, c.trends_boosted, COUNT(*) as draft_count " +
         "FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
         "WHERE d.mode IN ('auto', 'manual_import') AND d.cluster_id IS NOT NULL AND d.status = 'draft' " +
         "  AND c.status = 'queued' " +
+        "  AND c.article_count >= ? " +
+        "  AND (c.avg_similarity IS NULL OR c.avg_similarity >= ?) " +
         "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
         "  AND NOT EXISTS (" +
         "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
@@ -219,11 +265,22 @@ class Pipeline {
         "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
         "LIMIT ?"
-      ).all(_rewriteConcurrency());
+      ).all(minSources, minSim, slotsAvailable);
+
+      // Filter blocked keywords from cluster topic
+      if (blockedKw.length > 0) {
+        readyClusters = readyClusters.filter(function (cl) {
+          var topic = (cl.topic || '').toLowerCase();
+          for (var ki = 0; ki < blockedKw.length; ki++) {
+            if (topic.indexOf(blockedKw[ki]) !== -1) return false;
+          }
+          return true;
+        });
+      }
 
       if (readyClusters.length === 0) return;
 
-      this.logger.info(MODULE, 'Rewrite: found ' + readyClusters.length + ' clusters ready for AI rewrite');
+      this.logger.info(MODULE, 'Auto-rewrite: ' + readyClusters.length + ' clusters ready (daily:' + rewrittenToday + '/' + dailyLimit + ' hourly:' + rewrittenThisHour + '/' + hourlyLimit + ')');
 
       var self = this;
 
@@ -240,6 +297,58 @@ class Pipeline {
     } finally {
       this._rewriteRunning = false;
     }
+  }
+
+  _getRewriteCountToday() {
+    try {
+      var row = this.db.prepare(
+        "SELECT COUNT(*) AS cnt FROM draft_versions WHERE created_at >= date('now')"
+      ).get();
+      return (row && row.cnt) ? row.cnt : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  _getRewriteCountThisHour() {
+    try {
+      var row = this.db.prepare(
+        "SELECT COUNT(*) AS cnt FROM draft_versions WHERE created_at >= datetime('now', '-1 hour')"
+      ).get();
+      return (row && row.cnt) ? row.cnt : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  getAutoRewriteStatus() {
+    var enabled = _autoRewriteEnabled();
+    var dailyLimit = _autoRewriteDailyLimit();
+    var hourlyLimit = _autoRewriteHourlyLimit();
+    var rewrittenToday = this._getRewriteCountToday();
+    var rewrittenThisHour = this._getRewriteCountThisHour();
+    var pendingClusters = 0;
+    try {
+      var row = this.db.prepare(
+        "SELECT COUNT(DISTINCT d.cluster_id) AS cnt FROM drafts d " +
+        "JOIN clusters c ON d.cluster_id = c.id " +
+        "WHERE d.status = 'draft' AND c.status = 'queued' AND d.cluster_role = 'primary'"
+      ).get();
+      pendingClusters = (row && row.cnt) ? row.cnt : 0;
+    } catch (e) { /* ignore */ }
+    return {
+      enabled: enabled,
+      rewrittenToday: rewrittenToday,
+      dailyLimit: dailyLimit,
+      rewrittenThisHour: rewrittenThisHour,
+      hourlyLimit: hourlyLimit,
+      pendingClusters: pendingClusters,
+      filters: {
+        minSources: _autoRewriteMinSources(),
+        minSimilarity: _autoRewriteMinSim(),
+        blockedKeywords: _cfg.get('AUTO_REWRITE_BLOCKED_KEYWORDS') || '',
+      },
+    };
   }
 
   async _rewriteCluster(clusterInfo, _opts) {
@@ -947,13 +1056,20 @@ class Pipeline {
     }
     scheduleExtraction();
 
-    // ─── REWRITE LOOP DISABLED — Manual trigger only ─────────────
-    // The rewrite loop no longer auto-polls. Rewriting is triggered
-    // manually via POST /api/drafts/batch-rewrite or individual
-    // POST /api/clusters/:clusterId/rewrite buttons in the UI.
-    // The _rewriteCluster() method is still available for manual use.
-    this._rewriteTimer = null;
-    this.logger.info(MODULE, 'Rewrite loop: MANUAL MODE (no auto-polling)');
+    // Rewrite loop — self-rescheduling setTimeout reads poll interval from config
+    // on each tick. Guarded by AUTO_REWRITE_ENABLED flag (hot-reloaded each tick),
+    // so toggling the setting takes effect without restart.
+    function scheduleRewrite() {
+      self._rewriteTimer = setTimeout(function () {
+        self._rewriteLoop().catch(function (err) {
+          self.logger.error(MODULE, 'Rewrite loop crash: ' + err.message);
+          self._rewriteRunning = false;
+        }).finally(function () {
+          if (!self._stopped) scheduleRewrite();
+        });
+      }, _autoRewritePollMs());
+    }
+    scheduleRewrite();
 
     // Publish loop — self-rescheduling setTimeout reads poll interval from config
     // on each tick so PUBLISH_POLL_MS changes take effect without restart.
@@ -969,13 +1085,13 @@ class Pipeline {
     }
     schedulePublish();
 
-    this.logger.info(MODULE, 'All worker loops started (extraction: sequential queue, rewrite: manual, publish: auto)');
+    this.logger.info(MODULE, 'All worker loops started (extraction: sequential queue, rewrite: auto-gated, publish: auto)');
   }
 
   stop() {
     this._stopped = true;
     if (this._extractionTimer) { clearTimeout(this._extractionTimer); this._extractionTimer = null; }
-    if (this._rewriteTimer) { clearInterval(this._rewriteTimer); this._rewriteTimer = null; }
+    if (this._rewriteTimer) { clearTimeout(this._rewriteTimer); this._rewriteTimer = null; }
     if (this._publishTimer) { clearTimeout(this._publishTimer); this._publishTimer = null; }
     this.logger.info(MODULE, 'Pipeline stopped');
   }

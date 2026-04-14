@@ -1667,6 +1667,10 @@ function createApiRouter(deps) {
         'AUTO_CREATE_WP_TAGS',
         'MAX_TAGS_PER_ARTICLE',
         'BLOCKED_TAGS',
+        // Auto-Rewrite engine
+        'AUTO_REWRITE_ENABLED', 'AUTO_REWRITE_DAILY_LIMIT', 'AUTO_REWRITE_HOURLY_LIMIT',
+        'AUTO_REWRITE_MIN_SOURCES', 'AUTO_REWRITE_MIN_SIMILARITY', 'AUTO_REWRITE_BLOCKED_KEYWORDS',
+        'BACKLOG_MAX_AGE_HOURS',
       ];
 
       var BLOCKED_KEYS = [
@@ -5498,6 +5502,107 @@ function createApiRouter(deps) {
       cfgSet('AUTOPILOT_ENABLED', newValue, req.app.locals.db);
       var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
       res.json({ ok: true, enabled: newValue === 'true', status: ap ? ap.getStatus() : null });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/auto-rewrite/toggle — toggle AUTO_REWRITE_ENABLED
+  router.post('/auto-rewrite/toggle', function (req, res) {
+    try {
+      var { get: cfgGet, set: cfgSet } = require('../utils/config');
+      var current = cfgGet('AUTO_REWRITE_ENABLED');
+      var newValue = (current === 'true' || current === true) ? 'false' : 'true';
+      cfgSet('AUTO_REWRITE_ENABLED', newValue, req.app.locals.db);
+      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
+      var status = pipeline && typeof pipeline.getAutoRewriteStatus === 'function'
+        ? pipeline.getAutoRewriteStatus() : null;
+      res.json({ ok: true, enabled: newValue === 'true', status: status });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/auto-rewrite/status — auto-rewrite engine stats
+  router.get('/auto-rewrite/status', function (req, res) {
+    try {
+      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
+      if (!pipeline || typeof pipeline.getAutoRewriteStatus !== 'function') {
+        return res.json({ ok: true, data: { enabled: false, pendingClusters: 0 } });
+      }
+      res.json({ ok: true, data: pipeline.getAutoRewriteStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/autopilot/queue — unified article queue (status='ready' primary drafts)
+  router.get('/autopilot/queue', function (req, res) {
+    try {
+      var db = req.app.locals.db;
+      var pp = parsePageParam(req, 20);
+      var total = (db.prepare(
+        "SELECT COUNT(*) AS cnt FROM drafts WHERE status = 'ready' AND cluster_role = 'primary'"
+      ).get() || {}).cnt || 0;
+      var rows = db.prepare(
+        "SELECT d.id, d.cluster_id, d.rewritten_title, d.source_domain, d.rewritten_word_count, " +
+        "d.ai_model_used, d.language, d.wp_category_ids, d.wp_primary_cat_id, d.wp_author_id_override, " +
+        "d.updated_at, c.avg_similarity, c.article_count, c.trends_boosted " +
+        "FROM drafts d LEFT JOIN clusters c ON d.cluster_id = c.id " +
+        "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
+        "ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
+        "LIMIT ? OFFSET ?"
+      ).all(pp.limit, pp.offset);
+      res.json({ ok: true, data: rows, total: total, page: pp.page, perPage: pp.perPage });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+
+  // POST /api/autopilot/queue/:id/reject — discard a queued draft
+  router.post('/autopilot/queue/:id/reject', function (req, res) {
+    try {
+      var draftId = parseInt(req.params.id, 10);
+      if (!draftId) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
+      var db = req.app.locals.db;
+      var result = db.prepare(
+        "UPDATE drafts SET status = 'failed', error_message = 'Rejected from queue by user', " +
+        "updated_at = datetime('now') WHERE id = ? AND status = 'ready'"
+      ).run(draftId);
+      if (result.changes === 0) return res.status(404).json({ ok: false, error: 'Draft not found or not in ready state' });
+      res.json({ ok: true, message: 'Draft rejected' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/drafts/cleanup-stale — delete old stuck drafts older than BACKLOG_MAX_AGE_HOURS
+  router.post('/drafts/cleanup-stale', function (req, res) {
+    try {
+      var db = req.app.locals.db;
+      var { get: cfgGet } = require('../utils/config');
+      var maxAgeHours = parseInt(cfgGet('BACKLOG_MAX_AGE_HOURS'), 10) || 72;
+      var result = db.prepare(
+        "DELETE FROM drafts WHERE status IN ('draft', 'failed') " +
+        "AND updated_at < datetime('now', '-' || ? || ' hours')"
+      ).run(maxAgeHours);
+      res.json({ ok: true, deleted: result.changes, maxAgeHours: maxAgeHours });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/drafts/:id/queue — add a ready draft to autopilot queue (it's already ready; this is a no-op marker)
+  router.post('/drafts/:id/queue', function (req, res) {
+    try {
+      var draftId = parseInt(req.params.id, 10);
+      if (!draftId) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
+      var db = req.app.locals.db;
+      var draft = db.prepare("SELECT id, status FROM drafts WHERE id = ?").get(draftId);
+      if (!draft) return res.status(404).json({ ok: false, error: 'Draft not found' });
+      if (draft.status !== 'ready') return res.status(400).json({ ok: false, error: 'Draft must be in ready state to queue (current: ' + draft.status + ')' });
+      res.json({ ok: true, message: 'Draft is in the autopilot queue', draftId: draftId });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
