@@ -1312,6 +1312,7 @@
         <div class="page-header">
           <h2 class="page-title">Autopilot</h2>
           <div class="page-actions">
+            <button class="btn btn-sm btn-outline" id="autopilotSimulateBtn">🧪 Simulate</button>
             <button class="btn btn-sm btn-ghost" id="autopilotRefreshBtn">↻ Refresh</button>
           </div>
         </div>
@@ -1335,6 +1336,9 @@
             </div>
           </div>
         </div>
+
+        <!-- Simulate Result (hidden until run) -->
+        <div id="autopilot-simulate-result" style="display:none;margin-bottom:16px;"></div>
 
         <!-- Settings Grid -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
@@ -1718,6 +1722,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=51"></script>
+  <script src="/js/dashboard.js?v=52"></script>
 </body>
 </html>
