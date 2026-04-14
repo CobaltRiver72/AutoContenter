@@ -1,67 +1,92 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HDF AutoPub Dashboard</title>
-  <link rel="stylesheet" href="/css/dashboard.css?v=27">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/dashboard.css?v=28">
 </head>
 <body>
 
+<div class="app-shell" id="app-shell">
+
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <div class="logo">HDF <span class="logo-accent">AutoPub</span></div>
-      <button class="sidebar-close" id="sidebarClose" aria-label="Close sidebar">&times;</button>
+    <div class="sidebar-brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      <span class="brand-name">HDF <span class="logo-accent">AutoPub</span></span>
+      <button class="sidebar-close icon-btn" id="sidebarClose" aria-label="Close sidebar" style="margin-left:auto">
+        <svg data-lucide="x" class="icon"></svg>
+      </button>
     </div>
     <nav class="sidebar-nav">
-      <a href="#overview" class="nav-link active" data-page="overview">
-        <span class="nav-icon">&#9632;</span> Overview
-      </a>
-      <a href="#feed" class="nav-link" data-page="feed">
-        <span class="nav-icon">&#9881;</span> Live Feed
-      </a>
-      <a href="#rules" class="nav-link" data-page="rules">
-        <span class="nav-icon">&#9733;</span> Firehose Rules
-      </a>
-      <a href="#trends" class="nav-link" data-page="trends">
-        <span class="nav-icon">&#9650;</span> Trends
-      </a>
-      <a href="#clusters" class="nav-link" data-page="clusters">
-        <span class="nav-icon">&#10070;</span> Clusters
-      </a>
-      <a href="#failed" class="nav-link" data-page="failed">
-        <span class="nav-icon">&#9888;</span> Failed
-        <span class="nav-badge" id="failed-badge" style="display:none"></span>
-      </a>
-      <a href="#published" class="nav-link" data-page="published">
-        <span class="nav-icon">&#10003;</span> Published
-      </a>
-      <a href="#settings" class="nav-link" data-page="settings">
-        <span class="nav-icon">&#9881;</span> Settings
-      </a>
-      <a href="#logs" class="nav-link" data-page="logs">
-        <span class="nav-icon">&#9783;</span> Logs
-      </a>
-      <a href="#sources" class="nav-link" data-page="sources">
-        📡 Sources
-      </a>
-      <a href="#fuel" class="nav-link" data-page="fuel">
-        ⛽ Fuel
-      </a>
-      <a href="#metals" class="nav-link" data-page="metals">
-        🥇 Metals
-      </a>
-      <a href="#lottery" class="nav-link" data-page="lottery">
-        🎰 Lottery
-      </a>
-      <a href="#autopilot" class="nav-link" data-page="autopilot">
-        🚀 Autopilot
-      </a>
+
+      <div class="nav-section">
+        <span class="nav-section-label">Pipeline</span>
+        <a href="#overview" class="nav-link active" data-page="overview">
+          <svg data-lucide="layout-dashboard" class="icon"></svg> Overview
+        </a>
+        <a href="#feed" class="nav-link" data-page="feed">
+          <svg data-lucide="rss" class="icon"></svg> Live Feed
+        </a>
+        <a href="#trends" class="nav-link" data-page="trends">
+          <svg data-lucide="trending-up" class="icon"></svg> Trends
+        </a>
+        <a href="#clusters" class="nav-link" data-page="clusters">
+          <svg data-lucide="git-branch" class="icon"></svg> Clusters
+        </a>
+        <a href="#autopilot" class="nav-link" data-page="autopilot">
+          <svg data-lucide="rocket" class="icon"></svg> Autopilot
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <span class="nav-section-label">Content</span>
+        <a href="#published" class="nav-link" data-page="published">
+          <svg data-lucide="check-circle" class="icon"></svg> Published
+        </a>
+        <a href="#failed" class="nav-link" data-page="failed">
+          <svg data-lucide="alert-triangle" class="icon"></svg> Failed
+          <span class="nav-badge" id="failed-badge" style="display:none"></span>
+        </a>
+        <a href="#sources" class="nav-link" data-page="sources">
+          <svg data-lucide="radio" class="icon"></svg> Sources
+        </a>
+        <a href="#rules" class="nav-link" data-page="rules">
+          <svg data-lucide="filter" class="icon"></svg> Firehose Rules
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <span class="nav-section-label">Data Feeds</span>
+        <a href="#fuel" class="nav-link" data-page="fuel">
+          <svg data-lucide="fuel" class="icon"></svg> Fuel
+        </a>
+        <a href="#metals" class="nav-link" data-page="metals">
+          <svg data-lucide="gem" class="icon"></svg> Metals
+        </a>
+        <a href="#lottery" class="nav-link" data-page="lottery">
+          <svg data-lucide="ticket" class="icon"></svg> Lottery
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <span class="nav-section-label">System</span>
+        <a href="#settings" class="nav-link" data-page="settings">
+          <svg data-lucide="settings" class="icon"></svg> Settings
+        </a>
+        <a href="#logs" class="nav-link" data-page="logs">
+          <svg data-lucide="scroll-text" class="icon"></svg> Logs
+        </a>
+      </div>
+
     </nav>
     <div class="sidebar-footer">
       <a href="/logout" class="nav-link logout-link">
-        <span class="nav-icon">&#10132;</span> Logout
+        <svg data-lucide="log-out" class="icon"></svg> Logout
       </a>
     </div>
   </aside>
@@ -71,8 +96,13 @@
 
     <!-- Top bar -->
     <header class="topbar">
-      <button class="hamburger" id="hamburger" aria-label="Toggle sidebar">&#9776;</button>
-      <div class="topbar-status">
+      <div class="topbar-left">
+        <button class="hamburger icon-btn" id="hamburger" aria-label="Toggle sidebar">
+          <svg data-lucide="menu" class="icon"></svg>
+        </button>
+        <span id="page-title" class="topbar-title">Overview</span>
+      </div>
+      <div class="topbar-right">
         <span class="status-item">
           <span class="status-dot" id="firehoseStatus" title="Firehose"></span>
           Firehose
@@ -81,10 +111,12 @@
           <span class="status-dot" id="trendsStatus" title="Trends"></span>
           Trends
         </span>
-      </div>
-      <div class="topbar-info">
         <span id="lastTrendsPoll" class="topbar-meta" title="Last trends poll">--</span>
         <span id="bufferCount" class="topbar-meta" title="Articles in buffer">Buffer: --</span>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme">
+          <svg data-lucide="sun" class="icon" id="theme-icon-sun" style="display:none"></svg>
+          <svg data-lucide="moon" class="icon" id="theme-icon-moon"></svg>
+        </button>
       </div>
     </header>
 
@@ -1733,6 +1765,8 @@
     </div>
   </div>
 
+</div><!-- /.app-shell -->
+
   <!-- Toast container -->
   <div id="toastContainer" class="toast-container"></div>
 
@@ -1773,6 +1807,8 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js?v=53"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script>if (window.lucide) lucide.createIcons();</script>
+  <script src="/js/dashboard.js?v=54"></script>
 </body>
 </html>

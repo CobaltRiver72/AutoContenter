@@ -1,3 +1,11 @@
+// ─── Theme bootstrap (runs before first paint) ───────────────────────────────
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem('hdf-theme'); } catch (e) {}
+  var theme = saved || 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+
 (function () {
   'use strict';
 
@@ -494,6 +502,19 @@
       window.location.hash = page;
     }
 
+    // Update topbar page title
+    var pageTitleEl = document.getElementById('page-title');
+    if (pageTitleEl) {
+      var PAGE_TITLES = {
+        overview: 'Overview', feed: 'Live Feed', rules: 'Firehose Rules',
+        trends: 'Trends', clusters: 'Clusters', failed: 'Failed Drafts',
+        published: 'Published', settings: 'Settings', logs: 'Logs',
+        sources: 'Sources', fuel: 'Fuel Prices', metals: 'Metals',
+        lottery: 'Lottery', autopilot: 'Autopilot'
+      };
+      pageTitleEl.textContent = PAGE_TITLES[page] || page.charAt(0).toUpperCase() + page.slice(1);
+    }
+
     // Update nav
     var links = $$('.nav-link[data-page]');
     for (var i = 0; i < links.length; i++) {
@@ -531,6 +552,7 @@
     if (sidebar) sidebar.classList.remove('open');
 
     if (typeof updateBatchActions === 'function') updateBatchActions();
+    _refreshIcons();
   }
 
   function initRouter() {
@@ -7647,6 +7669,30 @@
 
   // ─── Init ───────────────────────────────────────────────────────────────
 
+  function _applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    var sunEl = document.getElementById('theme-icon-sun');
+    var moonEl = document.getElementById('theme-icon-moon');
+    if (sunEl)  sunEl.style.display  = theme === 'dark'  ? 'none' : '';
+    if (moonEl) moonEl.style.display = theme === 'light' ? 'none' : '';
+    try { localStorage.setItem('hdf-theme', theme); } catch (e) {}
+  }
+
+  function _refreshIcons() {
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  function initThemeToggle() {
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    var current = document.documentElement.getAttribute('data-theme') || 'dark';
+    _applyTheme(current);
+    btn.addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      _applyTheme(next);
+    });
+  }
+
   function init() {
     bindDelegatedEvents();
     initSidebar();
@@ -7655,6 +7701,8 @@
     initWpDiagButtons();
     initInfraDebugPanel();
     initManualImport();
+    initThemeToggle();
+    _refreshIcons();
     // Pre-fetch OpenRouter models so the editor's model picker works even
     // before the user visits the Settings page. Cached server-side for 1h.
     __loadOpenRouterModels();
