@@ -239,6 +239,8 @@ var _db = null;
 function loadRuntimeOverrides(db) {
   try {
     _db = db;
+    _getStmt = null;
+    _invalidateGetCache();
     seedSettingsFromEnv(db);
     var rows = db.prepare('SELECT key, value FROM settings').all();
     if (!rows || rows.length === 0) return;
@@ -352,6 +354,19 @@ function getConfig() {
   return _frozen;
 }
 
+// In-process TTL cache for get() to avoid hitting SQLite on every pipeline
+// tick. Pipeline workers call _cfg.get() dozens of times per second; without
+// this, that's 100k+ settings queries per day. 5s TTL keeps hot-reload from
+// the dashboard responsive while eliminating the hot-path cost.
+var _getCache = new Map();
+var _GET_CACHE_TTL_MS = 5000;
+var _getStmt = null;
+
+function _invalidateGetCache(key) {
+  if (key) _getCache.delete(key);
+  else _getCache.clear();
+}
+
 /**
  * Get a single config value. Checks SQLite settings first, then env/defaults.
  *
@@ -359,34 +374,29 @@ function getConfig() {
  * @returns {*} The value, or undefined if not found
  */
 function get(key) {
-  // Check SQLite settings first if db is available
+  var cached = _getCache.get(key);
+  var now = Date.now();
+  if (cached && cached.expires > now) return cached.value;
+
+  var value;
   if (_db) {
     try {
-      var row = _db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-      if (row) {
-        return row.value;
-      }
+      if (!_getStmt) _getStmt = _db.prepare('SELECT value FROM settings WHERE key = ?');
+      var row = _getStmt.get(key);
+      if (row) value = row.value;
     } catch (err) {
       // Fall through to frozen config
     }
   }
 
-  // Fall back to the frozen config snapshot
-  if (_frozen[key] !== undefined) {
-    return _frozen[key];
+  if (value === undefined) {
+    if (_frozen[key] !== undefined) value = _frozen[key];
+    else if (process.env[key] !== undefined) value = process.env[key];
+    else if (DEFAULTS[key] !== undefined) value = DEFAULTS[key];
   }
 
-  // Fall back to env vars
-  if (process.env[key] !== undefined) {
-    return process.env[key];
-  }
-
-  // Fall back to defaults
-  if (DEFAULTS[key] !== undefined) {
-    return DEFAULTS[key];
-  }
-
-  return undefined;
+  _getCache.set(key, { value: value, expires: now + _GET_CACHE_TTL_MS });
+  return value;
 }
 
 /**
@@ -439,6 +449,7 @@ function set(key, value, db) {
     }
 
     _frozen = Object.freeze(JSON.parse(JSON.stringify(_config)));
+    _invalidateGetCache(key);
   } catch (err) {
     console.error('[config] Failed to set config key "' + key + '":', err.message);
     throw err;

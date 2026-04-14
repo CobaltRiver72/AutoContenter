@@ -623,6 +623,7 @@
 
     clearPageTimers();
     state.refreshTimers.push(setInterval(function () {
+      if (document.hidden) return;
       fetchStats();
       fetchStatus();
       fetchHealth();
@@ -1039,6 +1040,7 @@
 
     // Refresh transient statuses every 10s (fetching, rewriting, adding)
     var statusRefreshTimer = setInterval(function () {
+      if (document.hidden) return;
       if (state.currentPage !== 'feed') return;
       var hasTransient = false;
       var cacheKeys = Object.keys(draftStatusCache);
@@ -3690,6 +3692,7 @@
         publishedPollInterval = null;
         return;
       }
+      if (document.hidden) return;
       // Re-render the entire Published page to pick up status changes in cluster groups
       fetchApi('/api/drafts')
         .then(function (data) {
@@ -7158,6 +7161,7 @@
     // Auto-refresh every 10s — only create if no existing timer
     if (!state.refreshTimers.length) {
       state.refreshTimers.push(setInterval(function () {
+        if (document.hidden) return;
         if (state.currentPage === 'logs') loadLogs();
       }, 10000));
     }
