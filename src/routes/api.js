@@ -5459,7 +5459,7 @@ function createApiRouter(deps) {
 
       // Find next ready primary draft
       var nextDraft = db.prepare(
-        "SELECT d.*, c.similarity_score, c.article_count FROM drafts d " +
+        "SELECT d.*, c.avg_similarity, c.article_count FROM drafts d " +
         "JOIN clusters c ON c.id = d.cluster_id " +
         "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
         "AND c.status NOT IN ('published','skipped') " +
@@ -5483,7 +5483,7 @@ function createApiRouter(deps) {
           clusterId: nextDraft.cluster_id,
           title: nextDraft.rewritten_title || nextDraft.source_title || '(untitled)',
           wordCount: nextDraft.rewritten_word_count || 0,
-          similarity: nextDraft.similarity_score || 0,
+          similarity: nextDraft.avg_similarity || 0,
           sourceDomain: nextDraft.source_domain || ''
         },
         decision: decision,
