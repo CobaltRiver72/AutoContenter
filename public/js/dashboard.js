@@ -3743,11 +3743,11 @@
         var draft = data.data;
         currentDraft = draft;
 
-        // Populate taxonomy override selects
+        // Populate taxonomy override selects — always run immediately so WP
+        // Publish tab is never blank, then refresh once taxonomy is loaded.
+        _populateEditorTaxonomy(draft);
         if (!_wpTaxonomy) {
           loadWPTaxonomy(function() { _populateEditorTaxonomy(draft); });
-        } else {
-          _populateEditorTaxonomy(draft);
         }
 
         // Populate top bar
@@ -4247,9 +4247,11 @@
             window.__showTaxTab('category');
           }
           if (cb) cb(data);
+        } else {
+          if (cb) cb(null);
         }
       })
-      .catch(function () {});
+      .catch(function () { if (cb) cb(null); });
   }
 
   window.__showTaxTab = function (taxType) {
