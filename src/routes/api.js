@@ -1657,6 +1657,16 @@ function createApiRouter(deps) {
         'PUBLISH_POLL_MS', 'WP_TIMEOUT_MS', 'BATCH_PUBLISH_DELAY_MS',
         // InfraNodus
         'INFRANODUS_CACHE_TTL_MINUTES', 'INFRANODUS_TEXT_LIMIT', 'INFRANODUS_AUTO_ANALYZE', 'INFRANODUS_GOOGLE_ENABLED',
+        // Classifier
+        'DEFAULT_AUTHOR_USERNAME',
+        'AUTHOR_ASSIGNMENT_ENABLED',
+        'CLASSIFIER_CONFIDENCE_THRESHOLD',
+        'CLASSIFIER_CATEGORY_DICTIONARIES',
+        'CLASSIFIER_AUTHOR_DICTIONARIES',
+        'CLASSIFIER_TAG_DICTIONARY',
+        'AUTO_CREATE_WP_TAGS',
+        'MAX_TAGS_PER_ARTICLE',
+        'BLOCKED_TAGS',
       ];
 
       var BLOCKED_KEYS = [
@@ -5434,6 +5444,96 @@ function createApiRouter(deps) {
       cfgSet('AUTOPILOT_ENABLED', newValue, req.app.locals.db);
       var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
       res.json({ ok: true, enabled: newValue === 'true', status: ap ? ap.getStatus() : null });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CLASSIFIER ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // GET /api/classifier/test?title=...&content=...&domain=...&category=...
+  router.get('/classifier/test', function(req, res) {
+    try {
+      var classifier = req.app.locals.modules.classifier;
+      if (!classifier) return res.json({ ok: false, error: 'Classifier not loaded' });
+      var title = req.query.title || '';
+      var content = req.query.content || '';
+      var domain = req.query.domain || '';
+      var category = req.query.category || '';
+      var result = classifier.scoreLocally(title, content, domain, category);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/classifier/reload
+  router.post('/classifier/reload', function(req, res) {
+    try {
+      var classifier = req.app.locals.modules.classifier;
+      if (!classifier) return res.json({ ok: false, error: 'Classifier not loaded' });
+      classifier.reloadDictionaries();
+      res.json({ ok: true, message: 'Dictionaries reloaded' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/classifier/stats
+  router.get('/classifier/stats', function(req, res) {
+    try {
+      var classifier = req.app.locals.modules.classifier;
+      if (!classifier) return res.json({ ok: false, error: 'Classifier not loaded' });
+      res.json({ ok: true, data: classifier.getStats() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/classifier/recent?limit=N
+  router.get('/classifier/recent', function(req, res) {
+    try {
+      var classifier = req.app.locals.modules.classifier;
+      if (!classifier) return res.json({ ok: false, error: 'Classifier not loaded' });
+      var limit = Math.min(parseInt(req.query.limit) || 50, 200);
+      res.json({ ok: true, data: classifier.getRecentClassifications(limit) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/classifier/dictionaries
+  router.get('/classifier/dictionaries', function(req, res) {
+    try {
+      var classifier = req.app.locals.modules.classifier;
+      if (!classifier) return res.json({ ok: false, error: 'Classifier not loaded' });
+      res.json({ ok: true, data: {
+        categoryDictionaries: classifier.categoryDictionaries,
+        authorDictionaries: classifier.authorDictionaries
+      }});
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // PUT /api/classifier/dictionaries
+  router.put('/classifier/dictionaries', function(req, res) {
+    try {
+      var classifier = req.app.locals.modules.classifier;
+      var db = req.app.locals.db;
+      if (!classifier) return res.json({ ok: false, error: 'Classifier not loaded' });
+      var body = req.body || {};
+      var upsert = db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+      if (body.categoryDictionaries) {
+        upsert.run('CLASSIFIER_CATEGORY_DICTIONARIES', JSON.stringify(body.categoryDictionaries));
+      }
+      if (body.authorDictionaries) {
+        upsert.run('CLASSIFIER_AUTHOR_DICTIONARIES', JSON.stringify(body.authorDictionaries));
+      }
+      classifier.reloadDictionaries();
+      res.json({ ok: true, message: 'Dictionaries saved and reloaded' });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

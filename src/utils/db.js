@@ -208,6 +208,28 @@ function runMigrations() {
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_autopilot_decisions_created ON autopilot_decisions(created_at)');
 
+    // Classification log table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS classification_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        draft_id INTEGER,
+        cluster_id INTEGER,
+        title TEXT,
+        assigned_category TEXT,
+        assigned_author TEXT,
+        assigned_tags TEXT,
+        layer_used TEXT,
+        l1_category_score REAL,
+        l1_author_score REAL,
+        l2_ai_confidence REAL,
+        match_reasons TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_classification_log_created ON classification_log(created_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_classification_log_author ON classification_log(assigned_author)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_classification_log_category ON classification_log(assigned_category)');
+
     // Add extracted_content column if it doesn't exist
     try {
       db.exec('ALTER TABLE articles ADD COLUMN extracted_content TEXT');
@@ -817,6 +839,12 @@ function runMigrations() {
         INFRANODUS_TEXT_LIMIT: '12000',
         INFRANODUS_AUTO_ANALYZE: 'true',
         INFRANODUS_GOOGLE_ENABLED: 'false',
+        DEFAULT_AUTHOR_USERNAME: 'karan-verma',
+        AUTHOR_ASSIGNMENT_ENABLED: 'true',
+        CLASSIFIER_CONFIDENCE_THRESHOLD: '15',
+        AUTO_CREATE_WP_TAGS: 'true',
+        MAX_TAGS_PER_ARTICLE: '8',
+        BLOCKED_TAGS: '',
       };
       var insertDefault = db.prepare(
         "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))"

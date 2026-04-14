@@ -33,6 +33,7 @@ var { Pipeline } = require('./workers/pipeline');
 var { ContentExtractor } = require('./modules/extractor');
 var { InfranodusAnalyzer } = require('./modules/infranodus');
 var AutopilotEngine = require('./modules/autopilot');
+var { ContentClassifier } = require('./modules/content-classifier');
 var { FuelModule } = require('./modules/fuel');
 var { MetalsModule } = require('./modules/metals');
 var { LotteryModule } = require('./modules/lottery');
@@ -53,7 +54,8 @@ var publisher = new WordPressPublisher(config, logger);
 var extractor = new ContentExtractor(config, db, logger);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
 var autopilot = new AutopilotEngine(require('./utils/config'), db, logger);
-var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot);
+var classifier = new ContentClassifier(require('./utils/config'), db, logger);
+var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot, classifier);
 var fuel = new FuelModule(config, db, logger);
 var metals = new MetalsModule(config, db, logger);
 var lottery = new LotteryModule(config, db, logger);
@@ -233,7 +235,7 @@ async function boot() {
   app.locals.modules = {
     firehose: firehose, trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
-    scheduler: scheduler, infranodus: infranodus, autopilot: autopilot,
+    scheduler: scheduler, infranodus: infranodus, autopilot: autopilot, classifier: classifier,
     fuel: fuel, metals: metals, lottery: lottery,
     wpPublisher: wpPub, fuelPosts: fuelPosts, metalsPosts: metalsPosts, lotteryPosts: lotteryPosts,
   };
