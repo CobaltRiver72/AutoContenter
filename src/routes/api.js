@@ -5436,6 +5436,60 @@ function createApiRouter(deps) {
     }
   });
 
+  // GET /api/autopilot/simulate — dry-run: check next ready cluster against all filters
+  router.get('/autopilot/simulate', function (req, res) {
+    try {
+      var db = req.app.locals.db;
+      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
+
+      // Queue depth snapshot
+      var queueStats = {};
+      ['ready','rewriting','draft','failed','published'].forEach(function (s) {
+        queueStats[s] = (db.prepare('SELECT COUNT(*) as n FROM drafts WHERE status = ?').get(s) || {}).n || 0;
+      });
+
+      if (!ap) {
+        return res.json({ ok: true, data: { queue: queueStats, result: null,
+          message: 'Autopilot module not loaded' } });
+      }
+
+      // Find next ready primary draft
+      var nextDraft = db.prepare(
+        "SELECT d.*, c.similarity_score, c.article_count FROM drafts d " +
+        "JOIN clusters c ON c.id = d.cluster_id " +
+        "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
+        "AND c.status NOT IN ('published','skipped') " +
+        "ORDER BY d.updated_at ASC LIMIT 1"
+      ).get();
+
+      if (!nextDraft) {
+        return res.json({ ok: true, data: { queue: queueStats, result: null,
+          message: 'No ready clusters in queue. Check Live Feed and Clusters pages.' } });
+      }
+
+      // Run through all autopilot checks (read-only — no DB writes)
+      var cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(nextDraft.cluster_id);
+      var decision = ap.simulateChecks(cluster, nextDraft);
+      var status = ap.getStatus();
+
+      res.json({ ok: true, data: {
+        queue: queueStats,
+        candidate: {
+          draftId: nextDraft.id,
+          clusterId: nextDraft.cluster_id,
+          title: nextDraft.rewritten_title || nextDraft.source_title || '(untitled)',
+          wordCount: nextDraft.rewritten_word_count || 0,
+          similarity: nextDraft.similarity_score || 0,
+          sourceDomain: nextDraft.source_domain || ''
+        },
+        decision: decision,
+        autopilotStatus: status
+      }});
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/autopilot/toggle', function (req, res) {
     try {
       var { get: cfgGet, set: cfgSet } = require('../utils/config');

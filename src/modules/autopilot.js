@@ -188,6 +188,80 @@ class AutopilotEngine {
     return { approved: true, reason: 'all checks passed' };
   }
 
+  /**
+   * Like shouldPublish() but runs ALL checks without short-circuiting.
+   * Returns a full per-check breakdown for the Simulate UI.
+   * @returns {{ approved: boolean, reason: string, checks: object }}
+   */
+  simulateChecks(cluster, draft) {
+    var checks = {};
+    var failedReason = null;
+
+    // 1. Daily quota
+    var dailyTarget = this._int('AUTOPILOT_DAILY_TARGET', 50);
+    var publishedToday = this.getPublishedToday();
+    var quotaPass = publishedToday < dailyTarget;
+    checks['Daily quota'] = { pass: quotaPass, value: publishedToday + '/' + dailyTarget, threshold: dailyTarget };
+    if (!quotaPass && !failedReason) failedReason = 'daily limit reached (' + publishedToday + '/' + dailyTarget + ')';
+
+    // 2. Publishing window
+    var windowPass = this.isActive();
+    var hour = new Date().getHours();
+    var startHour = this._int('AUTOPILOT_START_HOUR', 6);
+    var endHour = this._int('AUTOPILOT_END_HOUR', 23);
+    checks['Publishing window'] = { pass: windowPass, value: 'hour=' + hour, threshold: startHour + '–' + endHour };
+    if (!windowPass && !failedReason) failedReason = 'outside publishing window (hour=' + hour + ')';
+
+    // 3. Source count
+    var minSources = this._int('MIN_SOURCES_THRESHOLD', 2);
+    var sourceCount = cluster.article_count || 1;
+    var sourcesPass = sourceCount >= minSources;
+    checks['Min sources'] = { pass: sourcesPass, value: sourceCount, threshold: minSources };
+    if (!sourcesPass && !failedReason) failedReason = 'too few sources (' + sourceCount + ' < ' + minSources + ')';
+
+    // 4. Similarity
+    var minSim = this._float('AUTOPILOT_MIN_SIMILARITY', 0.70);
+    var sim = parseFloat(cluster.avg_similarity || cluster.similarity_score) || 0;
+    var simPass = sim >= minSim;
+    checks['Similarity'] = { pass: simPass, value: sim.toFixed(3), threshold: minSim };
+    if (!simPass && !failedReason) failedReason = 'low similarity (' + sim.toFixed(2) + ' < ' + minSim + ')';
+
+    // 5. Word count
+    var minWords = this._int('AUTOPILOT_MIN_WORDS', 300);
+    var wordCount = parseInt(draft.rewritten_word_count || draft.word_count, 10) || 0;
+    var wordsPass = wordCount >= minWords;
+    checks['Word count'] = { pass: wordsPass, value: wordCount, threshold: minWords };
+    if (!wordsPass && !failedReason) failedReason = 'word count too low (' + wordCount + ' < ' + minWords + ')';
+
+    // 6. Language
+    var publishLang = (this._get('PUBLISH_LANGUAGE') || 'en').toLowerCase().trim();
+    var draftLang = (draft.language || 'en').toLowerCase().trim();
+    var langPass = publishLang === 'both' || draftLang === (publishLang === 'hi' ? 'hi' : 'en');
+    checks['Language'] = { pass: langPass, value: draftLang, threshold: publishLang };
+    if (!langPass && !failedReason) failedReason = 'language mismatch (' + draftLang + ' vs ' + publishLang + ')';
+
+    // 7. Blocked keywords
+    var blockedKw = this._csv('AUTOPILOT_BLOCKED_KEYWORDS');
+    var titleLower = (draft.rewritten_title || draft.source_title || '').toLowerCase();
+    var matchedKw = blockedKw.filter(function (k) { return k && titleLower.indexOf(k) !== -1; });
+    var kwPass = matchedKw.length === 0;
+    checks['Blocked keywords'] = { pass: kwPass, value: matchedKw.length ? 'matched: ' + matchedKw[0] : 'none matched', threshold: blockedKw.length + ' keywords' };
+    if (!kwPass && !failedReason) failedReason = 'blocked keyword "' + matchedKw[0] + '"';
+
+    // 8. Blocked / allowed domains
+    var blockedDomains = this._csv('AUTOPILOT_BLOCKED_DOMAINS');
+    var allowedDomains = this._csv('AUTOPILOT_ALLOWED_DOMAINS');
+    var srcDomain = (draft.source_domain || draft.domain || '').toLowerCase();
+    var domainBlocked = blockedDomains.length > 0 && blockedDomains.indexOf(srcDomain) !== -1;
+    var domainAllowed = allowedDomains.length === 0 || allowedDomains.indexOf(srcDomain) !== -1;
+    var domainPass = !domainBlocked && domainAllowed;
+    checks['Domain filter'] = { pass: domainPass, value: srcDomain || '(none)', threshold: blockedDomains.length ? 'blocked:' + blockedDomains.length : 'all allowed' };
+    if (!domainPass && !failedReason) failedReason = domainBlocked ? 'blocked domain "' + srcDomain + '"' : 'domain not in allow-list "' + srcDomain + '"';
+
+    var allPass = Object.keys(checks).every(function (k) { return checks[k].pass !== false; });
+    return { approved: allPass, reason: allPass ? 'all checks passed' : failedReason, checks: checks };
+  }
+
   // ─── Decision log ─────────────────────────────────────────────────────────
 
   logDecision(clusterId, draftTitle, approved, reason) {

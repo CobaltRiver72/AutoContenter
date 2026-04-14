@@ -8936,8 +8936,105 @@
     var refreshBtn = $('autopilotRefreshBtn');
     if (refreshBtn) refreshBtn.onclick = function () { loadAutopilot(); showToast('Refreshed', 'info'); };
 
+    var simBtn = $('autopilotSimulateBtn');
+    if (simBtn) simBtn.onclick = runAutopilotSimulate;
+
     var saveBtn = $('autopilotSettingsSaveBtn');
     if (saveBtn) saveBtn.onclick = saveAutopilotSettings;
+  }
+
+  function runAutopilotSimulate() {
+    var btn = $('autopilotSimulateBtn');
+    var box = $('autopilot-simulate-result');
+    if (btn) { btn.disabled = true; btn.textContent = 'Simulating...'; }
+    if (box) box.style.display = 'none';
+
+    fetchApi('/api/autopilot/simulate')
+      .then(function (res) {
+        var d = res.data || res;
+        if (!box) return;
+        box.style.display = 'block';
+
+        // Queue stats row
+        var q = d.queue || {};
+        var qHtml = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;">' +
+          _simStat(q.ready || 0, 'Ready to Publish', '#22c55e') +
+          _simStat(q.rewriting || 0, 'Rewriting', '#f59e0b') +
+          _simStat(q.draft || 0, 'Extracted', '#3b82f6') +
+          _simStat(q.failed || 0, 'Failed', '#ef4444') +
+          _simStat(q.published || 0, 'Published', '#6b7280') +
+          '</div>';
+
+        if (!d.candidate) {
+          box.innerHTML = '<div class="card" style="border-left:4px solid #f59e0b;padding:16px;">' +
+            qHtml +
+            '<div style="color:#f59e0b;font-weight:600;font-size:14px;">⚠️ ' + (d.message || 'No ready clusters') + '</div>' +
+            '<div style="margin-top:8px;font-size:13px;color:var(--text-muted);">To test: articles need to flow through Firehose → get clustered → extracted → rewritten.</div>' +
+            '</div>';
+          return;
+        }
+
+        var dec = d.decision || {};
+        var approved = dec.approved === true;
+        var borderColor = approved ? '#22c55e' : '#ef4444';
+        var icon = approved ? '✅' : '❌';
+        var label = approved ? 'WOULD PUBLISH' : 'WOULD SKIP';
+        var labelColor = approved ? '#22c55e' : '#ef4444';
+
+        var candidate = d.candidate;
+        box.innerHTML = '<div class="card" style="border-left:4px solid ' + borderColor + ';padding:16px;">' +
+          qHtml +
+          '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+            '<span style="font-size:22px;">' + icon + '</span>' +
+            '<span style="font-size:16px;font-weight:700;color:' + labelColor + ';">' + label + '</span>' +
+          '</div>' +
+          '<div style="font-size:14px;font-weight:600;margin-bottom:8px;">' + escapeHtml(candidate.title) + '</div>' +
+          '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--text-muted);margin-bottom:10px;">' +
+            '<span>📝 ' + (candidate.wordCount || 0) + ' words</span>' +
+            '<span>🔗 ' + escapeHtml(candidate.sourceDomain || '—') + '</span>' +
+            '<span>📊 similarity: ' + ((candidate.similarity || 0) * 100).toFixed(0) + '%</span>' +
+            '<span>🆔 Draft #' + candidate.draftId + ' / Cluster #' + candidate.clusterId + '</span>' +
+          '</div>' +
+          (dec.reason ? '<div style="font-size:13px;padding:8px 12px;border-radius:6px;background:var(--bg-secondary);color:' + labelColor + ';">' +
+            '<strong>Reason:</strong> ' + escapeHtml(dec.reason) + '</div>' : '') +
+          (dec.checks ? _renderChecks(dec.checks) : '') +
+          '</div>';
+      })
+      .catch(function (e) {
+        if (box) { box.style.display = 'block'; box.innerHTML = '<div class="card" style="color:#ef4444;">Simulate failed: ' + e.message + '</div>'; }
+      })
+      .finally(function () {
+        if (btn) { btn.disabled = false; btn.textContent = '🧪 Simulate'; }
+      });
+  }
+
+  function _simStat(val, label, color) {
+    return '<div style="text-align:center;min-width:70px;">' +
+      '<div style="font-size:20px;font-weight:700;color:' + color + ';">' + val + '</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);">' + label + '</div>' +
+      '</div>';
+  }
+
+  function _renderChecks(checks) {
+    if (!checks || !Object.keys(checks).length) return '';
+    var rows = Object.keys(checks).map(function (k) {
+      var c = checks[k];
+      var pass = c.pass !== false;
+      return '<tr>' +
+        '<td style="padding:4px 8px;font-size:12px;">' + escapeHtml(k) + '</td>' +
+        '<td style="padding:4px 8px;font-size:12px;color:' + (pass ? '#22c55e' : '#ef4444') + ';font-weight:600;">' + (pass ? '✓ pass' : '✗ fail') + '</td>' +
+        '<td style="padding:4px 8px;font-size:12px;color:var(--text-muted);">' + escapeHtml(String(c.value || '')) + '</td>' +
+        '<td style="padding:4px 8px;font-size:12px;color:var(--text-muted);">' + (c.threshold !== undefined ? 'threshold: ' + c.threshold : '') + '</td>' +
+        '</tr>';
+    });
+    return '<div style="margin-top:10px;overflow-x:auto;">' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+      '<thead><tr style="border-bottom:1px solid var(--border-color);">' +
+      '<th style="padding:4px 8px;font-size:11px;text-align:left;color:var(--text-muted);">Check</th>' +
+      '<th style="padding:4px 8px;font-size:11px;text-align:left;color:var(--text-muted);">Result</th>' +
+      '<th style="padding:4px 8px;font-size:11px;text-align:left;color:var(--text-muted);">Value</th>' +
+      '<th style="padding:4px 8px;font-size:11px;text-align:left;color:var(--text-muted);">Threshold</th>' +
+      '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
   }
 
   function loadAutopilotStatus() {
