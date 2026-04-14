@@ -1641,6 +1641,48 @@ select:focus {
 .btn-purple:hover { background: #7c3aed; }
 .btn-warning { background: #a16207; color: #fff; }
 .btn-warning:hover { background: #92400e; }
+
+/* ── AI-extracted data boxes ─────────────────────────────────────────────── */
+.hdf-data-box {
+  background: #1a2235;
+  border: 1px solid #2d3f5e;
+  border-radius: 8px;
+  margin: 1.5rem 0;
+  overflow: hidden;
+}
+.hdf-data-box h4 {
+  background: #243047;
+  color: #93c5fd;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid #2d3f5e;
+}
+.hdf-data-box table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.hdf-data-box th,
+.hdf-data-box td {
+  padding: 0.45rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #1e2d45;
+  color: #cbd5e1;
+}
+.hdf-data-box th {
+  background: #1e2d45;
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.hdf-data-box tr:last-child td { border-bottom: none; }
+.hdf-data-box tr:hover td { background: #1e2d45; }
 .btn-green { background: var(--green); color: #fff; }
 .btn-green:hover { background: #16a34a; }
 .btn-primary { background: var(--accent); color: #fff; }

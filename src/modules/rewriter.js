@@ -406,6 +406,9 @@ function buildPrompt(article, cluster, settings) {
     '    {"q": "Question 2?", "a": "Answer 2."},',
     '    {"q": "Question 3?", "a": "Answer 3."}',
     '  ],',
+    '  "data_boxes": [',
+    '    {"type": "price", "title": "Box title taken from source", "rows": [["Column A", "Column B"], ["Row label", "Row value"]]}',
+    '  ],',
     '  "language": "' + targetLang + '",',
     '  "word_count_body": 487',
     '}',
@@ -415,6 +418,7 @@ function buildPrompt(article, cluster, settings) {
     '- in_brief: array of EXACTLY 4 strings',
     '- body_markdown: string, 250–700 words of plain prose, 1–2 H2 headings (## prefix, at least 1 unless under 300 words), optional H3 under H2 (### prefix, max 2 per H2 section)',
     '- faqs: array of 3–4 objects, each with "q" and "a" string keys',
+    '- data_boxes: array of data boxes extracted from the source articles. Each box: { "type": one of "price"/"stats"/"specs"/"comparison", "title": short descriptive string, "rows": 2D string array where the first sub-array is column headers and the rest are data rows }. Return [] if the source articles contain no concrete structured data. NEVER invent or estimate data — only include figures, prices, or statistics explicitly stated in the source articles.',
     '- language: "' + targetLang + '"',
     '- word_count_body: integer count of words in body_markdown',
   ].join('\n');
@@ -578,6 +582,21 @@ function parseModelOutput(text) {
     }
   }
 
+  // Parse data_boxes — optional, only keep well-formed entries
+  var dataBoxes = [];
+  if (Array.isArray(parsed.data_boxes)) {
+    for (var di = 0; di < parsed.data_boxes.length; di++) {
+      var box = parsed.data_boxes[di] || {};
+      if (typeof box.title === 'string' && box.title.trim() && Array.isArray(box.rows) && box.rows.length > 0) {
+        dataBoxes.push({
+          type: typeof box.type === 'string' ? box.type.trim() : 'stats',
+          title: box.title.trim(),
+          rows: box.rows,
+        });
+      }
+    }
+  }
+
   return {
     headline: parsed.headline.trim(),
     inBrief: inBrief,
@@ -586,6 +605,7 @@ function parseModelOutput(text) {
     language: parsed.language || '',
     wordCountBody: parseInt(parsed.word_count_body, 10) || 0,
     signals: signals,
+    dataBoxes: dataBoxes,
   };
 }
 
@@ -600,7 +620,7 @@ function parseModelOutput(text) {
 // dashboard preview consume rewritten_html unchanged while still preserving
 // the structured fields (in_brief_json, body_markdown) for future use.
 //
-function buildRewrittenHtml(inBrief, bodyMarkdown, faqs) {
+function buildRewrittenHtml(inBrief, bodyMarkdown, faqs, dataBoxes) {
   var parts = [];
 
   // In Brief block
@@ -619,6 +639,29 @@ function buildRewrittenHtml(inBrief, bodyMarkdown, faqs) {
   parts.push('<div class="hdf-body">');
   parts.push(convertMarkdownToHtml(bodyMarkdown));
   parts.push('</div>');
+
+  // Data boxes — extracted from source articles by the AI (never invented)
+  if (dataBoxes && dataBoxes.length > 0) {
+    for (var k = 0; k < dataBoxes.length; k++) {
+      var box = dataBoxes[k];
+      if (!box || !Array.isArray(box.rows) || box.rows.length === 0) continue;
+      parts.push('<div class="hdf-data-box" data-type="' + escapeHtmlText(box.type || 'stats') + '">');
+      if (box.title) parts.push('<h4>' + escapeHtmlText(box.title) + '</h4>');
+      parts.push('<table>');
+      for (var r = 0; r < box.rows.length; r++) {
+        var row = box.rows[r];
+        if (!Array.isArray(row)) continue;
+        var tag = (r === 0) ? 'th' : 'td';
+        parts.push('<tr>');
+        for (var c = 0; c < row.length; c++) {
+          parts.push('<' + tag + '>' + escapeHtmlText(String(row[c] == null ? '' : row[c])) + '</' + tag + '>');
+        }
+        parts.push('</tr>');
+      }
+      parts.push('</table>');
+      parts.push('</div>');
+    }
+  }
 
   // FAQs
   if (faqs && faqs.length > 0) {
@@ -646,7 +689,7 @@ function escapeHtmlText(text) {
 // Build a unified result object from v2 parsed output. Used by all 3
 // provider methods to keep the shape consistent.
 function buildRewriteResult(parsed, tokensUsed) {
-  var contentHtml = buildRewrittenHtml(parsed.inBrief, parsed.bodyMarkdown, parsed.faqs);
+  var contentHtml = buildRewrittenHtml(parsed.inBrief, parsed.bodyMarkdown, parsed.faqs, parsed.dataBoxes || []);
   return {
     title: parsed.headline,
     content: contentHtml,
