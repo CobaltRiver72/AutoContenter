@@ -416,6 +416,8 @@ td { padding: var(--space-3) var(--space-4); color: var(--text-primary); vertica
 
 /* ─── Forms ──────────────────────────────────────────────────────────────── */
 .form-group { margin-bottom: var(--space-5); }
+/* Stacked field (label above input) — use inside grids instead of .settings-row */
+.form-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .form-label, .settings-label {
   display: block; font-size: var(--text-sm); font-weight: var(--weight-medium);
   color: var(--text-secondary); margin-bottom: var(--space-2);

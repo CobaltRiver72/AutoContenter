@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/dashboard.css?v=28">
+  <link rel="stylesheet" href="/css/dashboard.css?v=29">
 </head>
 <body>
 
@@ -563,8 +563,8 @@
               <input type="password" id="wp-pub-password" placeholder="xxxx xxxx xxxx xxxx" />
             </div>
             <div style="display:flex;gap:8px;margin-top:12px;">
-              <button class="btn btn-sm btn-secondary" data-click="testWPConnection">🔗 Test Connection</button>
-              <button class="btn btn-purple" data-click="saveWPPublishingSettings">💾 Save</button>
+              <button class="btn btn-sm btn-secondary" data-click="testWPConnection"><svg data-lucide="plug" class="icon"></svg> Test Connection</button>
+              <button class="btn btn-purple" data-click="saveWPPublishingSettings"><svg data-lucide="save" class="icon"></svg> Save</button>
             </div>
             <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
           </div>
@@ -700,7 +700,7 @@
         <div class="card" style="margin-bottom:20px;">
           <div class="card-title">Pipeline Diagnostics</div>
           <p style="color:#888;font-size:13px;margin-bottom:12px;">Quick check of all system requirements — API keys, cities, modules, credentials.</p>
-          <button class="btn btn-secondary" data-click="runDiagnostics">🔍 Run Diagnostics</button>
+          <button class="btn btn-secondary" data-click="runDiagnostics"><svg data-lucide="stethoscope" class="icon"></svg> Run Diagnostics</button>
           <div id="diagnostics-result" style="margin-top:10px;"></div>
         </div>
 
@@ -963,10 +963,10 @@
         <div class="page-header">
           <h2 class="page-title">Fuel Price Tracker</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-outline" data-click="testFuelFetch">🧪 Test (5 cities)</button>
-            <button class="btn btn-sm btn-purple" id="fuelFetchBtn" data-click="triggerFuelFetch">⚡ Fetch All Prices</button>
-            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="fuelPostsBtn" data-click="triggerFuelPosts">📝 Generate Posts</button>
-            <button class="btn btn-sm btn-ghost" data-click="loadFuelPage">↻ Refresh</button>
+            <button class="btn btn-sm btn-outline" data-click="testFuelFetch"><svg data-lucide="flask-conical" class="icon"></svg> Test (5 cities)</button>
+            <button class="btn btn-sm btn-purple" id="fuelFetchBtn" data-click="triggerFuelFetch"><svg data-lucide="zap" class="icon"></svg> Fetch All Prices</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="fuelPostsBtn" data-click="triggerFuelPosts"><svg data-lucide="file-text" class="icon"></svg> Generate Posts</button>
+            <button class="btn btn-sm btn-ghost" data-click="loadFuelPage"><svg data-lucide="refresh-cw" class="icon"></svg> Refresh</button>
           </div>
         </div>
 
@@ -981,11 +981,11 @@
 
         <!-- Tab Navigation -->
         <div class="page-tabs" id="fuel-tabs">
-          <button class="tab active" data-tab="overview" data-click="switchFuelTab">📊 Overview</button>
-          <button class="tab" data-tab="cities" data-click="switchFuelTab">🏙️ Cities</button>
-          <button class="tab" data-tab="posts" data-click="switchFuelTab">📝 Posts</button>
-          <button class="tab" data-tab="logs" data-click="switchFuelTab">📋 Fetch Log</button>
-          <button class="tab" data-tab="quality" data-click="switchFuelTab">🔍 Data Quality</button>
+          <button class="tab active" data-tab="overview" data-click="switchFuelTab">Overview</button>
+          <button class="tab" data-tab="cities" data-click="switchFuelTab">Cities</button>
+          <button class="tab" data-tab="posts" data-click="switchFuelTab">Posts</button>
+          <button class="tab" data-tab="logs" data-click="switchFuelTab">Fetch Log</button>
+          <button class="tab" data-tab="quality" data-click="switchFuelTab">Data Quality</button>
         </div>
 
         <!-- Tab 1: Overview -->
@@ -1092,7 +1092,7 @@
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <div class="card">
-              <div class="card-title">⚠️ Stale Cities (3+ days)</div>
+              <div class="card-title">Stale Cities (3+ days)</div>
               <div id="fuel-stale-cities" style="padding:8px;font-size:13px;"></div>
             </div>
             <div class="card">
@@ -1108,10 +1108,10 @@
         <div class="page-header">
           <h2 class="page-title">Metals Price Tracker</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-outline" data-click="testMetalsFetch">🧪 Test (Gold)</button>
-            <button class="btn btn-sm btn-purple" data-click="triggerMetalsFetch">⚡ Fetch All Prices</button>
-            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="metalsPostsBtn" data-click="triggerMetalsPosts">📝 Generate Posts</button>
-            <button class="btn btn-sm btn-ghost" data-click="loadMetalsPage">↻ Refresh</button>
+            <button class="btn btn-sm btn-outline" data-click="testMetalsFetch"><svg data-lucide="flask-conical" class="icon"></svg> Test (Gold)</button>
+            <button class="btn btn-sm btn-purple" data-click="triggerMetalsFetch"><svg data-lucide="zap" class="icon"></svg> Fetch All Prices</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="metalsPostsBtn" data-click="triggerMetalsPosts"><svg data-lucide="file-text" class="icon"></svg> Generate Posts</button>
+            <button class="btn btn-sm btn-ghost" data-click="loadMetalsPage"><svg data-lucide="refresh-cw" class="icon"></svg> Refresh</button>
           </div>
         </div>
 
@@ -1133,11 +1133,11 @@
 
         <!-- Tab Navigation -->
         <div class="page-tabs" id="metals-tabs">
-          <button class="tab active" data-tab="overview" data-click="switchMetalsTab">📊 Overview</button>
-          <button class="tab" data-tab="cities" data-click="switchMetalsTab">🏙️ Cities</button>
-          <button class="tab" data-tab="posts" data-click="switchMetalsTab">📝 Posts</button>
-          <button class="tab" data-tab="logs" data-click="switchMetalsTab">📋 Fetch Log</button>
-          <button class="tab" data-tab="quality" data-click="switchMetalsTab">🔍 Data Quality</button>
+          <button class="tab active" data-tab="overview" data-click="switchMetalsTab">Overview</button>
+          <button class="tab" data-tab="cities" data-click="switchMetalsTab">Cities</button>
+          <button class="tab" data-tab="posts" data-click="switchMetalsTab">Posts</button>
+          <button class="tab" data-tab="logs" data-click="switchMetalsTab">Fetch Log</button>
+          <button class="tab" data-tab="quality" data-click="switchMetalsTab">Data Quality</button>
         </div>
 
         <!-- Tab 1: Overview -->
@@ -1245,7 +1245,7 @@
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <div class="card">
-              <div class="card-title">⚠️ Stale Cities (3+ days)</div>
+              <div class="card-title">Stale Cities (3+ days)</div>
               <div id="metals-stale-cities" style="padding:8px;font-size:13px;"></div>
             </div>
             <div class="card">
@@ -1259,11 +1259,11 @@
       <!-- ═══════════════════════════ LOTTERY PAGE ══════════════════════════ -->
       <section class="page hidden" id="page-lottery">
         <div class="page-header">
-          <h2 class="page-title">🎰 Lottery Results</h2>
+          <h2 class="page-title">Lottery Results</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-purple" id="lotteryFetchAllBtn">⚡ Fetch All</button>
-            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="lotteryGenPostsBtn">📝 Generate Posts</button>
-            <button class="btn btn-sm btn-ghost" id="lotteryRefreshBtn">↻ Refresh</button>
+            <button class="btn btn-sm btn-purple" id="lotteryFetchAllBtn"><svg data-lucide="zap" class="icon"></svg> Fetch All</button>
+            <button class="btn btn-sm" style="background:#3b82f6;color:#fff;" id="lotteryGenPostsBtn"><svg data-lucide="file-text" class="icon"></svg> Generate Posts</button>
+            <button class="btn btn-sm btn-ghost" id="lotteryRefreshBtn"><svg data-lucide="refresh-cw" class="icon"></svg> Refresh</button>
           </div>
         </div>
 
@@ -1276,9 +1276,9 @@
 
         <!-- Tab navigation -->
         <div class="page-tabs" id="lottery-tabs">
-          <button class="tab active" data-tab="today" data-click="switchLotteryTab">📅 Today</button>
-          <button class="tab" data-tab="recent" data-click="switchLotteryTab">📋 Recent Results</button>
-          <button class="tab" data-tab="logs" data-click="switchLotteryTab">🔍 Fetch Log</button>
+          <button class="tab active" data-tab="today" data-click="switchLotteryTab">Today</button>
+          <button class="tab" data-tab="recent" data-click="switchLotteryTab">Recent Results</button>
+          <button class="tab" data-tab="logs" data-click="switchLotteryTab">Fetch Log</button>
         </div>
 
         <!-- Tab: Today's Draws -->
@@ -1324,8 +1324,12 @@
         <div class="page-header">
           <h2 class="page-title">Autopilot</h2>
           <div class="page-actions">
-            <button class="btn btn-sm btn-outline" id="autopilotSimulateBtn">🧪 Simulate</button>
-            <button class="btn btn-sm btn-ghost" id="autopilotRefreshBtn">↻ Refresh</button>
+            <button class="btn btn-sm btn-outline" id="autopilotSimulateBtn">
+              <svg data-lucide="flask-conical" class="icon"></svg> Simulate
+            </button>
+            <button class="btn btn-sm btn-ghost" id="autopilotRefreshBtn">
+              <svg data-lucide="refresh-cw" class="icon"></svg> Refresh
+            </button>
           </div>
         </div>
 
@@ -1379,32 +1383,34 @@
 
         <!-- Auto-Rewrite Engine Card -->
         <div class="card" style="margin-bottom:16px;">
-          <div class="card-title">Auto-Rewrite Engine</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:14px;">
-            <div class="settings-row">
-              <label class="settings-label">Daily Limit</label>
-              <input type="number" min="1" data-setting-key="AUTO_REWRITE_DAILY_LIMIT" class="settings-input" />
+          <h3 class="card-title">Auto-Rewrite Engine</h3>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;">
+            <div class="form-field">
+              <label class="form-label">Daily Limit</label>
+              <input type="number" min="1" data-setting-key="AUTO_REWRITE_DAILY_LIMIT" class="settings-input" style="width:100%;" />
             </div>
-            <div class="settings-row">
-              <label class="settings-label">Hourly Limit</label>
-              <input type="number" min="1" data-setting-key="AUTO_REWRITE_HOURLY_LIMIT" class="settings-input" />
+            <div class="form-field">
+              <label class="form-label">Hourly Limit</label>
+              <input type="number" min="1" data-setting-key="AUTO_REWRITE_HOURLY_LIMIT" class="settings-input" style="width:100%;" />
             </div>
-            <div class="settings-row">
-              <label class="settings-label">Min Sources</label>
-              <input type="number" min="1" data-setting-key="AUTO_REWRITE_MIN_SOURCES" class="settings-input" />
+            <div class="form-field">
+              <label class="form-label">Min Sources</label>
+              <input type="number" min="1" data-setting-key="AUTO_REWRITE_MIN_SOURCES" class="settings-input" style="width:100%;" />
             </div>
-            <div class="settings-row">
-              <label class="settings-label">Min Similarity (0–1)</label>
-              <input type="number" min="0" max="1" step="0.05" data-setting-key="AUTO_REWRITE_MIN_SIMILARITY" class="settings-input" />
+            <div class="form-field">
+              <label class="form-label">Min Similarity (0–1)</label>
+              <input type="number" min="0" max="1" step="0.05" data-setting-key="AUTO_REWRITE_MIN_SIMILARITY" class="settings-input" style="width:100%;" />
             </div>
           </div>
-          <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-bottom:12px;">
-            <label class="settings-label">Blocked Keywords (comma-separated)</label>
-            <textarea rows="2" data-setting-key="AUTO_REWRITE_BLOCKED_KEYWORDS" class="settings-input" style="width:100%;font-size:12px;"></textarea>
+          <div class="form-field" style="margin-bottom:16px;">
+            <label class="form-label">Blocked Keywords (comma-separated)</label>
+            <textarea rows="2" data-setting-key="AUTO_REWRITE_BLOCKED_KEYWORDS" class="settings-input" style="width:100%;font-size:12px;resize:vertical;"></textarea>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-sm" id="autoRewriteSaveBtn">Save</button>
-            <button class="btn btn-sm btn-ghost" id="cleanupStaleBtn">🗑 Cleanup Stale Drafts</button>
+            <button class="btn btn-sm btn-primary" id="autoRewriteSaveBtn">Save Settings</button>
+            <button class="btn btn-sm btn-ghost" id="cleanupStaleBtn">
+              <svg data-lucide="trash-2" class="icon"></svg> Cleanup Stale Drafts
+            </button>
           </div>
         </div>
 
