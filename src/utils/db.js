@@ -517,6 +517,10 @@ function runMigrations() {
         db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster_status ON drafts(cluster_id, extraction_status)');
         db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_mode_status ON drafts(mode, status)');
         db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_extraction_pending ON drafts(extraction_status, status, locked_by)');
+        // Covers the extraction worker pickup scan: status='fetching' AND lease expired
+        db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_pickup ON drafts(status, locked_by, lease_expires_at)');
+        // Covers the publish loop scan: ready+primary drafts ordered by trends/created
+        db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_ready_primary ON drafts(status, cluster_role, mode, created_at)');
 
         console.log('[db] Pipeline V2 migration complete');
       } catch (migrationErr) {

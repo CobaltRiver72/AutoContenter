@@ -2,6 +2,7 @@
 
 var path = require('path');
 var express = require('express');
+var compression = require('compression');
 var helmet = require('helmet');
 var cors = require('cors');
 var rateLimit = require('express-rate-limit');
@@ -253,6 +254,9 @@ async function boot() {
       res.redirect(301, 'https://' + req.headers.host + req.url);
     });
   }
+
+  // Response compression (gzip/brotli) — shrinks dashboard.js ~5x on the wire
+  app.use(compression());
 
   // Security headers
   app.use(helmet({

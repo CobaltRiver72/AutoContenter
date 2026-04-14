@@ -21,6 +21,7 @@
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.0.0",
     "better-sqlite3-session-store": "^0.1.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "eventsource": "^2.0.2",
