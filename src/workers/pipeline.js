@@ -252,9 +252,23 @@ class Pipeline {
         hourlyLimit - rewrittenThisHour
       );
 
+      // Blocked-keyword filter is applied IN SQL (not after) so the ORDER BY
+      // can step past blocked clusters. Applying it in JS post-SELECT meant
+      // that when the top-N by priority were all blocked (e.g. a surge of
+      // Hindi rashifal / horoscope clusters), every tick's LIMIT returned
+      // the same N rows, JS dropped them, the loop bailed, and nothing ever
+      // advanced — even with thousands of eligible non-blocked clusters
+      // sitting further down the queue.
+      var kwWhere = '';
+      var kwParams = [];
+      for (var kwi = 0; kwi < blockedKw.length; kwi++) {
+        kwWhere += ' AND LOWER(c.topic) NOT LIKE ?';
+        kwParams.push('%' + blockedKw[kwi] + '%');
+      }
+
       // Find clusters where ALL drafts are extracted (status = 'draft')
       // and the primary draft is not locked, with quality pre-filters
-      var readyClusters = this.db.prepare(
+      var readyClustersSql =
         "SELECT d.cluster_id, c.topic, c.trends_boosted, COUNT(*) as draft_count " +
         "FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
@@ -266,23 +280,15 @@ class Pipeline {
         "  AND NOT EXISTS (" +
         "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
         "    AND d2.status = 'fetching' AND d2.mode IN ('auto', 'manual_import')" +
-        "  ) " +
+        "  )" +
+        kwWhere + " " +
         "GROUP BY d.cluster_id " +
         "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
-        "LIMIT ?"
-      ).all(minSources, minSim, slotsAvailable);
-
-      // Filter blocked keywords from cluster topic
-      if (blockedKw.length > 0) {
-        readyClusters = readyClusters.filter(function (cl) {
-          var topic = (cl.topic || '').toLowerCase();
-          for (var ki = 0; ki < blockedKw.length; ki++) {
-            if (topic.indexOf(blockedKw[ki]) !== -1) return false;
-          }
-          return true;
-        });
-      }
+        "LIMIT ?";
+      var readyClustersStmt = this.db.prepare(readyClustersSql);
+      var readyClustersParams = [minSources, minSim].concat(kwParams).concat([slotsAvailable]);
+      var readyClusters = readyClustersStmt.all.apply(readyClustersStmt, readyClustersParams);
 
       if (readyClusters.length === 0) return;
 
