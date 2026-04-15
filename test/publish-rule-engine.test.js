@@ -253,6 +253,107 @@ test('resolveTaxonomy: per-draft wp_category_ids beats everything', function () 
   assert.equal(out.primaryCategoryId, 900);
 });
 
+// ─── WP_ALWAYS_APPEND_CATEGORY_ID tests ─────────────────────────────────────
+
+test('resolveTaxonomy: WP_ALWAYS_APPEND_CATEGORY_ID appends to rule-matched categories', function () {
+  _resetState();
+  _insertRule({
+    rule_name: 'auto-rule',
+    priority: 100,
+    match_source_domain: 'example.com',
+    wp_category_ids: JSON.stringify([10]),
+    wp_primary_cat_id: 10,
+  });
+  var cfg = {
+    WP_AUTHOR_ID: '1',
+    WP_DEFAULT_CATEGORY: '1',
+    WP_ALWAYS_APPEND_CATEGORY_ID: '42',
+    DEFAULT_AUTHOR_USERNAME: '',
+    DEFAULT_CATEGORY_SLUG: '',
+  };
+  var out = engine.resolveTaxonomy(_emptyDraft(), db, cfg);
+  assert.deepEqual(out.categoryIds, [10, 42], 'always-append id appended to rule categories');
+  assert.equal(out.primaryCategoryId, 10, 'primary remains from the matched rule');
+});
+
+test('resolveTaxonomy: WP_ALWAYS_APPEND_CATEGORY_ID appends to per-draft overrides too', function () {
+  _resetState();
+  var cfg = {
+    WP_AUTHOR_ID: '1',
+    WP_DEFAULT_CATEGORY: '1',
+    WP_ALWAYS_APPEND_CATEGORY_ID: '42',
+    DEFAULT_AUTHOR_USERNAME: '',
+    DEFAULT_CATEGORY_SLUG: '',
+  };
+  var draft = _emptyDraft({
+    wp_category_ids: JSON.stringify([900]),
+    wp_primary_cat_id: 900,
+  });
+  var out = engine.resolveTaxonomy(draft, db, cfg);
+  assert.deepEqual(out.categoryIds, [900, 42], 'always-append id appended even to explicit draft override');
+  assert.equal(out.primaryCategoryId, 900);
+});
+
+test('resolveTaxonomy: WP_ALWAYS_APPEND_CATEGORY_ID is not duplicated when already present', function () {
+  _resetState();
+  var cfg = {
+    WP_AUTHOR_ID: '1',
+    WP_DEFAULT_CATEGORY: '1',
+    WP_ALWAYS_APPEND_CATEGORY_ID: '42',
+    DEFAULT_AUTHOR_USERNAME: '',
+    DEFAULT_CATEGORY_SLUG: '',
+  };
+  var draft = _emptyDraft({
+    wp_category_ids: JSON.stringify([42, 900]),
+    wp_primary_cat_id: 900,
+  });
+  var out = engine.resolveTaxonomy(draft, db, cfg);
+  assert.deepEqual(out.categoryIds, [42, 900], 'no duplicate when id already in category list');
+});
+
+test('resolveTaxonomy: WP_ALWAYS_APPEND_CATEGORY_ID is the fallback when nothing else resolves', function () {
+  _resetState();
+  var cfg = {
+    WP_AUTHOR_ID: '1',
+    WP_DEFAULT_CATEGORY: '1',
+    WP_ALWAYS_APPEND_CATEGORY_ID: '42',
+    DEFAULT_AUTHOR_USERNAME: '',
+    DEFAULT_CATEGORY_SLUG: '',
+  };
+  var out = engine.resolveTaxonomy(_emptyDraft(), db, cfg);
+  assert.deepEqual(out.categoryIds, [42], 'append id used as sole fallback (not duplicated with WP_DEFAULT_CATEGORY)');
+  assert.equal(out.primaryCategoryId, 42, 'primary is the append id when nothing else resolves');
+});
+
+test('resolveTaxonomy: DEFAULT_CATEGORY_SLUG still wins over WP_ALWAYS_APPEND_CATEGORY_ID as fallback primary', function () {
+  _resetState();
+  _seedCategory(55, 'headlines');
+  var cfg = {
+    WP_AUTHOR_ID: '1',
+    WP_DEFAULT_CATEGORY: '1',
+    WP_ALWAYS_APPEND_CATEGORY_ID: '42',
+    DEFAULT_AUTHOR_USERNAME: '',
+    DEFAULT_CATEGORY_SLUG: 'headlines',
+  };
+  var out = engine.resolveTaxonomy(_emptyDraft(), db, cfg);
+  assert.deepEqual(out.categoryIds, [55, 42], 'slug default is primary; append id added as secondary');
+  assert.equal(out.primaryCategoryId, 55);
+});
+
+test('resolveTaxonomy: empty WP_ALWAYS_APPEND_CATEGORY_ID preserves pre-feature behavior', function () {
+  _resetState();
+  var cfg = {
+    WP_AUTHOR_ID: '1',
+    WP_DEFAULT_CATEGORY: '7',
+    WP_ALWAYS_APPEND_CATEGORY_ID: '',
+    DEFAULT_AUTHOR_USERNAME: '',
+    DEFAULT_CATEGORY_SLUG: '',
+  };
+  var out = engine.resolveTaxonomy(_emptyDraft(), db, cfg);
+  assert.deepEqual(out.categoryIds, [7], 'feature off — only legacy numeric fallback is used');
+  assert.equal(out.primaryCategoryId, 7);
+});
+
 // ─── Cleanup ────────────────────────────────────────────────────────────────
 
 test.after(function () {

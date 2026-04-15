@@ -803,6 +803,16 @@
                 <input type="number" id="wp-default-category" placeholder="1" min="1" />
               </div>
               <div class="settings-row">
+                <label class="settings-label">Always-append Category <small style="color:#666;">(catch-all secondary + fallback)</small></label>
+                <select id="wp-always-append-category" class="settings-input">
+                  <option value="">— none (disabled) —</option>
+                </select>
+              </div>
+              <small style="color:#666;display:block;margin:-4px 0 10px 0;font-size:11px;">
+                Every published article will include this category alongside its primary. E.g. set it to <strong>News</strong> so every post lands in /news/ plus its niche category (Auto, Cricket, etc.). When no rule or draft override resolves, this is also used as the fallback primary category.
+                Dropdown is populated from the WP Taxonomy Cache below — click <strong>Sync from WordPress</strong> first if it looks empty.
+              </small>
+              <div class="settings-row">
                 <label class="settings-label">Classifier Default Author <small style="color:#666;">(username slug)</small></label>
                 <input type="text" id="wp-default-author-username" placeholder="(leave blank to use Default Author ID)" />
               </div>
