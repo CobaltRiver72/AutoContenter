@@ -8438,7 +8438,11 @@
       var v = s.BULK_IMPORT_ENABLED;
       _bulkImportEnabled = (v === true || v === 'true' || v === 1 || v === '1');
       _renderBulkImportStatus();
-    }).catch(function () {});
+    }).catch(function (err) {
+      // Was silently swallowed — surface it in the console so future debugging
+      // sees the failure. The card still renders in its "Disabled" state.
+      console.warn('[bulk-import] _refreshBulkImportStatus failed:', err && err.message);
+    });
   }
 
   function _renderBulkImportStatus() {
@@ -8610,6 +8614,11 @@
         _refreshIcons();
         if (!resp.ok) {
           showToast('Apply failed: ' + (resp.error || (resp.errors && resp.errors[0] && resp.errors[0].message) || 'unknown'), 'error');
+          // Server consumes the preview cache on read, so the preview_id is
+          // now invalid — clear it AND close the modal so the user has to
+          // re-upload. Otherwise they get stuck in a "Preview expired" loop.
+          _bulkImportPreviewId = null;
+          window.__closeBulkImportModal();
           return;
         }
         window.__closeBulkImportModal();
@@ -8681,13 +8690,14 @@
       fetchApi('/api/config/import/rollback/' + snapshotId, { method: 'POST' })
         .then(function (r) {
           if (r.ok) {
-            showToast('Reverted to snapshot #' + snapshotId, 'success');
+            showToast('Reverted to snapshot #' + snapshotId + ' (import UNDONE)', 'success');
             _loadBulkImportSnapshots();
             forceApiRefresh('/api/settings');
             forceApiRefresh('/api/publish-rules');
             forceApiRefresh('/api/wp/taxonomy');
             if (typeof loadPublishRules === 'function') loadPublishRules();
             if (typeof loadWPPublishingSettings === 'function') loadWPPublishingSettings();
+            if (typeof loadActiveConfigViewer === 'function') loadActiveConfigViewer();
           } else {
             showToast('Undo failed: ' + (r.error || 'unknown'), 'error');
           }
