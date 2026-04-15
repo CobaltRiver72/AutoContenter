@@ -22,10 +22,16 @@ function _autoRewriteEnabled() {
 function _autoRewritePollMs()     { return parseInt(_cfg.get('REWRITE_POLL_MS'), 10) || 5000; }
 function _autoRewriteDailyLimit() { return parseInt(_cfg.get('AUTO_REWRITE_DAILY_LIMIT'), 10) || 100; }
 function _autoRewriteHourlyLimit(){ return parseInt(_cfg.get('AUTO_REWRITE_HOURLY_LIMIT'), 10) || 20; }
-function _autoRewriteMinSources() { return parseInt(_cfg.get('AUTO_REWRITE_MIN_SOURCES'), 10) || 2; }
-function _autoRewriteMinSim()     { return parseFloat(_cfg.get('AUTO_REWRITE_MIN_SIMILARITY')) || 0.30; }
-function _autoRewriteBlockedKw()  {
-  var v = _cfg.get('AUTO_REWRITE_BLOCKED_KEYWORDS') || '';
+
+// Unified min-sources, min-similarity, and blocked-keyword gates — shared with
+// the autopilot publish decision in src/modules/autopilot.js so a single
+// admin-facing value gates BOTH the rewrite stage and the publish stage. This
+// replaced three duplicate AUTO_REWRITE_* keys that were drifting apart from
+// their autopilot counterparts in the admin UI.
+function _minSources()            { return parseInt(_cfg.get('MIN_SOURCES_THRESHOLD'), 10) || 2; }
+function _minSimilarity()         { return parseFloat(_cfg.get('AUTOPILOT_MIN_SIMILARITY')) || 0.30; }
+function _blockedKeywords()       {
+  var v = _cfg.get('AUTOPILOT_BLOCKED_KEYWORDS') || '';
   return String(v).split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
 }
 
@@ -235,9 +241,9 @@ class Pipeline {
         return;
       }
 
-      var minSources = _autoRewriteMinSources();
-      var minSim = _autoRewriteMinSim();
-      var blockedKw = _autoRewriteBlockedKw();
+      var minSources = _minSources();
+      var minSim = _minSimilarity();
+      var blockedKw = _blockedKeywords();
 
       // Slots available this tick (bounded by rate limits and concurrency)
       var slotsAvailable = Math.min(
@@ -344,9 +350,9 @@ class Pipeline {
       hourlyLimit: hourlyLimit,
       pendingClusters: pendingClusters,
       filters: {
-        minSources: _autoRewriteMinSources(),
-        minSimilarity: _autoRewriteMinSim(),
-        blockedKeywords: _cfg.get('AUTO_REWRITE_BLOCKED_KEYWORDS') || '',
+        minSources: _minSources(),
+        minSimilarity: _minSimilarity(),
+        blockedKeywords: _cfg.get('AUTOPILOT_BLOCKED_KEYWORDS') || '',
       },
     };
   }

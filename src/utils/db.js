@@ -919,9 +919,6 @@ function runMigrations() {
         AUTO_REWRITE_ENABLED: 'false',
         AUTO_REWRITE_DAILY_LIMIT: '100',
         AUTO_REWRITE_HOURLY_LIMIT: '20',
-        AUTO_REWRITE_MIN_SOURCES: '2',
-        AUTO_REWRITE_MIN_SIMILARITY: '0.30',
-        AUTO_REWRITE_BLOCKED_KEYWORDS: 'horoscope,rashifal,zodiac,numerology,wishes,greetings',
         BACKLOG_MAX_AGE_HOURS: '72',
       };
       var insertDefault = db.prepare(

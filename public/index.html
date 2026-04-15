@@ -1514,10 +1514,11 @@
         <!-- Simulate Result (hidden until run) -->
         <div id="autopilot-simulate-result" style="display:none;margin-bottom:16px;"></div>
 
-        <!-- Auto-Rewrite Engine Card -->
+        <!-- Rewrite Throughput Card -->
         <div class="card" style="margin-bottom:16px;">
-          <h3 class="card-title">Auto-Rewrite Engine</h3>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;">
+          <h3 class="card-title">Rewrite Throughput</h3>
+          <small style="color:var(--text-tertiary);display:block;margin:-4px 0 12px 0;font-size:11px;">Caps how many clusters the AI can rewrite per day/hour. Content quality gates (Min Sources, Similarity, Blocked Keywords) live in the cards below and apply to both the rewrite and publish stages.</small>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:16px;">
             <div class="form-field">
               <label class="form-label">Daily Limit</label>
               <input type="number" min="1" data-setting-key="AUTO_REWRITE_DAILY_LIMIT" class="settings-input" style="width:100%;" />
@@ -1526,18 +1527,6 @@
               <label class="form-label">Hourly Limit</label>
               <input type="number" min="1" data-setting-key="AUTO_REWRITE_HOURLY_LIMIT" class="settings-input" style="width:100%;" />
             </div>
-            <div class="form-field">
-              <label class="form-label">Min Sources</label>
-              <input type="number" min="1" data-setting-key="AUTO_REWRITE_MIN_SOURCES" class="settings-input" style="width:100%;" />
-            </div>
-            <div class="form-field">
-              <label class="form-label">Min Similarity (0–1)</label>
-              <input type="number" min="0" max="1" step="0.05" data-setting-key="AUTO_REWRITE_MIN_SIMILARITY" class="settings-input" style="width:100%;" />
-            </div>
-          </div>
-          <div class="form-field" style="margin-bottom:16px;">
-            <label class="form-label">Blocked Keywords (comma-separated)</label>
-            <textarea rows="2" data-setting-key="AUTO_REWRITE_BLOCKED_KEYWORDS" class="settings-input" style="width:100%;font-size:12px;resize:vertical;"></textarea>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary" id="autoRewriteSaveBtn">Save Settings</button>
@@ -1570,7 +1559,12 @@
 
           <div class="card">
             <div class="card-title">Quality Gates</div>
+            <small style="color:var(--text-tertiary);display:block;margin:-4px 0 12px 0;font-size:11px;">Gates apply to BOTH the rewrite stage and the publish stage. Set Min Sources to 1 to allow single-source clusters.</small>
             <div class="settings-group">
+              <div class="settings-row">
+                <label class="settings-label">Min Sources</label>
+                <input type="number" min="1" data-setting-key="MIN_SOURCES_THRESHOLD" class="settings-input" />
+              </div>
               <div class="settings-row">
                 <label class="settings-label">Min Word Count</label>
                 <input type="number" min="100" data-setting-key="AUTOPILOT_MIN_WORDS" class="settings-input" />
