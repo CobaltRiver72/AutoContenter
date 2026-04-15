@@ -8,33 +8,71 @@ var configImportValidator = require('../utils/config-import-validator');
 var configImportEngine = require('../utils/config-import-engine');
 
 // ── Bulk Config Import — multer config (memory, 5 MB cap, .json only) ──────
+// fileFilter rejects with cb(null, false) instead of cb(new Error, ...). The
+// former drops the file silently so the handler can return a clean 400; the
+// latter bubbles an unhandled error out to Express's default error handler,
+// which would surface as a 500.
 var configImportUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: function (req, file, cb) {
     var nameOk = /\.json$/i.test(file.originalname || '');
     var typeOk = file.mimetype === 'application/json' || file.mimetype === 'text/json';
-    if (!nameOk && !typeOk) return cb(new Error('Only .json files are accepted'));
+    if (!nameOk && !typeOk) return cb(null, false);
     cb(null, true);
   },
 });
 
 // In-memory cache of recently parsed previews so apply() can re-use without
-// asking the admin to upload twice. 60-second TTL, opportunistic GC.
+// asking the admin to upload twice. 60-second TTL, single shared interval
+// sweeper (instead of one timer per entry, which was O(n) timers).
 var _configImportPreviewCache = new Map();
 var _CONFIG_IMPORT_PREVIEW_TTL_MS = 60 * 1000;
+var _CONFIG_IMPORT_PREVIEW_MAX_ENTRIES = 50;
+var _configImportPreviewSweeper = null;
 function _cacheImportPreview(parsed) {
-  var id = crypto.randomBytes(8).toString('hex');
+  // Hard cap on concurrent pending previews. Oldest entry evicted on overflow.
+  if (_configImportPreviewCache.size >= _CONFIG_IMPORT_PREVIEW_MAX_ENTRIES) {
+    var oldestKey = _configImportPreviewCache.keys().next().value;
+    if (oldestKey) _configImportPreviewCache.delete(oldestKey);
+  }
+  var id = crypto.randomBytes(16).toString('hex');
   _configImportPreviewCache.set(id, { parsed: parsed, expires: Date.now() + _CONFIG_IMPORT_PREVIEW_TTL_MS });
-  setTimeout(function () { _configImportPreviewCache.delete(id); }, _CONFIG_IMPORT_PREVIEW_TTL_MS + 1000).unref();
+  // Start shared sweeper on first insert; it self-clears when the cache empties.
+  if (!_configImportPreviewSweeper) {
+    _configImportPreviewSweeper = setInterval(function () {
+      var now = Date.now();
+      _configImportPreviewCache.forEach(function (entry, key) {
+        if (entry.expires < now) _configImportPreviewCache.delete(key);
+      });
+      if (_configImportPreviewCache.size === 0) {
+        clearInterval(_configImportPreviewSweeper);
+        _configImportPreviewSweeper = null;
+      }
+    }, 10000);
+    _configImportPreviewSweeper.unref();
+  }
   return id;
 }
-function _getCachedImportPreview(id) {
+// Two modes:
+//   consume=false (default) — peek at the cached preview, leave it in place.
+//                             Used by future diff re-render, not currently.
+//   consume=true            — TAKE the preview and remove it from the cache.
+//                             Used by apply() so two concurrent apply clicks
+//                             with the same preview_id can't both run.
+function _getCachedImportPreview(id, consume) {
   var entry = _configImportPreviewCache.get(id);
   if (!entry) return null;
   if (entry.expires < Date.now()) { _configImportPreviewCache.delete(id); return null; }
+  if (consume) _configImportPreviewCache.delete(id);
   return entry.parsed;
 }
+
+// Single-flight lock for apply. Two admins clicking Apply simultaneously (or
+// the same admin double-clicking) would otherwise run two parallel applies,
+// corrupting snapshot ordering and doubling WP-side category creates.
+var _configImportApplyInFlight = false;
+
 function _isBulkImportEnabled() {
   var v = cfgGet('BULK_IMPORT_ENABLED');
   return v === true || v === 1 || String(v).toLowerCase() === 'true' || v === '1';
@@ -5803,7 +5841,7 @@ function createApiRouter(deps) {
         errors: [],
       });
     } catch (err) {
-      logger.error('config-import', 'Preview failed: ' + err.message);
+      logger.error('config-import', 'Preview failed: ' + (err.stack || err.message));
       res.status(500).json({ ok: false, error: 'Preview failed: ' + err.message });
     }
   });
@@ -5811,7 +5849,13 @@ function createApiRouter(deps) {
   // POST /api/config/import/apply
   // Two paths: multipart file upload OR { preview_id } JSON body to re-use a
   // recent preview without re-uploading. Always re-validates server-side.
+  // Serialized via _configImportApplyInFlight so double-clicks and concurrent
+  // tabs can't run two applies at the same time.
   router.post('/config/import/apply', _importGate, configImportUpload.single('file'), async function (req, res) {
+    if (_configImportApplyInFlight) {
+      return res.status(409).json({ ok: false, error: 'Another import is already running. Please wait for it to finish.' });
+    }
+    _configImportApplyInFlight = true;
     try {
       var parsed = null;
       var filename = null;
@@ -5824,8 +5868,10 @@ function createApiRouter(deps) {
         catch (parseErr) { return res.status(400).json({ ok: false, error: 'Invalid JSON: ' + parseErr.message }); }
         filename = req.file.originalname;
       } else if (req.body && req.body.preview_id) {
-        parsed = _getCachedImportPreview(req.body.preview_id);
-        if (!parsed) return res.status(400).json({ ok: false, error: 'Preview expired or not found — please re-upload the file' });
+        // consume=true — delete the cache entry on read so a second concurrent
+        // apply with the same preview_id gets null and 400s cleanly.
+        parsed = _getCachedImportPreview(req.body.preview_id, true);
+        if (!parsed) return res.status(400).json({ ok: false, error: 'Preview expired, not found, or already consumed — please re-upload the file' });
         filename = 'preview-' + req.body.preview_id;
       } else {
         return res.status(400).json({ ok: false, error: 'No file or preview_id provided' });
@@ -5848,8 +5894,10 @@ function createApiRouter(deps) {
       var result = await configImportEngine.applyImport(parsed, ctx);
       res.json({ ok: true, snapshot_id: result.snapshot_id, summary: result.summary });
     } catch (err) {
-      logger.error('config-import', 'Apply failed: ' + err.message);
+      logger.error('config-import', 'Apply failed: ' + (err.stack || err.message));
       res.status(500).json({ ok: false, error: 'Apply failed: ' + err.message });
+    } finally {
+      _configImportApplyInFlight = false;
     }
   });
 
@@ -5867,7 +5915,7 @@ function createApiRouter(deps) {
       }
       res.json({ ok: true, restored_to: result });
     } catch (err) {
-      logger.error('config-import', 'Rollback failed: ' + err.message);
+      logger.error('config-import', 'Rollback failed: ' + (err.stack || err.message));
       res.status(500).json({ ok: false, error: 'Rollback failed: ' + err.message });
     }
   });
@@ -5890,7 +5938,7 @@ function createApiRouter(deps) {
       res.setHeader('Content-Disposition', 'attachment; filename="hdf-config-' + ts + '.json"');
       res.send(JSON.stringify(out, null, 2));
     } catch (err) {
-      logger.error('config-import', 'Export failed: ' + err.message);
+      logger.error('config-import', 'Export failed: ' + (err.stack || err.message));
       res.status(500).json({ ok: false, error: err.message });
     }
   });

@@ -347,12 +347,17 @@ function restoreSnapshot(db, snapshotId) {
   return { snapshot_id: snap.id, label: snap.label, restored_at: new Date().toISOString() };
 }
 
-// Keep snapshot id=1 (day-zero baseline) and the 10 most recent. Anything
-// older gets pruned. Called after every successful capture.
+// Keep every is_baseline=1 row (day-zero factory defaults) plus the 10 most
+// recent non-baseline rows. The old implementation hardcoded id=1 as the
+// baseline, which broke if the table was ever TRUNCATEd and re-seeded — the
+// new baseline would get a non-1 autoincrement id and then be pruned on the
+// 11th import. Marking by column makes this data-driven and resilient.
 function pruneSnapshots(db) {
   try {
     var stale = db.prepare(
-      "SELECT id FROM config_snapshots WHERE id != 1 ORDER BY id DESC LIMIT -1 OFFSET 10"
+      "SELECT id FROM config_snapshots " +
+      "WHERE (is_baseline IS NULL OR is_baseline = 0) " +
+      "ORDER BY id DESC LIMIT -1 OFFSET 10"
     ).all();
     for (var i = 0; i < stale.length; i++) {
       db.prepare("DELETE FROM config_snapshots WHERE id = ?").run(stale[i].id);
@@ -398,50 +403,71 @@ async function applyImport(parsed, ctx) {
   // Step 2 — resolve all referenced categories. For misses, auto-create on
   // WP via resolveCategorySlugs. This is the only network step; it runs
   // outside the SQLite transaction so a network failure doesn't poison it.
+  // maxCreatePerCall is raised to 200 here (vs. the 12 used by the rewrite
+  // pipeline) because a single import can legitimately reference that many
+  // new categories in one shot.
   var requiredCatSlugs = _collectReferencedCategories(parsed);
   if (requiredCatSlugs.length > 0) {
     try {
-      await resolveCategorySlugs(db, config, requiredCatSlugs, { logger: logger, maxCreatePerCall: 12 });
+      await resolveCategorySlugs(db, config, requiredCatSlugs, { logger: logger, maxCreatePerCall: 200 });
     } catch (catErr) {
       throw new Error('Failed to resolve/create categories on WordPress: ' + catErr.message);
+    }
+    // Verify every referenced category now resolves. resolveCategorySlugs
+    // silently skips any slug that hits an error, so we must re-check the
+    // cache and hard-fail if anything is still missing — otherwise publish
+    // rules that reference those slugs would silently save null WP IDs.
+    var postCatMap = _loadWpCategoryMap(db);
+    var stillMissingCats = [];
+    for (var scm = 0; scm < requiredCatSlugs.length; scm++) {
+      if (!postCatMap[requiredCatSlugs[scm]]) stillMissingCats.push(requiredCatSlugs[scm]);
+    }
+    if (stillMissingCats.length > 0) {
+      throw new Error(
+        'Failed to create ' + stillMissingCats.length + ' categories on WordPress (check WP REST permissions): ' +
+        stillMissingCats.slice(0, 10).join(', ') + (stillMissingCats.length > 10 ? ' and ' + (stillMissingCats.length - 10) + ' more' : '')
+      );
     }
   }
 
   // Step 3 — resolve referenced tag slugs (auto-creates missing tags). Same
-  // network-outside-transaction reasoning.
+  // network-outside-transaction reasoning, same raised cap.
   var requiredTagSlugs = _collectReferencedTagSlugs(parsed);
   if (requiredTagSlugs.length > 0) {
     try {
-      await resolveTagNames(db, config, requiredTagSlugs, { logger: logger, maxCreatePerCall: 12 });
+      await resolveTagNames(db, config, requiredTagSlugs, { logger: logger, maxCreatePerCall: 200 });
     } catch (tagErr) {
       // Non-fatal — publish rules referencing missing tags will save without those tag IDs.
       if (logger) logger.warn('config-import', 'Tag resolution had errors (non-fatal): ' + tagErr.message);
     }
   }
 
-  // Step 4 — snapshot BEFORE apply so rollback is always available.
-  var snapshotId = captureSnapshot(db, {
-    label: 'before_import_' + new Date().toISOString().replace(/[:.]/g, '-'),
-    createdBy: ctx.createdBy || 'admin',
-    filename: ctx.filename || null,
-  });
-
-  // Step 5 — re-load WP cache after step 2/3 may have added rows.
+  // Step 4 — reload WP maps now that resolver may have added rows
   var wpCatMap = _loadWpCategoryMap(db);
   wpAuthorMap = _loadWpAuthorMap(db);
   var wpTagMap = _loadWpTagMap(db);
 
-  // Step 6 — synchronous apply transaction.
+  // Step 5 — snapshot + apply in one atomic transaction. Previously the
+  // snapshot ran outside the apply transaction, which left a window where a
+  // concurrent writer (another admin tab / a poll tick / a manual setting
+  // save) could mutate the managed state between the snapshot read and the
+  // apply write, making the "before" snapshot point to an inconsistent state.
+  var snapshotId;
   var summary;
-  var apply = db.transaction(function () {
+  var snapshotAndApply = db.transaction(function () {
+    snapshotId = captureSnapshot(db, {
+      label: 'before_import_' + new Date().toISOString().replace(/[:.]/g, '-'),
+      createdBy: ctx.createdBy || 'admin',
+      filename: ctx.filename || null,
+    });
     summary = _applyTx(db, parsed, { wpAuthorMap: wpAuthorMap, wpCatMap: wpCatMap, wpTagMap: wpTagMap });
   });
-  apply();
+  snapshotAndApply();
 
-  // Step 7 — prune old snapshots.
+  // Step 6 — prune old snapshots.
   pruneSnapshots(db);
 
-  // Step 8 — hot-reload classifier so new dictionaries take effect immediately.
+  // Step 7 — hot-reload classifier so new dictionaries take effect immediately.
   if (classifier && typeof classifier.reloadDictionaries === 'function') {
     try {
       classifier.reloadDictionaries();

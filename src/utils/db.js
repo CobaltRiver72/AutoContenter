@@ -726,10 +726,20 @@ function runMigrations() {
         publish_rules_json TEXT NOT NULL,
         created_by      TEXT,
         import_filename TEXT,
+        is_baseline     INTEGER DEFAULT 0,
         created_at      TEXT DEFAULT (datetime('now'))
       );
       CREATE INDEX IF NOT EXISTS idx_config_snapshots_created ON config_snapshots(created_at DESC);
     `);
+
+    // Add is_baseline column to existing installs that predate the column.
+    // is_baseline=1 marks the factory-default row that pruneSnapshots must
+    // never delete. Marking by column (not hardcoded id=1) means TRUNCATE
+    // + reseed still works correctly because the flag is data, not a
+    // positional assumption about sqlite_sequence.
+    try {
+      db.exec("ALTER TABLE config_snapshots ADD COLUMN is_baseline INTEGER DEFAULT 0");
+    } catch (e) { /* already exists */ }
 
     // Add 'source' column to publish_rules so we can distinguish manual rules
     // (created via UI) from imported rules. Rollback only touches imported.
@@ -742,12 +752,14 @@ function runMigrations() {
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_rules_key ON publish_rules(key) WHERE key IS NOT NULL");
 
     // Day-zero baseline snapshot — guarantees rollback always has somewhere
-    // to go, even on a brand-new install. Only created if snapshots table is
-    // empty. Captures only the IMPORT_MANAGED_SETTING_KEYS, matching the
+    // to go, even on a brand-new install. Only created if no baseline exists
+    // yet. Captures only the IMPORT_MANAGED_SETTING_KEYS, matching the
     // serialization the import engine uses.
     try {
-      var snapCountRow = db.prepare("SELECT COUNT(*) AS cnt FROM config_snapshots").get();
-      if (!snapCountRow || snapCountRow.cnt === 0) {
+      var baselineRow = db.prepare(
+        "SELECT id FROM config_snapshots WHERE is_baseline = 1 LIMIT 1"
+      ).get();
+      if (!baselineRow) {
         var IMPORT_MANAGED_KEYS = require('./config-import-keys').IMPORT_MANAGED_SETTING_KEYS;
         var managedSettings = {};
         for (var mki = 0; mki < IMPORT_MANAGED_KEYS.length; mki++) {
@@ -756,12 +768,12 @@ function runMigrations() {
           if (row) managedSettings[k] = row.value;
         }
         var importedRules = db.prepare(
-          "SELECT * FROM publish_rules WHERE source = 'import'"
+          "SELECT * FROM publish_rules WHERE source = 'import' AND key IS NOT NULL"
         ).all();
         var label = 'factory_default_' + new Date().toISOString().replace(/[:.]/g, '-');
         db.prepare(
-          "INSERT INTO config_snapshots (label, settings_json, publish_rules_json, created_by, import_filename) " +
-          "VALUES (?, ?, ?, ?, ?)"
+          "INSERT INTO config_snapshots (label, settings_json, publish_rules_json, created_by, import_filename, is_baseline) " +
+          "VALUES (?, ?, ?, ?, ?, 1)"
         ).run(label, JSON.stringify(managedSettings), JSON.stringify(importedRules), 'system', null);
         console.log('[db] Day-zero baseline snapshot created: ' + label);
       }
