@@ -572,26 +572,36 @@ function _applyTx(db, parsed, maps) {
     }
   }
 
-  // publish_rules — upsert by key
+  // publish_rules — upsert by key.
+  //
+  // We deliberately can't use INSERT ... ON CONFLICT(key) here because the
+  // unique index on publish_rules.key is PARTIAL (WHERE key IS NOT NULL),
+  // and SQLite's ON CONFLICT targeting requires matching a full unique
+  // constraint — partial-index targeting needs the WHERE clause repeated
+  // on the ON CONFLICT AND still has edge cases with older better-sqlite3
+  // builds. A simple check-then-insert-or-update is portable and obvious.
   if (Array.isArray(parsed.publish_rules)) {
-    var insertOrUpdate = db.prepare(
+    var insertStmt = db.prepare(
       "INSERT INTO publish_rules (key, rule_name, priority, match_source_domain, " +
       "match_source_category, match_title_keyword, wp_category_ids, wp_primary_cat_id, " +
       "wp_tag_ids, wp_author_id, is_active, source, created_at, updated_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', datetime('now'), datetime('now')) " +
-      "ON CONFLICT(key) DO UPDATE SET " +
-      "  rule_name             = excluded.rule_name, " +
-      "  priority              = excluded.priority, " +
-      "  match_source_domain   = excluded.match_source_domain, " +
-      "  match_source_category = excluded.match_source_category, " +
-      "  match_title_keyword   = excluded.match_title_keyword, " +
-      "  wp_category_ids       = excluded.wp_category_ids, " +
-      "  wp_primary_cat_id     = excluded.wp_primary_cat_id, " +
-      "  wp_tag_ids            = excluded.wp_tag_ids, " +
-      "  wp_author_id          = excluded.wp_author_id, " +
-      "  is_active             = excluded.is_active, " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', datetime('now'), datetime('now'))"
+    );
+    var updateStmt = db.prepare(
+      "UPDATE publish_rules SET " +
+      "  rule_name             = ?, " +
+      "  priority              = ?, " +
+      "  match_source_domain   = ?, " +
+      "  match_source_category = ?, " +
+      "  match_title_keyword   = ?, " +
+      "  wp_category_ids       = ?, " +
+      "  wp_primary_cat_id     = ?, " +
+      "  wp_tag_ids            = ?, " +
+      "  wp_author_id          = ?, " +
+      "  is_active             = ?, " +
       "  source                = 'import', " +
-      "  updated_at            = datetime('now')"
+      "  updated_at            = datetime('now') " +
+      "WHERE key = ?"
     );
     var existingKeys = {};
     var existing = db.prepare("SELECT key FROM publish_rules WHERE key IS NOT NULL").all();
@@ -623,23 +633,40 @@ function _applyTx(db, parsed, maps) {
 
       var authorId = assign.author_username ? (maps.wpAuthorMap[assign.author_username] || null) : null;
       var isActive = (rule.is_active === false) ? 0 : 1;
+      var catIdsJson = catIds.length ? JSON.stringify(catIds) : null;
+      var tagIdsJson = tagIds.length ? JSON.stringify(tagIds) : null;
 
-      insertOrUpdate.run(
-        rule.key,
-        rule.name || rule.key,
-        rule.priority || 0,
-        match.source_domain || null,
-        match.source_category || null,
-        match.title_keyword || null,
-        catIds.length ? JSON.stringify(catIds) : null,
-        primCatId,
-        tagIds.length ? JSON.stringify(tagIds) : null,
-        authorId,
-        isActive
-      );
-
-      if (existingKeys[rule.key]) counts.publish_rules_updated++;
-      else counts.publish_rules_added++;
+      if (existingKeys[rule.key]) {
+        updateStmt.run(
+          rule.name || rule.key,
+          rule.priority || 0,
+          match.source_domain || null,
+          match.source_category || null,
+          match.title_keyword || null,
+          catIdsJson,
+          primCatId,
+          tagIdsJson,
+          authorId,
+          isActive,
+          rule.key
+        );
+        counts.publish_rules_updated++;
+      } else {
+        insertStmt.run(
+          rule.key,
+          rule.name || rule.key,
+          rule.priority || 0,
+          match.source_domain || null,
+          match.source_category || null,
+          match.title_keyword || null,
+          catIdsJson,
+          primCatId,
+          tagIdsJson,
+          authorId,
+          isActive
+        );
+        counts.publish_rules_added++;
+      }
     }
   }
 
