@@ -4487,11 +4487,19 @@
           if (r.match_source_domain) matchParts.push('domain: ' + r.match_source_domain);
           if (r.match_source_category) matchParts.push('category: ' + r.match_source_category);
           if (r.match_title_keyword) matchParts.push('keyword: ' + r.match_title_keyword);
+          var sourceBadge = r.source === 'import'
+            ? '<span title="Created via Bulk Config Import" style="background:rgba(16,185,129,0.15);color:#4ade80;font-size:10px;padding:2px 6px;border-radius:3px;border:1px solid rgba(16,185,129,0.3);">imported</span>'
+            : '';
+          var keyBadge = r.key
+            ? '<span style="background:rgba(100,116,139,0.15);color:#94a3b8;font-size:10px;padding:2px 6px;border-radius:3px;font-family:monospace;">' + escapeHtml(r.key) + '</span>'
+            : '';
           return '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;">' +
             '<div>' +
-              '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">' +
+              '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap;">' +
                 '<span style="background:#1d4ed8;color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;">P' + r.priority + '</span>' +
                 '<strong style="font-size:13px;">' + escapeHtml(r.rule_name) + '</strong>' +
+                sourceBadge +
+                keyBadge +
                 (!r.is_active ? '<span style="color:#888;font-size:11px;">(disabled)</span>' : '') +
               '</div>' +
               (matchParts.length ? '<div style="font-size:11px;color:#888;margin-bottom:3px;">Match: ' + matchParts.join(' &amp; ') + '</div>' : '<div style="font-size:11px;color:#888;margin-bottom:3px;">Default rule (matches all)</div>') +
@@ -7711,6 +7719,15 @@
     'openManualImportModal':   function () { __openManualImportModal(); },
     'closeManualImportModal':  function () { __closeManualImportModal(); },
     'closeBulkImportModal':    function () { __closeBulkImportModal(); },
+    'showTaxTab':              function (el) { window.__showTaxTab(el.getAttribute('data-tax')); },
+    'togglePipelineEngine':    function () {
+      var b = document.getElementById('pipelineEngineBody');
+      var a = document.getElementById('pipelineEngineArrow');
+      if (!b) return;
+      var hidden = b.style.display === 'none';
+      b.style.display = hidden ? '' : 'none';
+      if (a) a.textContent = hidden ? '\u25BC' : '\u25B6';
+    },
     'submitManualImport':      function () { __submitManualImport(); },
     'editRule':                function (el) {
       var ds = el.dataset;
