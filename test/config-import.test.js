@@ -367,6 +367,61 @@ test('engine: applyImport snapshot points to BEFORE-state for undo', async funct
   assert.equal(restored.value, 'draft', 'snapshot must capture the BEFORE-state, not the after-state');
 });
 
+test('engine: publish_rules upsert — insert then update by key', async function () {
+  _resetState();
+  _seedWpCache(
+    [{ id: 42, slug: 'rahul-sharma' }],
+    [{ id: 12, slug: 'cricket' }],
+    [{ id: 99, slug: 'ipl' }]
+  );
+
+  // First import: add one rule
+  var cfg1 = {
+    version: '1.0',
+    authors: [{ username: 'rahul-sharma', keywords: { ipl: 5 } }],
+    publish_rules: [{
+      key: 'cricbuzz_cricket',
+      name: 'Cricbuzz to Cricket',
+      priority: 100,
+      is_active: true,
+      match: { source_domain: 'cricbuzz.com', source_category: null, title_keyword: null },
+      assign: { category_slugs: ['cricket'], primary_category_slug: 'cricket', tag_slugs: ['ipl'], author_username: 'rahul-sharma' },
+    }],
+  };
+  var result1 = await engine.applyImport(cfg1, _baseCtx());
+  assert.ok(result1.snapshot_id > 0, 'first apply should succeed');
+
+  var firstRule = db.prepare("SELECT * FROM publish_rules WHERE key = 'cricbuzz_cricket'").get();
+  assert.ok(firstRule, 'rule should be inserted');
+  assert.equal(firstRule.priority, 100);
+  assert.equal(firstRule.source, 'import');
+
+  // Second import: update the same rule. Before the fix this threw "ON
+  // CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"
+  // because the unique index on key is PARTIAL (WHERE key IS NOT NULL).
+  var cfg2 = {
+    version: '1.0',
+    publish_rules: [{
+      key: 'cricbuzz_cricket',
+      name: 'Cricbuzz to Cricket (updated)',
+      priority: 200,
+      is_active: false,
+      match: { source_domain: 'cricbuzz.com', source_category: null, title_keyword: null },
+      assign: { category_slugs: ['cricket'], primary_category_slug: 'cricket', tag_slugs: ['ipl'], author_username: 'rahul-sharma' },
+    }],
+  };
+  var result2 = await engine.applyImport(cfg2, _baseCtx());
+  assert.ok(result2.snapshot_id > 0, 'second apply should succeed');
+
+  var updatedRule = db.prepare("SELECT * FROM publish_rules WHERE key = 'cricbuzz_cricket'").get();
+  assert.equal(updatedRule.priority, 200, 'priority should be updated');
+  assert.equal(updatedRule.rule_name, 'Cricbuzz to Cricket (updated)', 'name should be updated');
+  assert.equal(updatedRule.is_active, 0, 'is_active should be updated');
+
+  var count = db.prepare("SELECT COUNT(*) AS c FROM publish_rules WHERE key = 'cricbuzz_cricket'").get().c;
+  assert.equal(count, 1, 'should be exactly one row for the rule');
+});
+
 test('engine: silent-truncation guard — applyImport throws if a referenced category cannot be resolved', async function () {
   _resetState();
   _seedWpCache([{ id: 1, slug: 'admin' }], [], []);
