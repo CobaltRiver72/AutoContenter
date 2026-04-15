@@ -4468,12 +4468,33 @@ function createApiRouter(deps) {
 
           if (existingWpPostId) {
             logger.info('api', 'Draft ' + id + ': UPDATING existing WP post ' + existingWpPostId);
+            // Include EVERY field the rule engine resolved — author, categories,
+            // tags, primary category, post status — so admin changes (via
+            // recommendation apply, manual edits, or publish-rule updates)
+            // actually propagate to an already-published post when they click
+            // "Update on WP". Previously this only sent title/content/excerpt,
+            // which silently dropped taxonomy changes.
             var updateData = {
               title: rewrittenArticle.title,
               content: rewrittenArticle.content,
               excerpt: rewrittenArticle.excerpt,
               featured_media: draft.wp_media_id || 0,
+              author: rewrittenArticle.wpAuthorId,
+              categories: rewrittenArticle.wpCategories,
+              tags: rewrittenArticle.wpTags,
             };
+            // Post status override — only pass when explicitly set so we don't
+            // accidentally unpublish a live post. Per-draft override wins.
+            if (rewrittenArticle.wpPostStatus) {
+              updateData.status = rewrittenArticle.wpPostStatus;
+            }
+            // Yoast / RankMath primary category meta — same logic as publish()
+            if (rewrittenArticle.wpPrimaryCatId) {
+              updateData.meta = {
+                _yoast_wpseo_primary_category: String(rewrittenArticle.wpPrimaryCatId),
+                rank_math_primary_category: String(rewrittenArticle.wpPrimaryCatId),
+              };
+            }
             publishPromise = publisherMod.updatePost(existingWpPostId, updateData)
               .then(function (result) { return { wpPostId: result.wpPostId, wpPostUrl: result.wpPostUrl, wpImageId: draft.wp_media_id || null, isUpdate: true }; });
           } else {
@@ -5791,9 +5812,15 @@ function createApiRouter(deps) {
 
   // POST /api/drafts/:id/recommend — compute routing recommendations for a
   // single draft by re-running the classifier + publish rule engine against
-  // the current admin config. Read-only: this does NOT mutate the draft or
-  // its overrides. The client can then offer an "apply" action that saves
-  // whatever the admin picks via the existing PUT /api/drafts/:id path.
+  // the current admin config. Also auto-resolves classifier-suggested tag
+  // names to WP IDs (creating them on WP if missing, via resolveTagNames)
+  // so the Apply button on the frontend can actually fill the select.
+  //
+  // With ?resolveTags=true (default true), missing tag names are created
+  // on WP. This is a side-effect but one that matches what the publish
+  // pipeline already does — and without it, Apply can only select tags
+  // that happen to be in wp_taxonomy_cache, which silently drops the
+  // classifier's new suggestions. Admin can opt out with ?resolveTags=false.
   //
   // Reuses:
   //   - classifier.scoreLocally()          — layer-1 keyword scoring
@@ -5801,10 +5828,8 @@ function createApiRouter(deps) {
   //   - classifier.getCategoryWpIdMap()     — slug → WP category id
   //   - classifier.getTagWpIdMap()          — slug → WP tag id
   //   - resolveTaxonomy()                   — full rule-engine fallback chain
-  //
-  // Nothing invented here — it's a diagnostic/advisory wrapper around the
-  // same functions the rewrite + publish workers call.
-  router.post('/drafts/:id/recommend', function (req, res) {
+  //   - wpTaxonomy.resolveTagNames()        — auto-create + cache tags on WP
+  router.post('/drafts/:id/recommend', async function (req, res) {
     try {
       var draftId = parseInt(req.params.id, 10);
       if (!draftId || draftId < 1) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
@@ -5833,7 +5858,24 @@ function createApiRouter(deps) {
       // Layer 1 — local keyword scoring
       var localScore = classifier.scoreLocally(scoreTitle, scoreText, scoreDomain, scoreSourceCat);
 
-      // Slug → WP ID maps (already resolve against wp_taxonomy_cache)
+      // Auto-resolve classifier-suggested tags against WP. This creates
+      // missing tags on WP (via the existing resolveTagNames path the
+      // rewrite pipeline uses) and caches them in wp_taxonomy_cache so the
+      // subsequent map lookups below find them. Opt-out via ?resolveTags=false.
+      var shouldResolveTags = req.query.resolveTags !== 'false';
+      if (shouldResolveTags && localScore.tags && localScore.tags.length > 0) {
+        try {
+          var _wpTax = require('../modules/wp-taxonomy');
+          await _wpTax.resolveTagNames(db, getConfig(), localScore.tags, {
+            logger: logger, maxCreatePerCall: 20
+          });
+        } catch (tagErr) {
+          logger.warn('api', 'recommend: tag auto-resolve failed (non-fatal): ' + tagErr.message);
+        }
+      }
+
+      // Slug → WP ID maps (already resolve against wp_taxonomy_cache — now
+      // includes any tags we just auto-created above)
       var catMap = classifier.getCategoryWpIdMap();
       var authMap = classifier.getAuthorWpIdMap();
       var tagMap = classifier.getTagWpIdMap();
