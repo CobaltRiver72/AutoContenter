@@ -8877,7 +8877,17 @@
     var out = '';
     var hasAny = false;
 
-    // 1. Defaults
+    // 1. Authors Overview — per-author roll-up of everything routed to them
+    //    (beats, mapped categories, publish rules by match type, tag coverage,
+    //    keyword count + top). Shown first because it's the admin's primary
+    //    mental model: "who writes what".
+    var authorsOverview = _renderAuthorsOverview(cfg);
+    if (authorsOverview) {
+      hasAny = true;
+      out += authorsOverview;
+    }
+
+    // 2. Defaults
     var defs = cfg.defaults || {};
     var defKeys = Object.keys(defs);
     if (defKeys.length) {
@@ -8891,7 +8901,7 @@
       );
     }
 
-    // 2. Authors
+    // 3. Authors
     var authors = cfg.authors || [];
     if (authors.length) {
       hasAny = true;
@@ -9031,6 +9041,203 @@
 
   function _configCard(title, body) {
     return '<div class="cfg-card"><div class="cfg-card-title">' + escapeHtml(title) + '</div>' + body + '</div>';
+  }
+
+  // ─── Authors Overview ────────────────────────────────────────────────────
+  // Per-author roll-up: cross-references authors[] with categories[],
+  // routing_hints.category_to_author, and publish_rules[] to build a
+  // "who writes what" dashboard. Shows each author as a box with:
+  //   - their beats (self-declared)
+  //   - categories with their username as default_author_username
+  //   - publish rules targeting them, split into domain-based + title-based
+  //   - union of all tag_slugs they're assigned
+  //   - keyword count + top 10 scoring keywords
+  function _renderAuthorsOverview(cfg) {
+    var authors = cfg.authors || [];
+    if (!authors.length) return '';
+
+    var categories = cfg.categories || [];
+    var publishRules = cfg.publish_rules || [];
+    var routingHints = cfg.routing_hints || {};
+    var catToAuthor = routingHints.category_to_author || {};
+
+    // Build a reverse index: username → { mappedCategories, domainRules, titleRules, srcCatRules, tagsUnion, routingHintCats }
+    var byAuthor = {};
+    authors.forEach(function (a) {
+      byAuthor[a.username] = {
+        mappedCategories: [],
+        routingHintCats:  [],
+        domainRules:      [],
+        titleRules:       [],
+        srcCatRules:      [],
+        tagsUnion:        {},
+      };
+    });
+
+    // Categories with default_author_username → mappedCategories
+    categories.forEach(function (c) {
+      if (c.default_author_username && byAuthor[c.default_author_username]) {
+        byAuthor[c.default_author_username].mappedCategories.push(c.slug);
+      }
+    });
+
+    // routing_hints.category_to_author — category → author fallback
+    Object.keys(catToAuthor).forEach(function (catSlug) {
+      var author = catToAuthor[catSlug];
+      if (byAuthor[author]) byAuthor[author].routingHintCats.push(catSlug);
+    });
+
+    // publish_rules — split by match type
+    publishRules.forEach(function (r) {
+      var a = r.assign || {};
+      var m = r.match || {};
+      if (!a.author_username || !byAuthor[a.author_username]) return;
+      var bucket = byAuthor[a.author_username];
+      var ruleSummary = {
+        key:        r.key,
+        priority:   r.priority || 0,
+        categories: (a.category_slugs || []).slice(),
+        tags:       (a.tag_slugs || []).slice(),
+      };
+      if (m.source_domain) {
+        ruleSummary.domain = m.source_domain;
+        bucket.domainRules.push(ruleSummary);
+      } else if (m.title_keyword) {
+        ruleSummary.titleKeyword = m.title_keyword;
+        bucket.titleRules.push(ruleSummary);
+      } else if (m.source_category) {
+        ruleSummary.sourceCategory = m.source_category;
+        bucket.srcCatRules.push(ruleSummary);
+      }
+      // Union tags
+      (a.tag_slugs || []).forEach(function (t) { bucket.tagsUnion[t] = true; });
+    });
+
+    // Render each author box
+    var boxes = authors.map(function (a) {
+      var bucket = byAuthor[a.username];
+      var keywordsObj = a.keywords || {};
+      var keywordsCount = Object.keys(keywordsObj).length;
+
+      // Top 10 keywords sorted by score descending
+      var topKw = Object.keys(keywordsObj)
+        .sort(function (x, y) { return (keywordsObj[y] || 0) - (keywordsObj[x] || 0); })
+        .slice(0, 10);
+
+      var beats = (a.beats || []).slice();
+      var allTags = Object.keys(bucket.tagsUnion).sort();
+      var domainList = bucket.domainRules.slice().sort(function (x, y) { return y.priority - x.priority; });
+      var titleList = bucket.titleRules.slice().sort(function (x, y) { return y.priority - x.priority; });
+
+      // Color-code by author so each box is visually distinct
+      var hue = _hashToHue(a.username);
+
+      var html = '<div class="author-box" style="border-left-color: hsl(' + hue + ', 70%, 55%);">';
+      html += '<div class="author-box-header">';
+      html += '<div class="author-box-name">' + escapeHtml(a.display_name || a.username) + '</div>';
+      html += '<div class="author-box-slug">@' + escapeHtml(a.username) + '</div>';
+      html += '</div>';
+
+      html += '<div class="author-box-body">';
+
+      // Row: Beats
+      html += _authorRow('Beats', beats.length
+        ? beats.map(function (b) { return '<span class="author-chip author-chip-beat">' + escapeHtml(b) + '</span>'; }).join('')
+        : '<em class="author-empty">none</em>');
+
+      // Row: Mapped categories (primary)
+      var allCats = bucket.mappedCategories.slice();
+      bucket.routingHintCats.forEach(function (c) { if (allCats.indexOf(c) === -1) allCats.push(c); });
+      html += _authorRow('Categories', allCats.length
+        ? allCats.map(function (c) { return '<span class="author-chip author-chip-cat">' + escapeHtml(c) + '</span>'; }).join('')
+        : '<em class="author-empty">none</em>');
+
+      // Row: Domain rules
+      if (domainList.length) {
+        var domainHtml = domainList.map(function (r) {
+          var tagStr = r.tags.length ? ' <small>+ tags: ' + r.tags.map(escapeHtml).join(', ') + '</small>' : '';
+          var catStr = r.categories.length ? ' → ' + r.categories.map(escapeHtml).join(', ') : '';
+          return '<div class="author-rule-line">' +
+            '<span class="author-prio-pill">P' + r.priority + '</span> ' +
+            '<code>' + escapeHtml(r.domain) + '</code>' + catStr + tagStr +
+            '</div>';
+        }).join('');
+        html += _authorRow('Domain rules (' + domainList.length + ')', domainHtml);
+      }
+
+      // Row: Title keyword rules
+      if (titleList.length) {
+        var titleHtml = titleList.map(function (r) {
+          var tagStr = r.tags.length ? ' <small>+ tags: ' + r.tags.map(escapeHtml).join(', ') + '</small>' : '';
+          var catStr = r.categories.length ? ' → ' + r.categories.map(escapeHtml).join(', ') : '';
+          return '<div class="author-rule-line">' +
+            '<span class="author-prio-pill">P' + r.priority + '</span> ' +
+            'title ~ "<code>' + escapeHtml(r.titleKeyword) + '</code>"' + catStr + tagStr +
+            '</div>';
+        }).join('');
+        html += _authorRow('Title rules (' + titleList.length + ')', titleHtml);
+      }
+
+      // Row: Source-category rules
+      if (bucket.srcCatRules.length) {
+        var srcHtml = bucket.srcCatRules.map(function (r) {
+          var catStr = r.categories.length ? ' → ' + r.categories.map(escapeHtml).join(', ') : '';
+          return '<div class="author-rule-line">' +
+            '<span class="author-prio-pill">P' + r.priority + '</span> ' +
+            'src_cat ~ "<code>' + escapeHtml(r.sourceCategory) + '</code>"' + catStr +
+            '</div>';
+        }).join('');
+        html += _authorRow('Source-category rules', srcHtml);
+      }
+
+      // Row: Tag coverage
+      if (allTags.length) {
+        html += _authorRow('Tags handled', allTags.map(function (t) {
+          return '<span class="author-chip author-chip-tag">' + escapeHtml(t) + '</span>';
+        }).join(''));
+      }
+
+      // Row: Keyword scoring
+      var kwLabel = keywordsCount + ' keywords';
+      var kwBody = keywordsCount
+        ? topKw.map(function (k) {
+            return '<span class="author-chip author-chip-kw">' + escapeHtml(k) + '<small>' + keywordsObj[k] + '</small></span>';
+          }).join('') + (keywordsCount > 10 ? ' <span class="author-empty">+' + (keywordsCount - 10) + ' more</span>' : '')
+        : '<em class="author-empty">no scoring dictionary</em>';
+      html += _authorRow(kwLabel, kwBody);
+
+      html += '</div></div>';
+      return html;
+    }).join('');
+
+    // Summary strip at the top
+    var totalRules = publishRules.length;
+    var totalMappedCats = categories.filter(function (c) { return !!c.default_author_username; }).length;
+    var summary =
+      '<div class="author-overview-summary">' +
+        '<strong>' + authors.length + '</strong> authors · ' +
+        '<strong>' + totalMappedCats + '</strong> category→author mappings · ' +
+        '<strong>' + totalRules + '</strong> publish rules' +
+      '</div>';
+
+    return _configCard('Authors Overview',
+      summary + '<div class="author-box-grid">' + boxes + '</div>'
+    );
+  }
+
+  function _authorRow(label, body) {
+    return '<div class="author-row">' +
+      '<div class="author-row-label">' + escapeHtml(label) + '</div>' +
+      '<div class="author-row-body">' + body + '</div>' +
+      '</div>';
+  }
+
+  // Stable color per username so each author box has its own hue.
+  // Not cryptographic — just a fast fold of char codes.
+  function _hashToHue(str) {
+    var hash = 0;
+    for (var i = 0; i < str.length; i++) hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+    return Math.abs(hash) % 360;
   }
 
   // ─── Shared helpers (Day 3) ──────────────────────────────────────────────
