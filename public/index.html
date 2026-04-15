@@ -676,9 +676,9 @@
             <!-- Taxonomy cache display (collapsed) -->
             <div id="wpTaxCacheWrap" style="display:none;margin-bottom:14px;">
               <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-xs btn-secondary" data-tax-tab="category" onclick="window.__showTaxTab('category')">Categories</button>
-                <button class="btn btn-xs btn-secondary" data-tax-tab="tag" onclick="window.__showTaxTab('tag')">Tags</button>
-                <button class="btn btn-xs btn-secondary" data-tax-tab="author" onclick="window.__showTaxTab('author')">Authors</button>
+                <button class="btn btn-xs btn-secondary" data-tax-tab="category" data-click="showTaxTab" data-tax="category">Categories</button>
+                <button class="btn btn-xs btn-secondary" data-tax-tab="tag" data-click="showTaxTab" data-tax="tag">Tags</button>
+                <button class="btn btn-xs btn-secondary" data-tax-tab="author" data-click="showTaxTab" data-tax="author">Authors</button>
               </div>
               <div id="wpTaxTableWrap" style="max-height:320px;overflow-y:auto;margin-top:4px;"></div>
             </div>
@@ -837,7 +837,7 @@
         <!-- Pipeline Engine Settings -->
         <div class="settings-form" id="pipeline-engine-section">
           <div class="settings-group">
-            <div class="settings-group-title" id="pipelineEngineToggle" style="cursor:pointer;user-select:none;" onclick="(function(){var b=document.getElementById('pipelineEngineBody');var a=document.getElementById('pipelineEngineArrow');if(b){b.style.display=b.style.display==='none'?'':'none';a.textContent=b.style.display===''?'▼':'▶';}})()">
+            <div class="settings-group-title" id="pipelineEngineToggle" style="cursor:pointer;user-select:none;" data-click="togglePipelineEngine">
               Pipeline Engine &nbsp;<span id="pipelineEngineArrow" style="font-size:10px;color:var(--text-muted);">▶</span>
             </div>
             <div id="pipelineEngineBody" style="display:none;">
@@ -1940,6 +1940,6 @@
   </div>
 
   <script src="/js/lucide.min.js"></script>
-  <script src="/js/dashboard.js?v=63"></script>
+  <script src="/js/dashboard.js?v=64"></script>
 </body>
 </html>
