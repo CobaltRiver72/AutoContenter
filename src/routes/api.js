@@ -5697,15 +5697,86 @@ function createApiRouter(deps) {
   // Runs the exact same methods the scheduler calls on every tick. Gates
   // (AUTO_REWRITE_ENABLED, AUTOPILOT_ENABLED, rate limits, quality filters)
   // still apply, so the logs show real production behaviour.
+  //
+  // Before invoking the loops this also runs a 6-stage filter drop-off
+  // diagnostic against the rewrite selector, so when the loop finds zero
+  // candidates the UI can point at the exact filter that excluded them.
   router.post('/autopilot/run-now', async function (req, res) {
     var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
     if (!pipeline) {
       return res.status(500).json({ ok: false, error: 'scheduler not initialised' });
     }
+    var db = req.app.locals.db;
     var autoRw = cfgGet('AUTO_REWRITE_ENABLED');
     var autoPub = cfgGet('AUTOPILOT_ENABLED');
     var gateSummary = 'rewrite=' + autoRw + ' publish=' + autoPub;
     logger.info('autopilot', 'Run-Now triggered by user (' + gateSummary + ')');
+
+    // ─── Filter drop-off diagnostic ─────────────────────────────────────────
+    // Runs COUNT(DISTINCT cluster_id) against the same tables the rewrite
+    // selector uses, adding one filter per stage. Reveals which filter is
+    // cutting candidates to zero. Matches pipeline.js _rewriteLoop selector
+    // semantics (pipeline.js:257-274).
+    var diagnostic = { stages: [], biggestDrop: null, error: null };
+    try {
+      var minSources = parseInt(cfgGet('MIN_SOURCES_THRESHOLD'), 10);
+      if (isNaN(minSources) || minSources < 1) minSources = 2;
+      var minSim = parseFloat(cfgGet('AUTOPILOT_MIN_SIMILARITY'));
+      if (isNaN(minSim)) minSim = 0.30;
+
+      var base = "SELECT COUNT(DISTINCT d.cluster_id) AS n FROM drafts d " +
+        "JOIN clusters c ON d.cluster_id = c.id " +
+        "WHERE d.status='draft' AND c.status='queued' AND d.cluster_role='primary'";
+      var F_MODE = " AND d.mode IN ('auto','manual_import')";
+      var F_SOURCES = " AND c.article_count >= ?";
+      var F_SIM = " AND (c.avg_similarity IS NULL OR c.avg_similarity >= ?)";
+      var F_LOCK = " AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now'))";
+      var F_NOSIB = " AND NOT EXISTS (SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
+        "AND d2.status='fetching' AND d2.mode IN ('auto','manual_import'))";
+
+      var stages = [
+        { key: 'pending_primary',     sql: base,                                                  params: [],                     note: 'baseline: draft + queued + primary' },
+        { key: 'mode_auto',           sql: base + F_MODE,                                         params: [],                     note: "mode IN (auto, manual_import)" },
+        { key: 'min_sources',         sql: base + F_MODE + F_SOURCES,                             params: [minSources],           note: 'article_count >= ' + minSources },
+        { key: 'min_similarity',      sql: base + F_MODE + F_SOURCES + F_SIM,                     params: [minSources, minSim],   note: 'avg_similarity >= ' + minSim },
+        { key: 'not_locked',          sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK,            params: [minSources, minSim],   note: 'primary draft not locked' },
+        { key: 'no_sibling_fetching', sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK + F_NOSIB,  params: [minSources, minSim],   note: 'no sibling still in fetching' },
+      ];
+
+      for (var i = 0; i < stages.length; i++) {
+        var stmt = db.prepare(stages[i].sql);
+        var row = stmt.get.apply(stmt, stages[i].params);
+        diagnostic.stages.push({ stage: stages[i].key, count: (row && row.n) || 0, note: stages[i].note });
+      }
+
+      for (var j = 1; j < diagnostic.stages.length; j++) {
+        var drop = diagnostic.stages[j - 1].count - diagnostic.stages[j].count;
+        if (drop > 0 && (!diagnostic.biggestDrop || drop > diagnostic.biggestDrop.drop)) {
+          diagnostic.biggestDrop = {
+            from: diagnostic.stages[j - 1].stage,
+            to: diagnostic.stages[j].stage,
+            fromCount: diagnostic.stages[j - 1].count,
+            toCount: diagnostic.stages[j].count,
+            drop: drop,
+            filter: diagnostic.stages[j].note,
+          };
+        }
+      }
+
+      var summary = diagnostic.stages.map(function (s) { return s.stage + '=' + s.count; }).join(' -> ');
+      logger.info('autopilot', 'Run-Now diagnostic: ' + summary);
+      if (diagnostic.biggestDrop) {
+        var bd = diagnostic.biggestDrop;
+        logger.info('autopilot',
+          'Run-Now biggest drop: ' + bd.from + '(' + bd.fromCount + ') -> ' + bd.to + '(' + bd.toCount + ') ' +
+          '[-' + bd.drop + '] filter: ' + bd.filter);
+      } else if (diagnostic.stages[0].count === 0) {
+        logger.info('autopilot', 'Run-Now diagnostic: no clusters match baseline (nothing pending to rewrite)');
+      }
+    } catch (diagErr) {
+      diagnostic.error = diagErr.message;
+      logger.warn('autopilot', 'Run-Now diagnostic failed: ' + diagErr.message);
+    }
 
     var startStats = Object.assign({}, pipeline.stats || {});
     var errors = [];
@@ -5737,6 +5808,7 @@ function createApiRouter(deps) {
       ok: errors.length === 0,
       gates: { rewriteEnabled: String(autoRw) === 'true', publishEnabled: String(autoPub) === 'true' },
       delta: delta,
+      diagnostic: diagnostic,
       errors: errors,
     });
   });

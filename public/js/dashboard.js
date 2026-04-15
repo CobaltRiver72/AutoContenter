@@ -10530,12 +10530,28 @@
       .then(function (res) {
         var d = res && res.delta ? res.delta : {};
         var gates = res && res.gates ? res.gates : {};
+        var diag = res && res.diagnostic ? res.diagnostic : null;
         var summary = 'rewrites:' + (d.rewritesCompleted || 0) + '/' + (d.rewritesStarted || 0) +
                       ' publishes:' + (d.publishesCompleted || 0) +
-                      ' (rewrite gate ' + (gates.rewriteEnabled ? 'ON' : 'OFF') +
-                      ', publish gate ' + (gates.publishEnabled ? 'ON' : 'OFF') + ')';
+                      ' (rewrite ' + (gates.rewriteEnabled ? 'ON' : 'OFF') +
+                      ', publish ' + (gates.publishEnabled ? 'ON' : 'OFF') + ')';
         var level = (res && res.errors && res.errors.length) ? 'error' : 'success';
         showToast('Run Now: ' + summary, level);
+
+        // If rewrites=0 and we have diagnostic data, point at the biggest drop.
+        if (diag && !d.rewritesStarted) {
+          if (diag.biggestDrop) {
+            var bd = diag.biggestDrop;
+            showToast(
+              'Blocker: ' + bd.from + '(' + bd.fromCount + ') → ' + bd.to + '(' + bd.toCount + ') ' +
+              '— ' + bd.filter,
+              'warn'
+            );
+          } else if (diag.stages && diag.stages[0] && diag.stages[0].count === 0) {
+            showToast('No pending primary drafts in queued clusters — check extraction pipeline', 'warn');
+          }
+        }
+
         loadAutopilotLogs();
         loadAutopilotStatus();
         loadAutoRewriteStatus();
