@@ -8365,6 +8365,7 @@
   var _bulkImportSelectedFile = null;
   var _bulkImportPreviewId = null;
   var _bulkImportEnabled = false;
+  var _lastSnapshotList = [];
 
   function initBulkImport() {
     if ($('bulk-import-section')._wired) {
@@ -8612,9 +8613,15 @@
         window.__closeBulkImportModal();
         _bulkImportPreviewId = null;
         _showUndoToast(resp);
+        // Refresh EVERY section that might have changed. forceApiRefresh
+        // just invalidates the cache; we also need to re-fetch + re-render.
         _loadBulkImportSnapshots();
         forceApiRefresh('/api/settings');
         forceApiRefresh('/api/publish-rules');
+        forceApiRefresh('/api/wp/taxonomy');
+        if (typeof loadPublishRules === 'function') loadPublishRules();
+        if (typeof loadWPPublishingSettings === 'function') loadWPPublishingSettings();
+        if (typeof loadWPTaxonomy === 'function') loadWPTaxonomy();
       })
       .catch(function (err) {
         btn.disabled = false;
@@ -8626,9 +8633,17 @@
 
   function _showUndoToast(resp) {
     var sum = resp.summary || {};
-    var total = (sum.defaults_changed || 0) + (sum.authors_added || 0) + (sum.authors_updated || 0) +
-                (sum.categories_added || 0) + (sum.categories_updated || 0) + (sum.tags_changed || 0) +
-                (sum.routing_hints_changed || 0) + (sum.publish_rules_added || 0) + (sum.publish_rules_updated || 0);
+    var parts = [];
+    if (sum.authors_added || sum.authors_updated)
+      parts.push((sum.authors_added + sum.authors_updated) + ' authors');
+    if (sum.categories_added || sum.categories_updated)
+      parts.push((sum.categories_added + sum.categories_updated) + ' categories');
+    if (sum.tags_changed) parts.push(sum.tags_changed + ' tags');
+    if (sum.publish_rules_added || sum.publish_rules_updated)
+      parts.push((sum.publish_rules_added + sum.publish_rules_updated) + ' rules');
+    if (sum.defaults_changed) parts.push(sum.defaults_changed + ' defaults');
+    if (sum.routing_hints_changed) parts.push(sum.routing_hints_changed + ' routing hints');
+    var breakdown = parts.length ? parts.join(' · ') : 'nothing changed';
 
     var container = $('toastContainer');
     if (!container) return;
@@ -8637,8 +8652,9 @@
     toast.innerHTML =
       '<div style="display:flex;align-items:center;gap:12px;">' +
         '<div>' +
-          '<div style="font-weight:600;">Config imported</div>' +
-          '<div style="font-size:11px;opacity:0.85;">' + total + ' items applied. Snapshot #' + resp.snapshot_id + '.</div>' +
+          '<div style="font-weight:600;">\u2713 Config imported</div>' +
+          '<div style="font-size:11px;opacity:0.85;">' + escapeHtml(breakdown) + '</div>' +
+          '<div style="font-size:10px;opacity:0.6;margin-top:2px;">Snapshot #' + resp.snapshot_id + ' captured the previous state</div>' +
         '</div>' +
         '<button class="btn btn-xs btn-secondary bulk-undo-btn" type="button">Undo</button>' +
       '</div>';
@@ -8656,10 +8672,9 @@
       if (dismissed) return;
       undoBtn.disabled = true;
       undoBtn.textContent = 'Restoring...';
-      // Restore the snapshot the apply CREATED (which was the BEFORE state)
-      // Actually the apply returns its own NEW snapshot id; we restore that
-      // earlier baseline. Server returns snapshot_id = the snapshot it just
-      // captured before applying, so restoring it brings us back to pre-import.
+      // applyImport captures a snapshot BEFORE it mutates, so the
+      // snapshot_id in the response points to the pre-import state.
+      // Restoring it reverts the import cleanly.
       fetchApi('/api/config/import/rollback/' + snapshotId, { method: 'POST' })
         .then(function (r) {
           if (r.ok) {
@@ -8667,6 +8682,9 @@
             _loadBulkImportSnapshots();
             forceApiRefresh('/api/settings');
             forceApiRefresh('/api/publish-rules');
+            forceApiRefresh('/api/wp/taxonomy');
+            if (typeof loadPublishRules === 'function') loadPublishRules();
+            if (typeof loadWPPublishingSettings === 'function') loadWPPublishingSettings();
           } else {
             showToast('Undo failed: ' + (r.error || 'unknown'), 'error');
           }
@@ -8740,6 +8758,7 @@
     }
     fetchApi('/api/config/import/snapshots', { cacheMs: 0 })
       .then(function (resp) {
+        _lastSnapshotList = (resp && resp.data) || [];
         if (!resp.ok || !resp.data || resp.data.length === 0) {
           container.innerHTML = '<p class="placeholder-text" style="font-size:12px;">No snapshots yet.</p>';
           return;
@@ -8750,9 +8769,16 @@
           var when = s.created_at ? timeAgo(s.created_at + 'Z') : '';
           var byline = s.created_by ? ' · ' + escapeHtml(s.created_by) : '';
           var fname = s.import_filename ? ' · ' + escapeHtml(s.import_filename) : '';
+          // Human-readable label — "before_import_..." becomes "Undo import"
+          var humanLabel = s.label;
+          if (s.label.indexOf('before_import') === 0) {
+            humanLabel = '↶ Before import';
+          } else if (s.label.indexOf('factory_default') === 0) {
+            humanLabel = '⊘ Factory default';
+          }
           html += '<div class="bulk-snapshot-row">';
           html += '<span class="bulk-snapshot-id">#' + s.id + '</span>';
-          html += '<span class="bulk-snapshot-label">' + escapeHtml(s.label) + '</span>';
+          html += '<span class="bulk-snapshot-label" title="' + escapeHtml(s.label) + '">' + escapeHtml(humanLabel) + '</span>';
           html += '<span class="bulk-snapshot-meta">' + when + byline + fname + '</span>';
           html += '<button class="btn btn-xs btn-secondary" data-snapshot-restore="' + s.id + '">Restore</button>';
           html += '</div>';
@@ -8772,7 +8798,22 @@
   }
 
   function _bulkImportRestore(snapshotId) {
-    if (!confirm('Restore snapshot #' + snapshotId + '? This will replace your current import-managed settings and rules.\n\nNote: Categories and tags created in WordPress by previous imports will NOT be deleted — only your local config is restored.')) return;
+    // Snapshots labeled "before_import_*" represent the state BEFORE an
+    // import. Restoring them UNDOES that import. Make the confirm text
+    // crystal clear so admins don't click Restore expecting to "load" the
+    // imported rules.
+    var snap = (_lastSnapshotList || []).filter(function (s) { return s.id === snapshotId; })[0];
+    var label = snap ? snap.label : 'snapshot #' + snapshotId;
+    var msg = 'Revert to ' + label + '?\n\n';
+    if (label.indexOf('before_import') === 0) {
+      msg += 'This snapshot is the state BEFORE an import. Restoring it will UNDO that import — your imported rules, keyword dictionaries, and defaults will be replaced with their previous values.\n\n';
+    } else if (label.indexOf('factory_default') === 0) {
+      msg += 'This will reset import-managed settings to their initial state — all your imported rules and dictionaries will be cleared.\n\n';
+    } else {
+      msg += 'This will replace your current import-managed settings and rules with the ones in this snapshot.\n\n';
+    }
+    msg += 'Note: Categories/tags created on WordPress by previous imports will NOT be deleted — only your local routing config is restored.';
+    if (!confirm(msg)) return;
     fetchApi('/api/config/import/rollback/' + snapshotId, { method: 'POST' })
       .then(function (r) {
         if (r.ok) {
@@ -8780,6 +8821,9 @@
           _loadBulkImportSnapshots();
           forceApiRefresh('/api/settings');
           forceApiRefresh('/api/publish-rules');
+          forceApiRefresh('/api/wp/taxonomy');
+          if (typeof loadPublishRules === 'function') loadPublishRules();
+          if (typeof loadWPPublishingSettings === 'function') loadWPPublishingSettings();
         } else {
           showToast('Restore failed: ' + (r.error || 'unknown'), 'error');
         }
