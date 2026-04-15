@@ -5789,6 +5789,166 @@ function createApiRouter(deps) {
     }
   });
 
+  // POST /api/drafts/:id/recommend — compute routing recommendations for a
+  // single draft by re-running the classifier + publish rule engine against
+  // the current admin config. Read-only: this does NOT mutate the draft or
+  // its overrides. The client can then offer an "apply" action that saves
+  // whatever the admin picks via the existing PUT /api/drafts/:id path.
+  //
+  // Reuses:
+  //   - classifier.scoreLocally()          — layer-1 keyword scoring
+  //   - classifier.getAuthorWpIdMap()       — slug → WP user id
+  //   - classifier.getCategoryWpIdMap()     — slug → WP category id
+  //   - classifier.getTagWpIdMap()          — slug → WP tag id
+  //   - resolveTaxonomy()                   — full rule-engine fallback chain
+  //
+  // Nothing invented here — it's a diagnostic/advisory wrapper around the
+  // same functions the rewrite + publish workers call.
+  router.post('/drafts/:id/recommend', function (req, res) {
+    try {
+      var draftId = parseInt(req.params.id, 10);
+      if (!draftId || draftId < 1) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
+
+      var db = req.app.locals.db;
+      var classifier = req.app.locals.modules && req.app.locals.modules.classifier;
+      if (!classifier) return res.status(500).json({ ok: false, error: 'Classifier not loaded' });
+
+      var draft = db.prepare(
+        'SELECT id, source_url, source_domain, source_title, source_category, source_language, ' +
+        '  extracted_title, extracted_content, rewritten_title, rewritten_html, ' +
+        '  wp_category_ids, wp_primary_cat_id, wp_tag_ids, wp_author_id_override, wp_post_status_override ' +
+        'FROM drafts WHERE id = ?'
+      ).get(draftId);
+      if (!draft) return res.status(404).json({ ok: false, error: 'Draft not found' });
+
+      // Use the best-available title + text for scoring. Rewritten content
+      // is preferred when available (that's what actually publishes) but
+      // extracted source content is a fine fallback for drafts that haven't
+      // been rewritten yet.
+      var scoreTitle = draft.rewritten_title || draft.extracted_title || draft.source_title || '';
+      var scoreText  = (draft.rewritten_html || draft.extracted_content || '').replace(/<[^>]+>/g, ' ').slice(0, 4000);
+      var scoreDomain = draft.source_domain || '';
+      var scoreSourceCat = draft.source_category || '';
+
+      // Layer 1 — local keyword scoring
+      var localScore = classifier.scoreLocally(scoreTitle, scoreText, scoreDomain, scoreSourceCat);
+
+      // Slug → WP ID maps (already resolve against wp_taxonomy_cache)
+      var catMap = classifier.getCategoryWpIdMap();
+      var authMap = classifier.getAuthorWpIdMap();
+      var tagMap = classifier.getTagWpIdMap();
+
+      // Reverse maps so we can turn a WP ID back into a display name
+      var catById = {};
+      var authById = {};
+      var tagById = {};
+      try {
+        var catRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'category'").all();
+        for (var ci = 0; ci < catRows.length; ci++) catById[catRows[ci].wp_id] = catRows[ci];
+        var authRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'author'").all();
+        for (var ai = 0; ai < authRows.length; ai++) authById[authRows[ai].wp_id] = authRows[ai];
+        var tagRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'tag'").all();
+        for (var ti = 0; ti < tagRows.length; ti++) tagById[tagRows[ti].wp_id] = tagRows[ti];
+      } catch (e) { /* tolerate */ }
+
+      // Build the classifier's suggestion with resolved IDs + names
+      var classifierAuthorSlug = (localScore.author && localScore.author.username) || '';
+      var classifierCategorySlug = (localScore.category && localScore.category.key) || '';
+      var classifierAuthorId = classifierAuthorSlug ? (authMap[classifierAuthorSlug] || null) : null;
+      var classifierCategoryId = classifierCategorySlug ? (catMap[classifierCategorySlug] || null) : null;
+
+      var classifierTags = (localScore.tags || []).map(function (tagName) {
+        // Tags from scoreLocally are canonical display names (e.g. "IPL"),
+        // not slugs. Look them up by lowercased name in the cache map.
+        var lookup = tagMap[String(tagName).toLowerCase().trim()];
+        return {
+          name: tagName,
+          wp_id: lookup || null,
+          existed_on_wp: !!lookup,
+        };
+      });
+
+      var classifierSuggestion = {
+        author: classifierAuthorSlug ? {
+          slug: classifierAuthorSlug,
+          wp_id: classifierAuthorId,
+          display_name: (classifierAuthorId && authById[classifierAuthorId] && authById[classifierAuthorId].name) || classifierAuthorSlug,
+          score: localScore.author ? localScore.author.score : 0,
+          confident: localScore.author ? !!localScore.author.confident : false,
+          existed_on_wp: !!classifierAuthorId,
+        } : null,
+        category: classifierCategorySlug ? {
+          slug: classifierCategorySlug,
+          wp_id: classifierCategoryId,
+          display_name: (classifierCategoryId && catById[classifierCategoryId] && catById[classifierCategoryId].name) || classifierCategorySlug,
+          score: localScore.category ? localScore.category.score : 0,
+          confident: localScore.category ? !!localScore.category.confident : false,
+          existed_on_wp: !!classifierCategoryId,
+        } : null,
+        tags: classifierTags,
+        all_confident: !!localScore.allConfident,
+        match_reasons: localScore.matchReasons || [],
+      };
+
+      // Layer 3 — full publish rule engine fallback chain (same function
+      // the publisher uses at actual publish time, so this preview is
+      // guaranteed to match what would happen on Publish click).
+      var { resolveTaxonomy } = require('../utils/publish-rule-engine');
+      var taxonomy = resolveTaxonomy(draft, db, getConfig());
+
+      // Enrich the rule-engine result with display names
+      var resolvedCategoryNames = (taxonomy.categoryIds || []).map(function (id) {
+        return (catById[id] && catById[id].name) || ('#' + id);
+      });
+      var resolvedTagNames = (taxonomy.tagIds || []).map(function (id) {
+        return (tagById[id] && tagById[id].name) || ('#' + id);
+      });
+      var resolvedAuthorName = (taxonomy.authorId && authById[taxonomy.authorId] && authById[taxonomy.authorId].name) || ('#' + (taxonomy.authorId || '?'));
+      var resolvedPrimaryCategoryName = (taxonomy.primaryCategoryId && catById[taxonomy.primaryCategoryId] && catById[taxonomy.primaryCategoryId].name) || null;
+
+      // Figure out which layer of the resolution chain actually won so the
+      // UI can explain WHY those values were picked.
+      var source;
+      if (draft.wp_author_id_override || (draft.wp_category_ids && draft.wp_category_ids !== '[]')) {
+        source = 'draft_override';
+      } else {
+        // Check if any publish rule actually matched
+        try {
+          var rulesCount = db.prepare("SELECT COUNT(*) AS cnt FROM publish_rules WHERE is_active = 1").get();
+          source = (rulesCount && rulesCount.cnt > 0) ? 'rule_engine' : 'global_default';
+        } catch (e) { source = 'global_default'; }
+      }
+
+      res.json({
+        ok: true,
+        draft_id: draftId,
+        draft_summary: {
+          title: scoreTitle,
+          domain: scoreDomain,
+          source_category: scoreSourceCat,
+          has_rewritten: !!draft.rewritten_html,
+          has_override: !!(draft.wp_author_id_override || draft.wp_category_ids || draft.wp_tag_ids),
+        },
+        classifier_suggestion: classifierSuggestion,
+        resolved: {
+          source: source,
+          author_id: taxonomy.authorId || null,
+          author_name: resolvedAuthorName,
+          category_ids: taxonomy.categoryIds || [],
+          category_names: resolvedCategoryNames,
+          primary_category_id: taxonomy.primaryCategoryId || null,
+          primary_category_name: resolvedPrimaryCategoryName,
+          tag_ids: taxonomy.tagIds || [],
+          tag_names: resolvedTagNames,
+          post_status: taxonomy.postStatus || null,
+        },
+      });
+    } catch (err) {
+      logger.error('api', 'drafts/:id/recommend failed: ' + (err.stack || err.message));
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════════════════
   // BULK CONFIG IMPORT — Phase B endpoints (gated by BULK_IMPORT_ENABLED flag)
   // ═══════════════════════════════════════════════════════════════════════

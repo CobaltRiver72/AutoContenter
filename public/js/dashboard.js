@@ -6203,6 +6203,40 @@
       };
     }
 
+    // AI Recommendation button — calls POST /api/drafts/:id/recommend which
+    // re-runs the classifier + resolveTaxonomy against the current draft
+    // and returns a live preview of who would author/categorize this article
+    // if the Publish button were clicked right now.
+    var recommendBtn = $('editor-recommend-btn');
+    if (recommendBtn) {
+      recommendBtn.onclick = function () {
+        if (!currentDraftId) return;
+        var resultEl = $('editor-recommend-result');
+        recommendBtn.disabled = true;
+        recommendBtn.innerHTML = '<svg data-lucide="loader" class="icon"></svg> Analyzing...';
+        _refreshIcons();
+
+        fetchApi('/api/drafts/' + currentDraftId + '/recommend', { method: 'POST', cacheMs: 0 })
+          .then(function (resp) {
+            recommendBtn.disabled = false;
+            recommendBtn.innerHTML = '<svg data-lucide="sparkles" class="icon"></svg> Get AI Recommendation';
+            _refreshIcons();
+            if (!resp.ok) {
+              showToast('Recommendation failed: ' + (resp.error || 'unknown'), 'error');
+              return;
+            }
+            _renderEditorRecommendation(resp);
+            if (resultEl) resultEl.style.display = '';
+          })
+          .catch(function (err) {
+            recommendBtn.disabled = false;
+            recommendBtn.innerHTML = '<svg data-lucide="sparkles" class="icon"></svg> Get AI Recommendation';
+            _refreshIcons();
+            showToast('Recommendation failed: ' + err.message, 'error');
+          });
+      };
+    }
+
     // Queue for Autopilot button — saves WP overrides then marks draft ready
     var queueBtn = $('editorQueueBtn');
     if (queueBtn) {
@@ -6243,6 +6277,159 @@
           });
       };
     }
+  }
+
+  // Renders the POST /api/drafts/:id/recommend response into the
+  // #editor-recommend-result container. Shows two sections:
+  //   1. Classifier's raw suggestion (what the keyword scoring thinks)
+  //   2. Resolved routing (what would ACTUALLY happen at publish time,
+  //      which accounts for per-draft overrides + matching publish rules +
+  //      slug-based fallbacks + numeric global defaults)
+  // Adds an "Apply to override selects" button that writes the suggestion
+  // into the form fields (WP categories/tags/author) WITHOUT saving.
+  function _renderEditorRecommendation(resp) {
+    var resultEl = $('editor-recommend-result');
+    if (!resultEl) return;
+
+    var cs = resp.classifier_suggestion || {};
+    var rv = resp.resolved || {};
+
+    var sourceLabel;
+    if (rv.source === 'draft_override') sourceLabel = 'Per-draft override active';
+    else if (rv.source === 'rule_engine') sourceLabel = 'Will use publish rule match / fallback';
+    else sourceLabel = 'Will use global defaults';
+
+    var html = '';
+
+    // Header: what the publisher would actually do right now
+    html += '<div class="recommend-resolved">';
+    html += '<div class="recommend-section-title"><svg data-lucide="target" class="icon"></svg> What Publish would do right now</div>';
+    html += '<div class="recommend-source-pill">' + escapeHtml(sourceLabel) + '</div>';
+    html += '<table class="recommend-table"><tbody>';
+    html += '<tr><td>Author</td><td><strong>' + escapeHtml(rv.author_name || '(none)') + '</strong>' +
+      (rv.author_id ? ' <span class="recommend-id">#' + rv.author_id + '</span>' : '') + '</td></tr>';
+    html += '<tr><td>Categories</td><td>' +
+      (rv.category_names && rv.category_names.length
+        ? rv.category_names.map(function (n) { return '<strong>' + escapeHtml(n) + '</strong>'; }).join(', ')
+        : '<em>(none)</em>') + '</td></tr>';
+    if (rv.primary_category_name) {
+      html += '<tr><td>Primary</td><td><strong>' + escapeHtml(rv.primary_category_name) + '</strong> <small>(drives the permalink)</small></td></tr>';
+    }
+    html += '<tr><td>Tags</td><td>' +
+      (rv.tag_names && rv.tag_names.length
+        ? rv.tag_names.map(function (n) { return '<span class="recommend-chip">' + escapeHtml(n) + '</span>'; }).join(' ')
+        : '<em>(none)</em>') + '</td></tr>';
+    if (rv.post_status) {
+      html += '<tr><td>Status</td><td><strong>' + escapeHtml(rv.post_status) + '</strong> <small>(override)</small></td></tr>';
+    }
+    html += '</tbody></table>';
+    html += '</div>';
+
+    // Classifier suggestion (the raw Layer-1 scoring result)
+    html += '<div class="recommend-classifier">';
+    html += '<div class="recommend-section-title"><svg data-lucide="brain" class="icon"></svg> Classifier suggestion <small>(keyword scoring)</small></div>';
+    html += '<table class="recommend-table"><tbody>';
+    if (cs.author) {
+      var authConf = cs.author.confident ? '<span class="recommend-badge recommend-ok">confident</span>' : '<span class="recommend-badge recommend-weak">low confidence</span>';
+      var authCache = cs.author.existed_on_wp ? '' : ' <span class="recommend-badge recommend-warn">not in WP cache</span>';
+      html += '<tr><td>Author</td><td><strong>' + escapeHtml(cs.author.display_name) + '</strong> ' +
+        '<code>@' + escapeHtml(cs.author.slug) + '</code> ' +
+        '<span class="recommend-score">score ' + cs.author.score + '</span> ' + authConf + authCache + '</td></tr>';
+    } else {
+      html += '<tr><td>Author</td><td><em>No confident match</em></td></tr>';
+    }
+    if (cs.category) {
+      var catConf = cs.category.confident ? '<span class="recommend-badge recommend-ok">confident</span>' : '<span class="recommend-badge recommend-weak">low confidence</span>';
+      var catCache = cs.category.existed_on_wp ? '' : ' <span class="recommend-badge recommend-warn">not in WP cache</span>';
+      html += '<tr><td>Category</td><td><strong>' + escapeHtml(cs.category.display_name) + '</strong> ' +
+        '<code>' + escapeHtml(cs.category.slug) + '</code> ' +
+        '<span class="recommend-score">score ' + cs.category.score + '</span> ' + catConf + catCache + '</td></tr>';
+    } else {
+      html += '<tr><td>Category</td><td><em>No confident match</em></td></tr>';
+    }
+    if (cs.tags && cs.tags.length) {
+      html += '<tr><td>Tags</td><td>' + cs.tags.map(function (t) {
+        var cls = t.existed_on_wp ? 'recommend-chip recommend-chip-ok' : 'recommend-chip recommend-chip-new';
+        return '<span class="' + cls + '">' + escapeHtml(t.name) + '</span>';
+      }).join(' ') + '</td></tr>';
+    } else {
+      html += '<tr><td>Tags</td><td><em>None matched</em></td></tr>';
+    }
+    if (cs.match_reasons && cs.match_reasons.length) {
+      html += '<tr><td>Why</td><td class="recommend-reasons">' +
+        cs.match_reasons.map(function (r) { return escapeHtml(r); }).join(' &middot; ') + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    html += '</div>';
+
+    // Apply button
+    html += '<div class="recommend-actions">';
+    html += '<button class="btn btn-sm btn-primary" id="editor-recommend-apply-btn" type="button">' +
+      '<svg data-lucide="check" class="icon"></svg> Apply to Override Selects</button>';
+    html += '<small style="color:var(--text-tertiary);font-size:11px;">Fills the category/tag/author selects below. You still have to click <strong>Save Override</strong>.</small>';
+    html += '</div>';
+
+    resultEl.innerHTML = html;
+    _refreshIcons();
+
+    // Wire the apply button
+    var applyBtn = $('editor-recommend-apply-btn');
+    if (applyBtn) {
+      applyBtn.onclick = function () {
+        _applyRecommendationToSelects(resp);
+      };
+    }
+  }
+
+  // Fills the WP override selects with the classifier's suggestion + the
+  // rule engine's tag matches. Does NOT save — admin still needs to click
+  // "Save Override" to persist. Skips any ID that isn't in the loaded
+  // select options (means taxonomy isn't synced for that one).
+  function _applyRecommendationToSelects(resp) {
+    var cs = resp.classifier_suggestion || {};
+    var rv = resp.resolved || {};
+
+    // Categories — prefer the classifier's single suggestion (with its slug→ID
+    // resolution) but also accept the rule engine's list if classifier empty
+    var catSel = $('editor-wp-categories');
+    var primSel = $('editor-wp-primary-cat');
+    var chosenCatIds = [];
+    if (cs.category && cs.category.wp_id) {
+      chosenCatIds = [cs.category.wp_id];
+    } else if (rv.category_ids && rv.category_ids.length) {
+      chosenCatIds = rv.category_ids.slice();
+    }
+    if (catSel && chosenCatIds.length) {
+      Array.from(catSel.options).forEach(function (o) {
+        o.selected = chosenCatIds.indexOf(Number(o.value)) !== -1;
+      });
+    }
+    if (primSel && chosenCatIds.length) {
+      primSel.value = String(chosenCatIds[0]);
+    }
+
+    // Tags — use the classifier's matched tags (converted to WP ids where possible)
+    var tagSel = $('editor-wp-tags');
+    var chosenTagIds = (cs.tags || [])
+      .filter(function (t) { return t.wp_id; })
+      .map(function (t) { return t.wp_id; });
+    if (chosenTagIds.length === 0 && rv.tag_ids && rv.tag_ids.length) {
+      chosenTagIds = rv.tag_ids.slice();
+    }
+    if (tagSel && chosenTagIds.length) {
+      Array.from(tagSel.options).forEach(function (o) {
+        o.selected = chosenTagIds.indexOf(Number(o.value)) !== -1;
+      });
+    }
+
+    // Author — prefer classifier slug-resolved ID, fall back to rule-engine's
+    var authSel = $('editor-wp-author');
+    var chosenAuthId = (cs.author && cs.author.wp_id) || rv.author_id || null;
+    if (authSel && chosenAuthId) {
+      authSel.value = String(chosenAuthId);
+    }
+
+    showToast('Recommendation applied to override selects. Click "Save Override" to persist.', 'success');
   }
 
   function saveEditorSettings() {
