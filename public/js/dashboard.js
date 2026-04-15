@@ -6280,16 +6280,17 @@
   }
 
   // Renders the POST /api/drafts/:id/recommend response into the
-  // #editor-recommend-result container. Shows two sections:
-  //   1. Classifier's raw suggestion (what the keyword scoring thinks)
-  //   2. Resolved routing (what would ACTUALLY happen at publish time,
-  //      which accounts for per-draft overrides + matching publish rules +
-  //      slug-based fallbacks + numeric global defaults)
-  // Adds an "Apply to override selects" button that writes the suggestion
-  // into the form fields (WP categories/tags/author) WITHOUT saving.
+  // #editor-recommend-result container. Each card has its OWN Apply button
+  // so the admin explicitly chooses which source to use — resolved routing
+  // (publish-rule engine) vs. classifier suggestion (raw keyword scoring).
+  // No mixing, no "best-guess" fallback between sources. Admin picks.
   function _renderEditorRecommendation(resp) {
     var resultEl = $('editor-recommend-result');
     if (!resultEl) return;
+
+    // Cache the response so the Apply buttons can read it without
+    // capturing the whole resp object in their click closures.
+    _lastRecommendation = resp;
 
     var cs = resp.classifier_suggestion || {};
     var rv = resp.resolved || {};
@@ -6301,9 +6302,13 @@
 
     var html = '';
 
-    // Header: what the publisher would actually do right now
+    // ─── Card 1: What Publish would do right now (rule-engine resolution) ───
     html += '<div class="recommend-resolved">';
-    html += '<div class="recommend-section-title"><svg data-lucide="target" class="icon"></svg> What Publish would do right now</div>';
+    html += '<div class="recommend-section-title">';
+    html += '<svg data-lucide="target" class="icon"></svg> What Publish would do right now';
+    html += '<button class="btn btn-sm btn-success recommend-apply-btn" id="recommend-apply-resolved" type="button">';
+    html += '<svg data-lucide="check" class="icon"></svg> Apply these settings</button>';
+    html += '</div>';
     html += '<div class="recommend-source-pill">' + escapeHtml(sourceLabel) + '</div>';
     html += '<table class="recommend-table"><tbody>';
     html += '<tr><td>Author</td><td><strong>' + escapeHtml(rv.author_name || '(none)') + '</strong>' +
@@ -6325,9 +6330,20 @@
     html += '</tbody></table>';
     html += '</div>';
 
-    // Classifier suggestion (the raw Layer-1 scoring result)
+    // ─── Card 2: Classifier suggestion (raw Layer-1 keyword scoring) ──────
+    // Only show an Apply button on this card if the classifier found a
+    // confident match for SOMETHING (author, category, or tags). A completely
+    // empty classifier result can't be applied.
+    var csHasAnything = !!(cs.author || cs.category || (cs.tags && cs.tags.length));
+
     html += '<div class="recommend-classifier">';
-    html += '<div class="recommend-section-title"><svg data-lucide="brain" class="icon"></svg> Classifier suggestion <small>(keyword scoring)</small></div>';
+    html += '<div class="recommend-section-title">';
+    html += '<svg data-lucide="brain" class="icon"></svg> Classifier suggestion <small>(keyword scoring)</small>';
+    if (csHasAnything) {
+      html += '<button class="btn btn-sm btn-primary recommend-apply-btn" id="recommend-apply-classifier" type="button">';
+      html += '<svg data-lucide="check" class="icon"></svg> Apply these settings</button>';
+    }
+    html += '</div>';
     html += '<table class="recommend-table"><tbody>';
     if (cs.author) {
       var authConf = cs.author.confident ? '<span class="recommend-badge recommend-ok">confident</span>' : '<span class="recommend-badge recommend-weak">low confidence</span>';
@@ -6362,103 +6378,121 @@
     html += '</tbody></table>';
     html += '</div>';
 
-    // Apply button — fills the selects AND auto-saves the override so the
-    // resolved preview updates immediately. For already-published drafts,
-    // the next "Update on WP" click will push the new taxonomy to the
-    // existing WP post.
-    html += '<div class="recommend-actions">';
-    html += '<button class="btn btn-sm btn-primary" id="editor-recommend-apply-btn" type="button">' +
-      '<svg data-lucide="check" class="icon"></svg> Apply &amp; Save Override</button>';
-    html += '<small style="color:var(--text-tertiary);font-size:11px;">Fills the category/tag/author selects and saves the override. Click <strong>Update on WP</strong> below to push the new taxonomy to an already-published post.</small>';
+    // Footer hint
+    html += '<div class="recommend-footer-hint">';
+    html += 'Click <strong>Apply these settings</strong> on whichever card you want to use. ';
+    html += 'The selects below will be filled and the override saved automatically. ';
+    html += 'For already-published posts, click <strong>Update on WP</strong> to push the new taxonomy.';
     html += '</div>';
 
     resultEl.innerHTML = html;
     _refreshIcons();
 
-    // Wire the apply button
-    var applyBtn = $('editor-recommend-apply-btn');
-    if (applyBtn) {
-      applyBtn.onclick = function () {
-        _applyRecommendationToSelects(resp);
-      };
+    // Wire each Apply button to its own source
+    var resolvedBtn = $('recommend-apply-resolved');
+    if (resolvedBtn) {
+      resolvedBtn.onclick = function () { _applyRecommendationBySource('resolved'); };
+    }
+    var classifierBtn = $('recommend-apply-classifier');
+    if (classifierBtn) {
+      classifierBtn.onclick = function () { _applyRecommendationBySource('classifier'); };
     }
   }
 
-  // Fills the WP override selects with the classifier's suggestion + the
-  // rule engine's tag matches. Does NOT save — admin still needs to click
-  // "Save Override" to persist. The server-side /recommend endpoint
-  // auto-creates any classifier-suggested tags on WP first, so by the time
-  // we land here they should be in wp_taxonomy_cache. We reload the local
-  // taxonomy map + re-populate the selects so the new tag IDs are
-  // selectable before we try to flip them on.
-  function _applyRecommendationToSelects(resp) {
-    var cs = resp.classifier_suggestion || {};
-    var rv = resp.resolved || {};
+  // Module-level cache of the last recommendation response, so the two
+  // Apply buttons don't need to close over the whole response object.
+  var _lastRecommendation = null;
 
-    // Force-refresh the taxonomy cache from the server (it may have new
-    // auto-created tags from the /recommend side-effect), then populate
-    // the selects AGAIN so the new options are present, THEN apply.
+  // Applies the recommendation from ONE of the two sources:
+  //   'resolved'   — rule-engine's current resolution (author_id, category_ids,
+  //                  tag_ids, primary_category_id)
+  //   'classifier' — raw Layer-1 keyword scoring (cs.author.wp_id, cs.category.wp_id,
+  //                  cs.tags[i].wp_id)
+  //
+  // Does NOT mix sources. Each Apply button is tied to exactly one source
+  // so the admin explicitly picks which one to use.
+  //
+  // Flow: refresh taxonomy cache (server-side /recommend may have
+  // auto-created tags), re-populate the select <option>s, flip the
+  // selected flags, auto-save the override via saveEditorSettings(),
+  // refresh the resolved preview.
+  function _applyRecommendationBySource(source) {
+    if (!_lastRecommendation) {
+      showToast('No recommendation to apply — click Get AI Recommendation first', 'error');
+      return;
+    }
     forceApiRefresh('/api/wp/taxonomy');
     loadWPTaxonomy(function () {
-      _doApplyRecommendation(resp);
+      _doApplyRecommendation(_lastRecommendation, source);
     });
   }
 
-  function _doApplyRecommendation(resp) {
+  function _doApplyRecommendation(resp, source) {
     var cs = resp.classifier_suggestion || {};
     var rv = resp.resolved || {};
 
-    // Categories — prefer the classifier's single suggestion (with its slug→ID
-    // resolution) but also accept the rule engine's list if classifier empty
+    var chosenCatIds = [];
+    var chosenPrimaryCatId = null;
+    var chosenTagIds = [];
+    var chosenAuthId = null;
+    var missingTagNames = [];
+    var sourceLabel;
+
+    if (source === 'resolved') {
+      sourceLabel = 'Resolved (rule engine)';
+      chosenCatIds = (rv.category_ids || []).slice().map(Number);
+      chosenPrimaryCatId = rv.primary_category_id ? Number(rv.primary_category_id) : (chosenCatIds[0] || null);
+      chosenTagIds = (rv.tag_ids || []).slice().map(Number);
+      chosenAuthId = rv.author_id ? Number(rv.author_id) : null;
+    } else if (source === 'classifier') {
+      sourceLabel = 'Classifier suggestion';
+      if (cs.category && cs.category.wp_id) {
+        chosenCatIds = [Number(cs.category.wp_id)];
+        chosenPrimaryCatId = Number(cs.category.wp_id);
+      }
+      if (cs.tags && cs.tags.length) {
+        chosenTagIds = cs.tags
+          .filter(function (t) { return t.wp_id; })
+          .map(function (t) { return Number(t.wp_id); });
+        missingTagNames = cs.tags
+          .filter(function (t) { return !t.wp_id; })
+          .map(function (t) { return t.name; });
+      }
+      if (cs.author && cs.author.wp_id) {
+        chosenAuthId = Number(cs.author.wp_id);
+      }
+    } else {
+      showToast('Unknown apply source: ' + source, 'error');
+      return;
+    }
+
+    // Flip the select options
     var catSel = $('editor-wp-categories');
     var primSel = $('editor-wp-primary-cat');
-    var chosenCatIds = [];
-    if (cs.category && cs.category.wp_id) {
-      chosenCatIds = [cs.category.wp_id];
-    } else if (rv.category_ids && rv.category_ids.length) {
-      chosenCatIds = rv.category_ids.slice();
-    }
-    if (catSel && chosenCatIds.length) {
+    var tagSel = $('editor-wp-tags');
+    var authSel = $('editor-wp-author');
+
+    if (catSel) {
       Array.from(catSel.options).forEach(function (o) {
         o.selected = chosenCatIds.indexOf(Number(o.value)) !== -1;
       });
     }
-    if (primSel && chosenCatIds.length) {
-      primSel.value = String(chosenCatIds[0]);
+    if (primSel && chosenPrimaryCatId) {
+      primSel.value = String(chosenPrimaryCatId);
     }
-
-    // Tags — use the classifier's matched tags (each now has wp_id because
-    // the server auto-created missing ones and refreshed the cache). Fall
-    // back to the rule-engine's tag IDs if the classifier list is empty.
-    var tagSel = $('editor-wp-tags');
-    var chosenTagIds = (cs.tags || [])
-      .filter(function (t) { return t.wp_id; })
-      .map(function (t) { return Number(t.wp_id); });
-    if (chosenTagIds.length === 0 && rv.tag_ids && rv.tag_ids.length) {
-      chosenTagIds = rv.tag_ids.slice().map(Number);
-    }
-    var missingTagNames = (cs.tags || [])
-      .filter(function (t) { return !t.wp_id; })
-      .map(function (t) { return t.name; });
-    if (tagSel && chosenTagIds.length) {
+    if (tagSel) {
       Array.from(tagSel.options).forEach(function (o) {
         o.selected = chosenTagIds.indexOf(Number(o.value)) !== -1;
       });
     }
-
-    // Author — prefer classifier slug-resolved ID, fall back to rule-engine's
-    var authSel = $('editor-wp-author');
-    var chosenAuthId = (cs.author && cs.author.wp_id) || rv.author_id || null;
     if (authSel && chosenAuthId) {
       authSel.value = String(chosenAuthId);
     }
 
-    // Auto-save the override right away so the user doesn't have to click
-    // Save Override manually. This persists wp_category_ids, wp_primary_cat_id,
-    // wp_tag_ids, wp_author_id_override to the drafts table via the existing
-    // saveEditorSettings() path. After this the "Update on WP" button will
-    // pick up the new taxonomy from resolveTaxonomy() and push it to the
-    // already-published post.
+    // Auto-save the override via the existing path (PUT /api/drafts/:id).
+    // This writes wp_category_ids, wp_primary_cat_id, wp_tag_ids,
+    // wp_author_id_override to the draft row. Clicking "Update on WP"
+    // afterwards will push the new taxonomy to an already-published post.
     if (typeof saveEditorSettings === 'function') {
       saveEditorSettings();
     }
@@ -6467,7 +6501,9 @@
     if (chosenCatIds.length) parts.push(chosenCatIds.length + ' categor' + (chosenCatIds.length === 1 ? 'y' : 'ies'));
     if (chosenTagIds.length) parts.push(chosenTagIds.length + ' tag' + (chosenTagIds.length === 1 ? '' : 's'));
     if (chosenAuthId) parts.push('author');
-    var msg = parts.length ? 'Applied ' + parts.join(' · ') + ' and saved override' : 'Nothing to apply';
+    var msg = parts.length
+      ? 'Applied ' + sourceLabel + ': ' + parts.join(' · ') + ' — override saved'
+      : sourceLabel + ' had nothing to apply';
     if (missingTagNames.length) {
       msg += '. Skipped unresolved tags: ' + missingTagNames.join(', ');
     }
