@@ -9,7 +9,8 @@
     "prod": "pm2 start ecosystem.config.js",
     "stop": "pm2 stop hdf-autopub",
     "restart": "pm2 restart hdf-autopub",
-    "logs": "pm2 logs hdf-autopub --lines 100"
+    "logs": "pm2 logs hdf-autopub --lines 100",
+    "test": "node --test test/*.test.js"
   },
   "engines": {
     "node": ">=20.0.0"
