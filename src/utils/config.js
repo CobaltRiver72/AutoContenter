@@ -111,6 +111,8 @@ var DEFAULTS = {
   AUTO_REWRITE_MIN_SIMILARITY: '0.30',
   AUTO_REWRITE_BLOCKED_KEYWORDS: 'horoscope,rashifal,zodiac,numerology,wishes,greetings',
   BACKLOG_MAX_AGE_HOURS: '72',
+  // Bulk Config Import — feature flag, default off until Phase C ships UI
+  BULK_IMPORT_ENABLED: 'false',
 };
 
 // Numeric keys that should be parsed as numbers
