@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/dashboard.css?v=29">
+  <link rel="stylesheet" href="/css/dashboard.css?v=30">
 </head>
 <body>
 
@@ -545,14 +545,14 @@
           <button class="btn btn-purple btn-full" id="saveFuelMetalsSettingsBtn" style="margin-top:15px;" data-click="saveFuelMetalsSettings">Save Fuel & Metals Keys</button>
         </div>
 
-        <!-- WordPress Publishing (Fuel/Metals) -->
+        <!-- WordPress Publishing -->
         <div class="settings-form" id="wp-publishing-settings-section">
           <div class="settings-group">
-            <div class="settings-group-title">WordPress Publishing (Fuel & Metals Posts)</div>
-            <small style="color:#888;display:block;margin-bottom:12px;">WordPress REST API credentials for fuel/metals post publishing. Create an Application Password in WordPress under Users → Your Profile → Application Passwords.</small>
+            <div class="settings-group-title">WordPress Publishing</div>
+            <small style="color:#888;display:block;margin-bottom:12px;">WordPress REST API credentials. Create an Application Password in WordPress under Users → Your Profile → Application Passwords.</small>
             <div class="settings-row">
               <label class="settings-label">Site URL</label>
-              <input type="url" id="wp-site-url" placeholder="https://hdfnews.com" />
+              <input type="url" id="wp-site-url" placeholder="https://example.com" />
             </div>
             <div class="settings-row">
               <label class="settings-label">Username</label>
@@ -562,12 +562,55 @@
               <label class="settings-label">App Password</label>
               <input type="password" id="wp-pub-password" placeholder="xxxx xxxx xxxx xxxx" />
             </div>
-            <div style="display:flex;gap:8px;margin-top:12px;">
-              <button class="btn btn-sm btn-secondary" data-click="testWPConnection"><svg data-lucide="plug" class="icon"></svg> Test Connection</button>
-              <button class="btn btn-purple" data-click="saveWPPublishingSettings"><svg data-lucide="save" class="icon"></svg> Save</button>
-            </div>
-            <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
           </div>
+
+          <div class="settings-group" style="margin-top:18px;">
+            <div class="settings-group-title">Post Defaults</div>
+            <small style="color:#888;display:block;margin-bottom:12px;">Fallback values used when no publish rule matches and no per-draft override is set. Per-article overrides in the editor always win.</small>
+            <div class="settings-row">
+              <label class="settings-label">Default Post Status</label>
+              <select id="wp-post-status" class="settings-input">
+                <option value="draft">Draft</option>
+                <option value="publish">Publish immediately</option>
+                <option value="pending">Pending Review</option>
+                <option value="private">Private</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Default Author ID</label>
+              <input type="number" id="wp-author-id" placeholder="1" min="1" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Default Category ID</label>
+              <input type="number" id="wp-default-category" placeholder="1" min="1" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Classifier Default Author <small style="color:#666;">(username slug)</small></label>
+              <input type="text" id="wp-default-author-username" placeholder="(leave blank to use Default Author ID)" />
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Comment Status</label>
+              <select id="wp-comment-status" class="settings-input">
+                <option value="">— WordPress default —</option>
+                <option value="open">Open (allow comments)</option>
+                <option value="closed">Closed (disable comments)</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">Ping Status</label>
+              <select id="wp-ping-status" class="settings-input">
+                <option value="">— WordPress default —</option>
+                <option value="open">Open (allow trackbacks)</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn btn-sm btn-secondary" data-click="testWPConnection"><svg data-lucide="plug" class="icon"></svg> Test Connection</button>
+            <button class="btn btn-purple" data-click="saveWPPublishingSettings"><svg data-lucide="save" class="icon"></svg> Save</button>
+          </div>
+          <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
         </div>
 
         <!-- WP Taxonomy & Routing Rules -->
@@ -1822,6 +1865,6 @@
   </div>
 
   <script src="/js/lucide.min.js"></script>
-  <script src="/js/dashboard.js?v=59"></script>
+  <script src="/js/dashboard.js?v=61"></script>
 </body>
 </html>

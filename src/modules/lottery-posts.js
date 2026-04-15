@@ -2,6 +2,14 @@
 
 const MODULE = 'lottery-posts';
 const crypto = require('crypto');
+const _cfg = require('../utils/config');
+
+// Read admin-configured post status — respect Settings → WP_POST_STATUS.
+function _wpPostStatus() {
+  var v = (_cfg.get('WP_POST_STATUS') || '').toLowerCase().trim();
+  var allowed = ['publish', 'draft', 'pending', 'private'];
+  return allowed.indexOf(v) !== -1 ? v : 'publish';
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,7 +77,7 @@ class LotteryPostCreator {
         result.id || null,
         result.slug || null,
         result.url || null,
-        'publish',
+        result.status || _wpPostStatus(),
         result.action || 'updated',
         contentHash || null
       );
@@ -130,7 +138,7 @@ class LotteryPostCreator {
         content: html,
         categoryNames: ['Lottery Results'],
         metaDescription,
-        status: 'publish',
+        status: _wpPostStatus(),
         meta: {
           _hdf_lottery_draw_date: draw_date,
           _hdf_lottery_draw_time: draw_time,

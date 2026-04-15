@@ -2,6 +2,16 @@
 
 const MODULE = 'fuel-posts';
 const crypto = require('crypto');
+const _cfg = require('../utils/config');
+
+// Read admin-configured post status (draft/publish/pending/private). Default
+// to 'publish' only if admin hasn't explicitly chosen — otherwise respect
+// whatever they set via Settings → WP_POST_STATUS.
+function _wpPostStatus() {
+  var v = (_cfg.get('WP_POST_STATUS') || '').toLowerCase().trim();
+  var allowed = ['publish', 'draft', 'pending', 'private'];
+  return allowed.indexOf(v) !== -1 ? v : 'publish';
+}
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -278,7 +288,7 @@ class FuelPostCreator {
       content: html,
       categoryNames: [fuelLabel],
       metaDescription: metaDescription,
-      status: 'publish',
+      status: _wpPostStatus(),
       meta: {
         _hdf_fuel_city: city,
         _hdf_fuel_state: state,
@@ -501,7 +511,7 @@ class FuelPostCreator {
       content: html,
       categoryNames: [fuelLabel],
       metaDescription: metaDescription,
-      status: 'publish',
+      status: _wpPostStatus(),
       meta: {
         _hdf_fuel_state: state,
         _hdf_fuel_type: fuelType,
@@ -589,7 +599,7 @@ class FuelPostCreator {
       content: html,
       categoryNames: [fuelLabel],
       metaDescription: metaDescription,
-      status: 'publish',
+      status: _wpPostStatus(),
       meta: {
         _hdf_fuel_type: fuelType,
         _hdf_fuel_is_national: '1'

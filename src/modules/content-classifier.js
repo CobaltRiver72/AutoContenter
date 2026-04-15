@@ -13,17 +13,11 @@ var STOPWORDS = new Set([
   'india','indian','news','report','reports','according','update','updates','latest',
 ]);
 
-// ─── Category → Author mapping ───────────────────────────────────────────────
-
-var CATEGORY_TO_AUTHOR = {
-  'entertainment': 'priya-mehta',
-  'cricket':       'arjun-sharma',
-  'auto':          'rahul-desai',
-  'finance':       'deepa-nair',
-  'fuel-prices':   'deepa-nair',
-  'gold-silver':   'deepa-nair',
-};
-var DEFAULT_AUTHOR = 'karan-verma';
+// Category → Author mapping is admin-configurable via CLASSIFIER_CATEGORY_TO_AUTHOR
+// (JSON string of {category: author-slug}). Default is empty — when unset, the
+// classifier does not assign any author and the publisher falls back to
+// WP_AUTHOR_ID from settings. This avoids shipping author slugs that don't
+// exist on the admin's WordPress site.
 
 // ─── Source category hints ────────────────────────────────────────────────────
 
@@ -253,29 +247,41 @@ class ContentClassifier {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
+  _getCategoryAuthorMap() {
+    var raw = this.config.get('CLASSIFIER_CATEGORY_TO_AUTHOR');
+    if (!raw) return {};
+    try { var parsed = JSON.parse(raw); return (parsed && typeof parsed === 'object') ? parsed : {}; }
+    catch (e) { return {}; }
+  }
+
+  _getDefaultAuthor() {
+    return (this.config.get('DEFAULT_AUTHOR_USERNAME') || '').trim();
+  }
+
+  // Parse a JSON-string config value, returning the fallback object on any
+  // parse failure or empty value. Used for all dictionary/hint overrides
+  // populated by the bulk import system.
+  _parseJsonSetting(key, fallback) {
+    var raw = this.config.get(key);
+    if (!raw) return fallback;
+    try {
+      var parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : fallback;
+    } catch (e) {
+      if (this.logger) this.logger.warn('[content-classifier] bad JSON in ' + key + ', falling back');
+      return fallback;
+    }
+  }
+
+  // Load all classifier scoring data sources. Setting values populated by the
+  // bulk import system override the corresponding hardcoded module constants.
+  // This is purely a data-source extension — no scoring logic changes.
   _loadDictionaries() {
-    var catRaw = this.config.get('CLASSIFIER_CATEGORY_DICTIONARIES');
-    var authRaw = this.config.get('CLASSIFIER_AUTHOR_DICTIONARIES');
-
-    if (catRaw) {
-      try {
-        this.categoryDictionaries = JSON.parse(catRaw);
-      } catch (e) {
-        this.categoryDictionaries = DEFAULT_CATEGORY_DICTIONARIES;
-      }
-    } else {
-      this.categoryDictionaries = DEFAULT_CATEGORY_DICTIONARIES;
-    }
-
-    if (authRaw) {
-      try {
-        this.authorDictionaries = JSON.parse(authRaw);
-      } catch (e) {
-        this.authorDictionaries = DEFAULT_AUTHOR_DICTIONARIES;
-      }
-    } else {
-      this.authorDictionaries = DEFAULT_AUTHOR_DICTIONARIES;
-    }
+    this.categoryDictionaries     = this._parseJsonSetting('CLASSIFIER_CATEGORY_DICTIONARIES', DEFAULT_CATEGORY_DICTIONARIES);
+    this.authorDictionaries       = this._parseJsonSetting('CLASSIFIER_AUTHOR_DICTIONARIES',   DEFAULT_AUTHOR_DICTIONARIES);
+    this.tagWorthyTerms           = this._parseJsonSetting('CLASSIFIER_TAG_NORMALIZATION',     TAG_WORTHY_TERMS);
+    this.domainHints              = this._parseJsonSetting('CLASSIFIER_DOMAIN_HINTS',          DOMAIN_HINTS);
+    this.sourceCategoryHints      = this._parseJsonSetting('CLASSIFIER_SOURCE_CATEGORY_HINTS', SOURCE_CATEGORY_HINTS);
   }
 
   _scoreDictionary(terms, dictionary) {
@@ -314,10 +320,11 @@ class ContentClassifier {
     var sourceCatLower = (sourceCategory || '').toLowerCase();
 
     // Source category hints → +8 to category score
-    var catKeys = Object.keys(SOURCE_CATEGORY_HINTS);
+    var sourceCatHints = this.sourceCategoryHints || SOURCE_CATEGORY_HINTS;
+    var catKeys = Object.keys(sourceCatHints);
     for (var ci = 0; ci < catKeys.length; ci++) {
       var catKey = catKeys[ci];
-      var hints = SOURCE_CATEGORY_HINTS[catKey];
+      var hints = sourceCatHints[catKey];
       for (var hi = 0; hi < hints.length; hi++) {
         if (sourceCatLower.indexOf(hints[hi]) !== -1) {
           if (!categoryScores[catKey]) {
@@ -330,10 +337,12 @@ class ContentClassifier {
     }
 
     // Domain hints → +10 to category score and matching author score
-    var domainCatKeys = Object.keys(DOMAIN_HINTS);
+    var catAuthorMap = this._getCategoryAuthorMap();
+    var domHints = this.domainHints || DOMAIN_HINTS;
+    var domainCatKeys = Object.keys(domHints);
     for (var di = 0; di < domainCatKeys.length; di++) {
       var dCatKey = domainCatKeys[di];
-      var domainList = DOMAIN_HINTS[dCatKey];
+      var domainList = domHints[dCatKey];
       for (var dhi = 0; dhi < domainList.length; dhi++) {
         if (domainLower.indexOf(domainList[dhi]) !== -1) {
           if (!categoryScores[dCatKey]) {
@@ -341,8 +350,8 @@ class ContentClassifier {
           }
           categoryScores[dCatKey].score += 10;
 
-          // Boost the matching author too
-          var matchingAuthor = CATEGORY_TO_AUTHOR[dCatKey];
+          // Boost the matching author too (only if admin has mapped one)
+          var matchingAuthor = catAuthorMap[dCatKey];
           if (matchingAuthor) {
             if (!authorScores[matchingAuthor]) {
               authorScores[matchingAuthor] = { score: 0, matchedTerms: [] };
@@ -358,10 +367,11 @@ class ContentClassifier {
   _extractTags(tokens, bigrams) {
     var all = tokens.concat(bigrams);
     var tags = [];
+    var tagMap = this.tagWorthyTerms || TAG_WORTHY_TERMS;
     for (var i = 0; i < all.length; i++) {
       var term = all[i];
-      if (TAG_WORTHY_TERMS[term] !== undefined) {
-        var tag = TAG_WORTHY_TERMS[term];
+      if (tagMap[term] !== undefined) {
+        var tag = tagMap[term];
         if (tags.indexOf(tag) === -1) {
           tags.push(tag);
         }
@@ -441,10 +451,14 @@ class ContentClassifier {
     // 10. Build reasons
     var matchReasons = this._buildReasons(bestCat, bestAuthor);
 
-    // If the best category author slot is empty, derive author from category
+    // If the best category author slot is empty, derive author from the
+    // admin-configured category→author map, falling back to the configured
+    // default author username. Both come from settings; empty string means
+    // "no classifier author, let publish rules / global default decide".
     var resolvedAuthor = bestAuthor.key;
     if (!resolvedAuthor || bestAuthor.score < CONFIDENCE_THRESHOLD) {
-      resolvedAuthor = CATEGORY_TO_AUTHOR[bestCat.key] || DEFAULT_AUTHOR;
+      var catAuthorMap = this._getCategoryAuthorMap();
+      resolvedAuthor = catAuthorMap[bestCat.key] || this._getDefaultAuthor() || '';
     }
 
     var catConfident    = bestCat.score >= CONFIDENCE_THRESHOLD;
@@ -483,13 +497,6 @@ class ContentClassifier {
     } catch (e) {
       if (this.logger) this.logger.warn('[content-classifier] getCategoryWpIdMap error: ' + e.message);
     }
-    // Known internal key → WP ID fallbacks
-    map['entertainment'] = map['entertainment'] || 5;
-    map['cricket']       = map['cricket']       || 6;
-    map['auto']          = map['auto']           || 7;
-    map['finance']       = map['finance']        || 8;
-    map['fuel-prices']   = map['fuel-prices']    || 9;
-    map['gold-silver']   = map['gold-silver']    || 10;
     return map;
   }
 
@@ -586,4 +593,4 @@ class ContentClassifier {
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
-module.exports = { ContentClassifier, CATEGORY_TO_AUTHOR, DEFAULT_AUTHOR };
+module.exports = { ContentClassifier };

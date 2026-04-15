@@ -1,7 +1,44 @@
 'use strict';
 
 var express = require('express');
-var { getConfig } = require('../utils/config');
+var crypto = require('crypto');
+var multer = require('multer');
+var { getConfig, get: cfgGet } = require('../utils/config');
+var configImportValidator = require('../utils/config-import-validator');
+var configImportEngine = require('../utils/config-import-engine');
+
+// ── Bulk Config Import — multer config (memory, 5 MB cap, .json only) ──────
+var configImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: function (req, file, cb) {
+    var nameOk = /\.json$/i.test(file.originalname || '');
+    var typeOk = file.mimetype === 'application/json' || file.mimetype === 'text/json';
+    if (!nameOk && !typeOk) return cb(new Error('Only .json files are accepted'));
+    cb(null, true);
+  },
+});
+
+// In-memory cache of recently parsed previews so apply() can re-use without
+// asking the admin to upload twice. 60-second TTL, opportunistic GC.
+var _configImportPreviewCache = new Map();
+var _CONFIG_IMPORT_PREVIEW_TTL_MS = 60 * 1000;
+function _cacheImportPreview(parsed) {
+  var id = crypto.randomBytes(8).toString('hex');
+  _configImportPreviewCache.set(id, { parsed: parsed, expires: Date.now() + _CONFIG_IMPORT_PREVIEW_TTL_MS });
+  setTimeout(function () { _configImportPreviewCache.delete(id); }, _CONFIG_IMPORT_PREVIEW_TTL_MS + 1000).unref();
+  return id;
+}
+function _getCachedImportPreview(id) {
+  var entry = _configImportPreviewCache.get(id);
+  if (!entry) return null;
+  if (entry.expires < Date.now()) { _configImportPreviewCache.delete(id); return null; }
+  return entry.parsed;
+}
+function _isBulkImportEnabled() {
+  var v = cfgGet('BULK_IMPORT_ENABLED');
+  return v === true || v === 1 || String(v).toLowerCase() === 'true' || v === '1';
+}
 
 // ── CSV helpers (used by inline import routes) ─────────────────────────────
 
@@ -107,7 +144,10 @@ function createApiRouter(deps) {
 
   function parsePageParam(req, defaultPerPage) {
     var page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    var perPage = defaultPerPage || 20;
+    var def = defaultPerPage || 20;
+    var reqPp = parseInt(req.query.perPage, 10);
+    // Honor client's perPage but hard-cap at 100 to prevent accidental DoS
+    var perPage = (reqPp > 0) ? Math.min(100, reqPp) : def;
     return { page: page, perPage: perPage };
   }
 
@@ -1631,6 +1671,7 @@ function createApiRouter(deps) {
       var ALLOWED_KEYS = [
         'FIREHOSE_TOKEN',
         'WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS',
+        'WP_COMMENT_STATUS', 'WP_PING_STATUS', 'CLASSIFIER_CATEGORY_TO_AUTHOR',
         'MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS',
         'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES',
         'TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES',
@@ -1671,6 +1712,8 @@ function createApiRouter(deps) {
         'AUTO_REWRITE_ENABLED', 'AUTO_REWRITE_DAILY_LIMIT', 'AUTO_REWRITE_HOURLY_LIMIT',
         'AUTO_REWRITE_MIN_SOURCES', 'AUTO_REWRITE_MIN_SIMILARITY', 'AUTO_REWRITE_BLOCKED_KEYWORDS',
         'BACKLOG_MAX_AGE_HOURS',
+        // Bulk Config Import
+        'BULK_IMPORT_ENABLED', 'DEFAULT_CATEGORY_SLUG', 'MODULE_ROUTING_CONFIG',
       ];
 
       var BLOCKED_KEYS = [
@@ -2780,22 +2823,35 @@ function createApiRouter(deps) {
     }
   });
 
-  // GET /api/drafts — List all drafts
+  // GET /api/drafts — List drafts.
+  //
+  // Query params:
+  //   ?status=       — filter by draft status (e.g. 'ready', 'draft')
+  //   ?mode=         — filter by mode ('auto', 'manual_import', 'manual')
+  //   ?cluster_id=   — filter by a specific cluster (bypasses pagination)
+  //   ?page=         — 1-based page number (enables pagination)
+  //   ?perPage=      — page size, hard-capped at 100
+  //
+  // If neither page nor perPage is passed, returns the full list
+  // (backwards-compatible). When paginated, the response also includes
+  // total/page/perPage fields for pagination UI.
   router.get('/drafts', function (req, res) {
     try {
       var status = req.query.status || null;
       var mode = req.query.mode || null;
       var clusterId = req.query.cluster_id || null;
 
+      // Pagination only activates when caller explicitly asked. cluster_id
+      // drill-down intentionally bypasses it so the editor can still fetch
+      // a full cluster in one call.
+      var paginate = (req.query.page != null || req.query.perPage != null) && !clusterId;
+      var pp = paginate ? parsePageParam(req, 50) : null;
+
       // Explicit column list: large text blobs (rewritten_html, extracted_content,
       // source_content_markdown, body_markdown, faq_json, ai_signals, infranodus_data)
       // are excluded or truncated to keep the listing payload small and avoid
       // ERR_HTTP2_PROTOCOL_ERROR on connections with many drafts.
-      //   extracted_chars  — exact byte length before truncation (for UI display)
-      //   extracted_content  — first 1200 chars (enough for 800-char card preview)
-      //   rewritten_html  — stub '1'/NULL so JS truthiness checks still work;
-      //                      full HTML is fetched per-draft in the editor
-      var query = `SELECT
+      var columns = `
         id, source_article_id, source_url, source_domain, source_title,
         source_language, source_category, source_publish_time,
         COALESCE(LENGTH(extracted_content), 0) AS extracted_chars,
@@ -2814,7 +2870,7 @@ function createApiRouter(deps) {
         retry_count, max_retries, error_message, last_error_at, failed_permanent,
         cluster_id, cluster_role,
         locked_by, locked_at, lease_expires_at, next_run_at
-      FROM drafts`;
+      `;
       var conditions = [];
       var params = [];
 
@@ -2822,17 +2878,34 @@ function createApiRouter(deps) {
       if (mode) { conditions.push('mode = ?'); params.push(mode); }
       if (clusterId) { conditions.push('cluster_id = ?'); params.push(clusterId); }
 
-      if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
-      }
+      var whereClause = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
       // Order: cluster primary drafts first within their group, then by date
-      query += ' ORDER BY cluster_id DESC NULLS LAST, ' +
-               "CASE WHEN cluster_role = 'primary' THEN 0 ELSE 1 END, " +
-               'created_at DESC';
+      var orderClause = ' ORDER BY cluster_id DESC NULLS LAST, ' +
+                        "CASE WHEN cluster_role = 'primary' THEN 0 ELSE 1 END, " +
+                        'created_at DESC';
 
-      var stmt = db.prepare(query);
-      var drafts = stmt.all.apply(stmt, params);
-      return res.json({ success: true, data: drafts });
+      if (paginate) {
+        var offset = (pp.page - 1) * pp.perPage;
+        var pagedStmt = db.prepare('SELECT ' + columns + ' FROM drafts' + whereClause + orderClause + ' LIMIT ? OFFSET ?');
+        var pagedParams = params.concat([pp.perPage, offset]);
+        var drafts = pagedStmt.all.apply(pagedStmt, pagedParams);
+
+        var countStmt = db.prepare('SELECT COUNT(*) AS total FROM drafts' + whereClause);
+        var totalRow = countStmt.get.apply(countStmt, params);
+        var total = (totalRow && totalRow.total) || 0;
+
+        return res.json({
+          success: true,
+          data: drafts,
+          total: total,
+          page: pp.page,
+          perPage: pp.perPage
+        });
+      }
+
+      var stmt = db.prepare('SELECT ' + columns + ' FROM drafts' + whereClause + orderClause);
+      var draftsAll = stmt.all.apply(stmt, params);
+      return res.json({ success: true, data: draftsAll });
     } catch (err) {
       logger.error('api', 'GET /api/drafts failed: ' + err.message);
       return res.status(500).json({ success: false, error: err.message });
@@ -5677,6 +5750,154 @@ function createApiRouter(deps) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BULK CONFIG IMPORT — Phase B endpoints (gated by BULK_IMPORT_ENABLED flag)
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Endpoints:
+  //   POST /api/config/import/preview          — multipart file → diff
+  //   POST /api/config/import/apply            — multipart OR { preview_id }
+  //   POST /api/config/import/rollback/:id     — restore snapshot
+  //   GET  /api/config/import/snapshots        — list snapshots
+  //   GET  /api/config/export                  — download current config JSON
+  //
+  // All endpoints return 404 when BULK_IMPORT_ENABLED is false. This keeps
+  // the routes silent in production until Phase C ships the UI.
+
+  function _importGate(req, res, next) {
+    if (!_isBulkImportEnabled()) {
+      return res.status(404).json({ ok: false, error: 'Bulk config import is not enabled. Set BULK_IMPORT_ENABLED=true in settings to activate.' });
+    }
+    next();
+  }
+
+  // POST /api/config/import/preview
+  router.post('/config/import/preview', _importGate, configImportUpload.single('file'), function (req, res) {
+    try {
+      if (!req.file) return res.status(400).json({ ok: false, errors: [{ path: '', message: 'No file uploaded (use multipart field "file")', severity: 'hard' }] });
+      var raw;
+      try { raw = req.file.buffer.toString('utf-8'); }
+      catch (e) { return res.status(400).json({ ok: false, errors: [{ path: '', message: 'File is not valid UTF-8', severity: 'hard' }] }); }
+
+      var parsed;
+      try { parsed = JSON.parse(raw); }
+      catch (parseErr) {
+        return res.status(400).json({ ok: false, errors: [{ path: '', message: 'Invalid JSON: ' + parseErr.message, severity: 'hard' }] });
+      }
+
+      var validation = configImportValidator.validate(parsed);
+      if (!validation.ok) {
+        return res.status(400).json({ ok: false, errors: validation.errors, warnings: validation.warnings });
+      }
+
+      var diff = configImportEngine.computeDiff(parsed, req.app.locals.db);
+      var previewId = _cacheImportPreview(parsed);
+
+      res.json({
+        ok: true,
+        preview_id: previewId,
+        filename: req.file.originalname,
+        changes: diff.changes,
+        warnings: validation.warnings.concat(diff.warnings || []),
+        errors: [],
+      });
+    } catch (err) {
+      logger.error('config-import', 'Preview failed: ' + err.message);
+      res.status(500).json({ ok: false, error: 'Preview failed: ' + err.message });
+    }
+  });
+
+  // POST /api/config/import/apply
+  // Two paths: multipart file upload OR { preview_id } JSON body to re-use a
+  // recent preview without re-uploading. Always re-validates server-side.
+  router.post('/config/import/apply', _importGate, configImportUpload.single('file'), async function (req, res) {
+    try {
+      var parsed = null;
+      var filename = null;
+
+      if (req.file) {
+        var raw;
+        try { raw = req.file.buffer.toString('utf-8'); }
+        catch (e) { return res.status(400).json({ ok: false, error: 'File is not valid UTF-8' }); }
+        try { parsed = JSON.parse(raw); }
+        catch (parseErr) { return res.status(400).json({ ok: false, error: 'Invalid JSON: ' + parseErr.message }); }
+        filename = req.file.originalname;
+      } else if (req.body && req.body.preview_id) {
+        parsed = _getCachedImportPreview(req.body.preview_id);
+        if (!parsed) return res.status(400).json({ ok: false, error: 'Preview expired or not found — please re-upload the file' });
+        filename = 'preview-' + req.body.preview_id;
+      } else {
+        return res.status(400).json({ ok: false, error: 'No file or preview_id provided' });
+      }
+
+      // Always re-validate, never trust client
+      var validation = configImportValidator.validate(parsed);
+      if (!validation.ok) {
+        return res.status(400).json({ ok: false, errors: validation.errors, warnings: validation.warnings });
+      }
+
+      var ctx = {
+        db: req.app.locals.db,
+        classifier: req.app.locals.modules && req.app.locals.modules.classifier,
+        config: getConfig(),
+        logger: logger,
+        filename: filename,
+        createdBy: (req.session && req.session.user) || 'admin',
+      };
+      var result = await configImportEngine.applyImport(parsed, ctx);
+      res.json({ ok: true, snapshot_id: result.snapshot_id, summary: result.summary });
+    } catch (err) {
+      logger.error('config-import', 'Apply failed: ' + err.message);
+      res.status(500).json({ ok: false, error: 'Apply failed: ' + err.message });
+    }
+  });
+
+  // POST /api/config/import/rollback/:snapshot_id
+  router.post('/config/import/rollback/:snapshot_id', _importGate, function (req, res) {
+    try {
+      var sid = parseInt(req.params.snapshot_id, 10);
+      if (!sid || sid < 1) return res.status(400).json({ ok: false, error: 'Invalid snapshot id' });
+      var result = configImportEngine.restoreSnapshot(req.app.locals.db, sid);
+      // Hot-reload classifier so restored dictionaries take effect immediately
+      var classifier = req.app.locals.modules && req.app.locals.modules.classifier;
+      if (classifier && typeof classifier.reloadDictionaries === 'function') {
+        try { classifier.reloadDictionaries(); }
+        catch (e) { logger.warn('config-import', 'Classifier reload after rollback failed (non-fatal): ' + e.message); }
+      }
+      res.json({ ok: true, restored_to: result });
+    } catch (err) {
+      logger.error('config-import', 'Rollback failed: ' + err.message);
+      res.status(500).json({ ok: false, error: 'Rollback failed: ' + err.message });
+    }
+  });
+
+  // GET /api/config/import/snapshots — for the rollback UI
+  router.get('/config/import/snapshots', _importGate, function (req, res) {
+    try {
+      res.json({ ok: true, data: configImportEngine.listSnapshots(req.app.locals.db) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/config/export — download full config as JSON, no credentials
+  router.get('/config/export', _importGate, function (req, res) {
+    try {
+      var out = configImportEngine.exportConfig(req.app.locals.db);
+      var ts = new Date().toISOString().replace(/[:.]/g, '-');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="hdf-config-' + ts + '.json"');
+      res.send(JSON.stringify(out, null, 2));
+    } catch (err) {
+      logger.error('config-import', 'Export failed: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // END BULK CONFIG IMPORT
+  // ═══════════════════════════════════════════════════════════════════════
 
   // POST /api/classifier/reload
   router.post('/classifier/reload', function(req, res) {

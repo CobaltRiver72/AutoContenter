@@ -158,6 +158,18 @@ class WPPublisher {
       }),
     };
 
+    // Optional admin-configured comment/ping status — empty string means
+    // "let WordPress use its site default".
+    var cfgCfg = require('../utils/config');
+    var commentStatus = (cfgCfg.get('WP_COMMENT_STATUS') || '').toLowerCase().trim();
+    var pingStatus = (cfgCfg.get('WP_PING_STATUS') || '').toLowerCase().trim();
+    if (commentStatus === 'open' || commentStatus === 'closed') {
+      postData.comment_status = commentStatus;
+    }
+    if (pingStatus === 'open' || pingStatus === 'closed') {
+      postData.ping_status = pingStatus;
+    }
+
     if (categoryIds.length > 0) {
       postData.categories = categoryIds;
     }

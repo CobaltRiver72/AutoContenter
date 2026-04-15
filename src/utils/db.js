@@ -713,6 +713,62 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_publish_rules_priority ON publish_rules(priority DESC, is_active);
     `);
 
+    // ─── Bulk Config Import: snapshot table + publish_rules.source column ─
+    // Phase A infrastructure for the JSON import feature. Snapshots back up
+    // ONLY the keys/rows the importer owns (whitelist enforced in the import
+    // engine, not at the schema level), so unrelated settings and manual
+    // publish rules survive a rollback.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS config_snapshots (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        label           TEXT NOT NULL,
+        settings_json   TEXT NOT NULL,
+        publish_rules_json TEXT NOT NULL,
+        created_by      TEXT,
+        import_filename TEXT,
+        created_at      TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_config_snapshots_created ON config_snapshots(created_at DESC);
+    `);
+
+    // Add 'source' column to publish_rules so we can distinguish manual rules
+    // (created via UI) from imported rules. Rollback only touches imported.
+    try {
+      db.exec("ALTER TABLE publish_rules ADD COLUMN source TEXT DEFAULT 'manual'");
+    } catch (e) { /* already exists */ }
+    try {
+      db.exec("ALTER TABLE publish_rules ADD COLUMN key TEXT");
+    } catch (e) { /* already exists */ }
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_rules_key ON publish_rules(key) WHERE key IS NOT NULL");
+
+    // Day-zero baseline snapshot — guarantees rollback always has somewhere
+    // to go, even on a brand-new install. Only created if snapshots table is
+    // empty. Captures only the IMPORT_MANAGED_SETTING_KEYS, matching the
+    // serialization the import engine uses.
+    try {
+      var snapCountRow = db.prepare("SELECT COUNT(*) AS cnt FROM config_snapshots").get();
+      if (!snapCountRow || snapCountRow.cnt === 0) {
+        var IMPORT_MANAGED_KEYS = require('./config-import-keys').IMPORT_MANAGED_SETTING_KEYS;
+        var managedSettings = {};
+        for (var mki = 0; mki < IMPORT_MANAGED_KEYS.length; mki++) {
+          var k = IMPORT_MANAGED_KEYS[mki];
+          var row = db.prepare("SELECT value FROM settings WHERE key = ?").get(k);
+          if (row) managedSettings[k] = row.value;
+        }
+        var importedRules = db.prepare(
+          "SELECT * FROM publish_rules WHERE source = 'import'"
+        ).all();
+        var label = 'factory_default_' + new Date().toISOString().replace(/[:.]/g, '-');
+        db.prepare(
+          "INSERT INTO config_snapshots (label, settings_json, publish_rules_json, created_by, import_filename) " +
+          "VALUES (?, ?, ?, ?, ?)"
+        ).run(label, JSON.stringify(managedSettings), JSON.stringify(importedRules), 'system', null);
+        console.log('[db] Day-zero baseline snapshot created: ' + label);
+      }
+    } catch (snapErr) {
+      console.warn('[db] Failed to create day-zero snapshot: ' + snapErr.message);
+    }
+
     // One-time fix: clean known-wrong model IDs from settings
     var wrongModelIds = {
       'claude-opus-4-6-20250610': 'claude-opus-4-6',
@@ -843,7 +899,7 @@ function runMigrations() {
         INFRANODUS_TEXT_LIMIT: '12000',
         INFRANODUS_AUTO_ANALYZE: 'true',
         INFRANODUS_GOOGLE_ENABLED: 'false',
-        DEFAULT_AUTHOR_USERNAME: 'karan-verma',
+        DEFAULT_AUTHOR_USERNAME: '',
         AUTHOR_ASSIGNMENT_ENABLED: 'true',
         CLASSIFIER_CONFIDENCE_THRESHOLD: '15',
         AUTO_CREATE_WP_TAGS: 'true',

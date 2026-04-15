@@ -2713,6 +2713,32 @@ svg.icon, [data-lucide] { width: 16px; height: 16px; }
   margin: 0 4px;
 }
 
+/* Per-page selector in the Published toolbar */
+.per-page-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+.per-page-select {
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px 22px 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23999' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+.per-page-select:hover { border-color: var(--accent); }
+.per-page-select:focus { outline: none; border-color: var(--accent); }
+
 /* Extra small buttons for compact cards */
 .btn-xs {
   padding: 2px 8px;
