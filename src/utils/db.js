@@ -872,8 +872,6 @@ function runMigrations() {
       var defaults = {
         AUTOPILOT_ENABLED: 'false',
         AUTOPILOT_DAILY_TARGET: '50',
-        AUTOPILOT_START_HOUR: '6',
-        AUTOPILOT_END_HOUR: '23',
         AUTOPILOT_WEEKENDS: 'true',
         AUTOPILOT_MIN_SIMILARITY: '0.70',
         AUTOPILOT_MIN_TIER: '0',

@@ -821,17 +821,32 @@ function buildRewrittenHtml(inBrief, bodyMarkdown, faqs, dataBoxes) {
       if (!box || !Array.isArray(box.rows) || box.rows.length === 0) continue;
       parts.push('<div class="hdf-data-box" data-type="' + escapeHtmlText(box.type || 'stats') + '">');
       if (box.title) parts.push('<h4>' + escapeHtmlText(box.title) + '</h4>');
-      parts.push('<table>');
-      for (var r = 0; r < box.rows.length; r++) {
+      parts.push('<table class="hdf-table">');
+      // Header row (first row) goes inside <thead>; remaining rows inside <tbody>.
+      // Without these semantic wrappers WordPress auto-injects a <tbody> around
+      // the whole body (including the <th> header row), which breaks theme CSS
+      // that targets `thead th` and confuses Google's table extractor.
+      var hasHeaderRow = Array.isArray(box.rows[0]);
+      if (hasHeaderRow) {
+        parts.push('<thead>');
+        parts.push('<tr>');
+        for (var hc = 0; hc < box.rows[0].length; hc++) {
+          parts.push('<th>' + escapeHtmlText(String(box.rows[0][hc] == null ? '' : box.rows[0][hc])) + '</th>');
+        }
+        parts.push('</tr>');
+        parts.push('</thead>');
+      }
+      parts.push('<tbody>');
+      for (var r = 1; r < box.rows.length; r++) {
         var row = box.rows[r];
         if (!Array.isArray(row)) continue;
-        var tag = (r === 0) ? 'th' : 'td';
         parts.push('<tr>');
         for (var c = 0; c < row.length; c++) {
-          parts.push('<' + tag + '>' + escapeHtmlText(String(row[c] == null ? '' : row[c])) + '</' + tag + '>');
+          parts.push('<td>' + escapeHtmlText(String(row[c] == null ? '' : row[c])) + '</td>');
         }
         parts.push('</tr>');
       }
+      parts.push('</tbody>');
       parts.push('</table>');
       parts.push('</div>');
     }

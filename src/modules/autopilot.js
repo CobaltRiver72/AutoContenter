@@ -45,22 +45,17 @@ class AutopilotEngine {
   // ─── Operating state ─────────────────────────────────────────────────────
 
   /**
-   * Returns true when autopilot is enabled AND we are within the configured
-   * publishing window (hour + weekday check).
+   * Returns true when autopilot is enabled and (optionally) weekends are allowed.
+   * Runs 24/7 — no hour-of-day window.
    */
   isActive() {
     if (!this._bool('AUTOPILOT_ENABLED', false)) return false;
 
-    var now = new Date();
-    var hour = now.getHours();
-    var dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
-
-    var startHour = this._int('AUTOPILOT_START_HOUR', 6);
-    var endHour   = this._int('AUTOPILOT_END_HOUR', 23);
-    if (hour < startHour || hour > endHour) return false;
-
     var weekendsAllowed = this._bool('AUTOPILOT_WEEKENDS', true);
-    if (!weekendsAllowed && (dayOfWeek === 0 || dayOfWeek === 6)) return false;
+    if (!weekendsAllowed) {
+      var dayOfWeek = new Date().getDay(); // 0 = Sunday, 6 = Saturday
+      if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+    }
 
     return true;
   }
@@ -99,10 +94,9 @@ class AutopilotEngine {
       return { approved: false, reason: 'daily limit reached (' + publishedToday + '/' + dailyTarget + ')' };
     }
 
-    // 2. Publishing window
+    // 2. Autopilot enabled + weekend gate
     if (!this.isActive()) {
-      var hour = new Date().getHours();
-      return { approved: false, reason: 'outside publishing window (hour=' + hour + ')' };
+      return { approved: false, reason: 'autopilot disabled or weekend blocked' };
     }
 
     // 3. Minimum source count
@@ -204,13 +198,20 @@ class AutopilotEngine {
     checks['Daily quota'] = { pass: quotaPass, value: publishedToday + '/' + dailyTarget, threshold: dailyTarget };
     if (!quotaPass && !failedReason) failedReason = 'daily limit reached (' + publishedToday + '/' + dailyTarget + ')';
 
-    // 2. Publishing window
+    // 2. Autopilot enabled + weekend gate
     var windowPass = this.isActive();
-    var hour = new Date().getHours();
-    var startHour = this._int('AUTOPILOT_START_HOUR', 6);
-    var endHour = this._int('AUTOPILOT_END_HOUR', 23);
-    checks['Publishing window'] = { pass: windowPass, value: 'hour=' + hour, threshold: startHour + '–' + endHour };
-    if (!windowPass && !failedReason) failedReason = 'outside publishing window (hour=' + hour + ')';
+    var enabled = this._bool('AUTOPILOT_ENABLED', false);
+    var weekendsAllowed = this._bool('AUTOPILOT_WEEKENDS', true);
+    var dayOfWeek = new Date().getDay();
+    var isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+    checks['Autopilot enabled'] = {
+      pass: windowPass,
+      value: enabled ? (isWeekend && !weekendsAllowed ? 'weekend-blocked' : 'enabled') : 'disabled',
+      threshold: 'enabled' + (weekendsAllowed ? '' : ', weekdays only'),
+    };
+    if (!windowPass && !failedReason) {
+      failedReason = enabled ? 'weekend blocked (weekends disabled)' : 'autopilot disabled';
+    }
 
     // 3. Source count
     var minSources = this._int('MIN_SOURCES_THRESHOLD', 2);
@@ -318,11 +319,7 @@ class AutopilotEngine {
       dailyTarget:   target,
       remainingQuota: remaining,
       nextPublishETA: nextEta,
-      operatingHours: {
-        start: this._int('AUTOPILOT_START_HOUR', 6),
-        end:   this._int('AUTOPILOT_END_HOUR', 23),
-        weekends: this._bool('AUTOPILOT_WEEKENDS', true),
-      },
+      weekendsAllowed: this._bool('AUTOPILOT_WEEKENDS', true),
       filters: {
         minSimilarity:    this._float('AUTOPILOT_MIN_SIMILARITY', 0.70),
         minSources:       this._int('MIN_SOURCES_THRESHOLD', 2),
