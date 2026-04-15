@@ -11,6 +11,43 @@ function _wpPostStatus() {
   return allowed.indexOf(v) !== -1 ? v : 'publish';
 }
 
+// Resolve an author slug to a numeric WP user ID via wp_taxonomy_cache.
+// Returns null when db is unavailable, slug is empty, or the slug is not
+// cached — the caller is expected to fall back to existing behavior.
+function _resolveAuthorId(db, slug) {
+  if (!db || !slug || typeof slug !== 'string') return null;
+  try {
+    var row = db.prepare(
+      "SELECT wp_id FROM wp_taxonomy_cache WHERE tax_type = 'author' AND slug = ? LIMIT 1"
+    ).get(slug.trim());
+    if (row && row.wp_id) {
+      var n = Number(row.wp_id);
+      if (!Number.isNaN(n) && n > 0) return n;
+    }
+  } catch (e) {
+    // Swallow — taxonomy cache may not exist yet; fall back to default.
+  }
+  return null;
+}
+
+// Read MODULE_ROUTING_CONFIG fresh and return the resolved author WP user
+// ID for the metals_posts module, or null if nothing is configured or the
+// slug can't be resolved. Fresh on every call so admin edits take effect
+// without a restart — config.get() has a 5s TTL cache internally.
+function _getMetalsAuthorId(db) {
+  try {
+    var raw = _cfg.get('MODULE_ROUTING_CONFIG');
+    if (!raw) return null;
+    var moduleConfig = JSON.parse(raw);
+    if (!moduleConfig || typeof moduleConfig !== 'object') return null;
+    var section = moduleConfig.metals_posts;
+    if (!section || !section.default_author) return null;
+    return _resolveAuthorId(db, section.default_author);
+  } catch (e) {
+    return null;
+  }
+}
+
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 
 function fmtPrice(n) { return n ? Number(n).toFixed(2) : '—'; }
@@ -290,6 +327,7 @@ class MetalsPostCreator {
     const html = this._buildCityContent(cityObj, metalType, prices, allCities, stateUrl, nationalUrl);
 
     // Publish
+    var metalsAuthorIdCity = _getMetalsAuthorId(this.db);
     const result = await this.wp.upsertPost({
       slug,
       title,
@@ -297,6 +335,7 @@ class MetalsPostCreator {
       categoryNames: [config.label],
       metaDescription,
       status: _wpPostStatus(),
+      authorId: metalsAuthorIdCity || undefined,
       meta: {
         _hdf_metal_city: city,
         _hdf_metal_type: metalType,
@@ -548,6 +587,7 @@ class MetalsPostCreator {
     const html = this._buildStateContent(state, metalType, citiesWithPrices, nationalUrl);
 
     // Publish
+    var metalsAuthorIdState = _getMetalsAuthorId(this.db);
     const result = await this.wp.upsertPost({
       slug,
       title,
@@ -555,6 +595,7 @@ class MetalsPostCreator {
       categoryNames: [config.label],
       metaDescription,
       status: _wpPostStatus(),
+      authorId: metalsAuthorIdState || undefined,
       meta: {
         _hdf_metal_state: state,
         _hdf_metal_type: metalType,
@@ -742,6 +783,7 @@ class MetalsPostCreator {
     const html = this._buildNationalContent(metalType, allCitiesWithPrices);
 
     // Publish
+    var metalsAuthorIdNational = _getMetalsAuthorId(this.db);
     const result = await this.wp.upsertPost({
       slug,
       title,
@@ -749,6 +791,7 @@ class MetalsPostCreator {
       categoryNames: [config.label],
       metaDescription,
       status: _wpPostStatus(),
+      authorId: metalsAuthorIdNational || undefined,
       meta: {
         _hdf_metal_type: metalType,
         _hdf_metal_is_national: '1',
