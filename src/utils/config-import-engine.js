@@ -795,18 +795,21 @@ function exportConfig(db) {
     });
   }
 
-  // categories — derive from CLASSIFIER_CATEGORY_DICTIONARIES
+  // categories — derive from CLASSIFIER_CATEGORY_DICTIONARIES. Omit
+  // default_author_username entirely when there's no mapping (the validator
+  // rejects null for that field, and the export must be re-importable as-is).
   var catDicts = _parseJsonSetting(db, 'CLASSIFIER_CATEGORY_DICTIONARIES', {});
   var catToAuthor = _parseJsonSetting(db, 'CLASSIFIER_CATEGORY_TO_AUTHOR', {});
   var catSlugs = Object.keys(catDicts);
   for (var cs = 0; cs < catSlugs.length; cs++) {
     var slug = catSlugs[cs];
-    out.categories.push({
+    var catRow = {
       slug: slug,
       display_name: '',
-      default_author_username: catToAuthor[slug] || null,
       keywords: catDicts[slug] || {},
-    });
+    };
+    if (catToAuthor[slug]) catRow.default_author_username = catToAuthor[slug];
+    out.categories.push(catRow);
   }
 
   // tags
