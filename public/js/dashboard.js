@@ -6362,11 +6362,14 @@
     html += '</tbody></table>';
     html += '</div>';
 
-    // Apply button
+    // Apply button — fills the selects AND auto-saves the override so the
+    // resolved preview updates immediately. For already-published drafts,
+    // the next "Update on WP" click will push the new taxonomy to the
+    // existing WP post.
     html += '<div class="recommend-actions">';
     html += '<button class="btn btn-sm btn-primary" id="editor-recommend-apply-btn" type="button">' +
-      '<svg data-lucide="check" class="icon"></svg> Apply to Override Selects</button>';
-    html += '<small style="color:var(--text-tertiary);font-size:11px;">Fills the category/tag/author selects below. You still have to click <strong>Save Override</strong>.</small>';
+      '<svg data-lucide="check" class="icon"></svg> Apply &amp; Save Override</button>';
+    html += '<small style="color:var(--text-tertiary);font-size:11px;">Fills the category/tag/author selects and saves the override. Click <strong>Update on WP</strong> below to push the new taxonomy to an already-published post.</small>';
     html += '</div>';
 
     resultEl.innerHTML = html;
@@ -6383,9 +6386,25 @@
 
   // Fills the WP override selects with the classifier's suggestion + the
   // rule engine's tag matches. Does NOT save — admin still needs to click
-  // "Save Override" to persist. Skips any ID that isn't in the loaded
-  // select options (means taxonomy isn't synced for that one).
+  // "Save Override" to persist. The server-side /recommend endpoint
+  // auto-creates any classifier-suggested tags on WP first, so by the time
+  // we land here they should be in wp_taxonomy_cache. We reload the local
+  // taxonomy map + re-populate the selects so the new tag IDs are
+  // selectable before we try to flip them on.
   function _applyRecommendationToSelects(resp) {
+    var cs = resp.classifier_suggestion || {};
+    var rv = resp.resolved || {};
+
+    // Force-refresh the taxonomy cache from the server (it may have new
+    // auto-created tags from the /recommend side-effect), then populate
+    // the selects AGAIN so the new options are present, THEN apply.
+    forceApiRefresh('/api/wp/taxonomy');
+    loadWPTaxonomy(function () {
+      _doApplyRecommendation(resp);
+    });
+  }
+
+  function _doApplyRecommendation(resp) {
     var cs = resp.classifier_suggestion || {};
     var rv = resp.resolved || {};
 
@@ -6408,14 +6427,19 @@
       primSel.value = String(chosenCatIds[0]);
     }
 
-    // Tags — use the classifier's matched tags (converted to WP ids where possible)
+    // Tags — use the classifier's matched tags (each now has wp_id because
+    // the server auto-created missing ones and refreshed the cache). Fall
+    // back to the rule-engine's tag IDs if the classifier list is empty.
     var tagSel = $('editor-wp-tags');
     var chosenTagIds = (cs.tags || [])
       .filter(function (t) { return t.wp_id; })
-      .map(function (t) { return t.wp_id; });
+      .map(function (t) { return Number(t.wp_id); });
     if (chosenTagIds.length === 0 && rv.tag_ids && rv.tag_ids.length) {
-      chosenTagIds = rv.tag_ids.slice();
+      chosenTagIds = rv.tag_ids.slice().map(Number);
     }
+    var missingTagNames = (cs.tags || [])
+      .filter(function (t) { return !t.wp_id; })
+      .map(function (t) { return t.name; });
     if (tagSel && chosenTagIds.length) {
       Array.from(tagSel.options).forEach(function (o) {
         o.selected = chosenTagIds.indexOf(Number(o.value)) !== -1;
@@ -6429,7 +6453,33 @@
       authSel.value = String(chosenAuthId);
     }
 
-    showToast('Recommendation applied to override selects. Click "Save Override" to persist.', 'success');
+    // Auto-save the override right away so the user doesn't have to click
+    // Save Override manually. This persists wp_category_ids, wp_primary_cat_id,
+    // wp_tag_ids, wp_author_id_override to the drafts table via the existing
+    // saveEditorSettings() path. After this the "Update on WP" button will
+    // pick up the new taxonomy from resolveTaxonomy() and push it to the
+    // already-published post.
+    if (typeof saveEditorSettings === 'function') {
+      saveEditorSettings();
+    }
+
+    var parts = [];
+    if (chosenCatIds.length) parts.push(chosenCatIds.length + ' categor' + (chosenCatIds.length === 1 ? 'y' : 'ies'));
+    if (chosenTagIds.length) parts.push(chosenTagIds.length + ' tag' + (chosenTagIds.length === 1 ? '' : 's'));
+    if (chosenAuthId) parts.push('author');
+    var msg = parts.length ? 'Applied ' + parts.join(' · ') + ' and saved override' : 'Nothing to apply';
+    if (missingTagNames.length) {
+      msg += '. Skipped unresolved tags: ' + missingTagNames.join(', ');
+    }
+    showToast(msg, 'success');
+
+    // Refresh the resolved-routing preview box so admin can see the live state
+    if (typeof fetchApi === 'function' && currentDraftId) {
+      forceApiRefresh('/api/drafts');
+      fetchApi('/api/drafts/' + currentDraftId)
+        .then(function (d) { if (d && d.data) _populateEditorTaxonomy(d.data); })
+        .catch(function () {});
+    }
   }
 
   function saveEditorSettings() {
