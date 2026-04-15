@@ -5040,3 +5040,24 @@ svg.icon, [data-lucide] { width: 16px; height: 16px; }
   border-top: 1px solid var(--border-subtle);
   flex-wrap: wrap;
 }
+/* Per-card Apply button — each card now has its own Apply so the admin
+   explicitly picks which source (resolved vs. classifier) to use. */
+.recommend-section-title .recommend-apply-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.recommend-section-title {
+  justify-content: flex-start;
+}
+.recommend-footer-hint {
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.recommend-footer-hint strong { color: var(--text-secondary); }
