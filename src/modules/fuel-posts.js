@@ -13,6 +13,44 @@ function _wpPostStatus() {
   return allowed.indexOf(v) !== -1 ? v : 'publish';
 }
 
+// Resolve an author slug to a numeric WP user ID via wp_taxonomy_cache.
+// Returns null when db is unavailable, slug is empty, or the slug is not
+// cached — the caller is expected to fall back to existing behavior.
+function _resolveAuthorId(db, slug) {
+  if (!db || !slug || typeof slug !== 'string') return null;
+  try {
+    var row = db.prepare(
+      "SELECT wp_id FROM wp_taxonomy_cache WHERE tax_type = 'author' AND slug = ? LIMIT 1"
+    ).get(slug.trim());
+    if (row && row.wp_id) {
+      var n = Number(row.wp_id);
+      if (!Number.isNaN(n) && n > 0) return n;
+    }
+  } catch (e) {
+    // Swallow — taxonomy cache may not exist yet; fall back to default.
+  }
+  return null;
+}
+
+// Read the MODULE_ROUTING_CONFIG setting fresh and return the resolved
+// author WP user ID for the fuel_posts module, or null if nothing is
+// configured or the slug can't be resolved. Read fresh on every call so
+// admin edits take effect without a restart — config.get() already has a
+// 5s TTL cache so this isn't hot-path expensive.
+function _getFuelAuthorId(db) {
+  try {
+    var raw = _cfg.get('MODULE_ROUTING_CONFIG');
+    if (!raw) return null;
+    var moduleConfig = JSON.parse(raw);
+    if (!moduleConfig || typeof moduleConfig !== 'object') return null;
+    var section = moduleConfig.fuel_posts;
+    if (!section || !section.default_author) return null;
+    return _resolveAuthorId(db, section.default_author);
+  } catch (e) {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
@@ -282,6 +320,7 @@ class FuelPostCreator {
     // Publish via WP
     // -----------------------------------------------------------------------
 
+    var fuelAuthorIdCity = _getFuelAuthorId(this.db);
     const result = await this.wp.upsertPost({
       slug: slug,
       title: title,
@@ -289,6 +328,7 @@ class FuelPostCreator {
       categoryNames: [fuelLabel],
       metaDescription: metaDescription,
       status: _wpPostStatus(),
+      authorId: fuelAuthorIdCity || undefined,
       meta: {
         _hdf_fuel_city: city,
         _hdf_fuel_state: state,
@@ -505,6 +545,7 @@ class FuelPostCreator {
     const html = this._buildStateContent(state, stateInfo, citiesWithPrices, nationalUrl);
 
     // Publish
+    var fuelAuthorIdState = _getFuelAuthorId(this.db);
     const result = await this.wp.upsertPost({
       slug: slug,
       title: title,
@@ -512,6 +553,7 @@ class FuelPostCreator {
       categoryNames: [fuelLabel],
       metaDescription: metaDescription,
       status: _wpPostStatus(),
+      authorId: fuelAuthorIdState || undefined,
       meta: {
         _hdf_fuel_state: state,
         _hdf_fuel_type: fuelType,
@@ -593,6 +635,7 @@ class FuelPostCreator {
     const html = this._buildNationalContent(allCitiesWithPrices);
 
     // Publish
+    var fuelAuthorIdNational = _getFuelAuthorId(this.db);
     const result = await this.wp.upsertPost({
       slug: slug,
       title: title,
@@ -600,6 +643,7 @@ class FuelPostCreator {
       categoryNames: [fuelLabel],
       metaDescription: metaDescription,
       status: _wpPostStatus(),
+      authorId: fuelAuthorIdNational || undefined,
       meta: {
         _hdf_fuel_type: fuelType,
         _hdf_fuel_is_national: '1'

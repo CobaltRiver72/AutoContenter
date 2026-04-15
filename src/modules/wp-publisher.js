@@ -133,9 +133,17 @@ class WPPublisher {
 
   /**
    * Create or update a WordPress post.
+   *
+   * Optional fields on `opts`:
+   *  - authorId     (positive integer) — WP user ID for post.author. When
+   *                  omitted/invalid, WordPress uses the API-authenticated
+   *                  user (existing behavior).
+   *  - categorySlug (string) — reserved for future use; if passed and it
+   *                  resolves via the category cache, it is appended to the
+   *                  category list. Unknown slugs are ignored silently.
    */
   async upsertPost(opts) {
-    const { slug, title, content, categoryNames, metaDescription, status, meta } = opts;
+    const { slug, title, content, categoryNames, metaDescription, status, meta, authorId, categorySlug } = opts;
 
     // Resolve category IDs
     const categoryIds = [];
@@ -143,6 +151,16 @@ class WPPublisher {
       for (const name of categoryNames) {
         const catId = await this.getOrCreateCategory(name);
         if (catId) categoryIds.push(catId);
+      }
+    }
+
+    // Optional explicit category slug (additive). Looked up via cache only —
+    // we do not auto-create from a slug, since slugs don't map 1:1 to names.
+    if (categorySlug && typeof categorySlug === 'string') {
+      var slugKey = categorySlug.toLowerCase().trim();
+      if (slugKey && this.categoryCache[slugKey]) {
+        var slugCatId = this.categoryCache[slugKey];
+        if (categoryIds.indexOf(slugCatId) === -1) categoryIds.push(slugCatId);
       }
     }
 
@@ -157,6 +175,13 @@ class WPPublisher {
         rank_math_description: metaDescription || '',
       }),
     };
+
+    // Optional explicit author — only set when caller passed a positive
+    // integer. Leaving this unset preserves existing behavior (WP uses the
+    // API-authenticated user as the post author).
+    if (typeof authorId === 'number' && authorId > 0 && Number.isFinite(authorId) && Math.floor(authorId) === authorId) {
+      postData.author = authorId;
+    }
 
     // Optional admin-configured comment/ping status — empty string means
     // "let WordPress use its site default".

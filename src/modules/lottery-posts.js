@@ -11,6 +11,43 @@ function _wpPostStatus() {
   return allowed.indexOf(v) !== -1 ? v : 'publish';
 }
 
+// Resolve an author slug to a numeric WP user ID via wp_taxonomy_cache.
+// Returns null when db is unavailable, slug is empty, or the slug is not
+// cached — the caller is expected to fall back to existing behavior.
+function _resolveAuthorId(db, slug) {
+  if (!db || !slug || typeof slug !== 'string') return null;
+  try {
+    var row = db.prepare(
+      "SELECT wp_id FROM wp_taxonomy_cache WHERE tax_type = 'author' AND slug = ? LIMIT 1"
+    ).get(slug.trim());
+    if (row && row.wp_id) {
+      var n = Number(row.wp_id);
+      if (!Number.isNaN(n) && n > 0) return n;
+    }
+  } catch (e) {
+    // Swallow — taxonomy cache may not exist yet; fall back to default.
+  }
+  return null;
+}
+
+// Read MODULE_ROUTING_CONFIG fresh and return the resolved author WP user
+// ID for the lottery_posts module, or null if nothing is configured or the
+// slug can't be resolved. Fresh on every call so admin edits take effect
+// without a restart — config.get() has a 5s TTL cache internally.
+function _getLotteryAuthorId(db) {
+  try {
+    var raw = _cfg.get('MODULE_ROUTING_CONFIG');
+    if (!raw) return null;
+    var moduleConfig = JSON.parse(raw);
+    if (!moduleConfig || typeof moduleConfig !== 'object') return null;
+    var section = moduleConfig.lottery_posts;
+    if (!section || !section.default_author) return null;
+    return _resolveAuthorId(db, section.default_author);
+  } catch (e) {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -132,6 +169,7 @@ class LotteryPostCreator {
     const contentHash = crypto.createHash('md5').update(html).digest('hex');
 
     try {
+      var lotteryAuthorId = _getLotteryAuthorId(this.db);
       const wpResult = await this.wp.upsertPost({
         slug,
         title,
@@ -139,6 +177,7 @@ class LotteryPostCreator {
         categoryNames: ['Lottery Results'],
         metaDescription,
         status: _wpPostStatus(),
+        authorId: lotteryAuthorId || undefined,
         meta: {
           _hdf_lottery_draw_date: draw_date,
           _hdf_lottery_draw_time: draw_time,

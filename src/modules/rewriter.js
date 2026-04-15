@@ -2,6 +2,7 @@
 
 var { convertMarkdownToHtml } = require('../utils/markdown-to-html');
 var { sanitizeAxiosError } = require('../utils/safe-http');
+var _config = require('../utils/config');
 
 // Model definitions — used by both backend and sent to frontend
 var AI_MODELS = {
@@ -28,6 +29,93 @@ var AI_MODELS = {
 function countWords(html) {
   var text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   return text ? text.split(' ').length : 0;
+}
+
+// ─── Classifier Slug Readers (for dynamic system prompt) ───────────────────
+//
+// The master prompt (see buildPrompt below) tells the AI which author slugs
+// and category slugs to return in its `author_beat` / `primary_category`
+// fields. Until these helpers existed the lists were hardcoded inside the
+// prompt string, which meant admin-imported authors / categories had NO
+// effect at rewrite time — the AI kept returning the original 5 legacy
+// author slugs regardless of CLASSIFIER_AUTHOR_DICTIONARIES.
+//
+// These helpers read the same setting that the content-classifier module
+// consumes (CLASSIFIER_AUTHOR_DICTIONARIES / CLASSIFIER_CATEGORY_DICTIONARIES),
+// parse it as JSON safely, and return the list of top-level keys (slugs).
+// If the setting is empty / missing / unparseable / not an object, they fall
+// back to the legacy hardcoded slug list so existing deployments keep working.
+//
+// config.get() has its own 5-second TTL cache, so we re-read on every
+// rewrite — admin edits take effect within seconds, no module reload needed.
+
+var _FALLBACK_AUTHOR_SLUGS = [
+  'priya-mehta',
+  'arjun-sharma',
+  'rahul-desai',
+  'deepa-nair',
+  'karan-verma',
+];
+
+var _FALLBACK_CATEGORY_SLUGS = [
+  'entertainment',
+  'cricket',
+  'auto',
+  'finance',
+  'fuel-prices',
+  'gold-silver',
+];
+
+function _parseDictionaryKeys(rawJsonString) {
+  if (!rawJsonString || typeof rawJsonString !== 'string') return null;
+  var trimmed = rawJsonString.trim();
+  if (!trimmed) return null;
+  try {
+    var parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    var keys = Object.keys(parsed).filter(function (k) {
+      return typeof k === 'string' && k.trim().length > 0;
+    });
+    return keys.length > 0 ? keys : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function _getConfiguredAuthors() {
+  var raw;
+  try {
+    raw = _config.get('CLASSIFIER_AUTHOR_DICTIONARIES');
+  } catch (e) {
+    raw = null;
+  }
+  var keys = _parseDictionaryKeys(raw);
+  return keys || _FALLBACK_AUTHOR_SLUGS.slice();
+}
+
+function _getConfiguredCategories() {
+  var raw;
+  try {
+    raw = _config.get('CLASSIFIER_CATEGORY_DICTIONARIES');
+  } catch (e) {
+    raw = null;
+  }
+  var keys = _parseDictionaryKeys(raw);
+  return keys || _FALLBACK_CATEGORY_SLUGS.slice();
+}
+
+// True when `list` contains exactly the same slugs as `reference` (any order).
+// Used by buildPrompt to decide whether to emit the legacy bullet-list
+// descriptions or a simpler slug-only list for admin-imported rosters.
+function _slugListMatches(list, reference) {
+  if (!Array.isArray(list) || !Array.isArray(reference)) return false;
+  if (list.length !== reference.length) return false;
+  var seen = {};
+  for (var i = 0; i < reference.length; i++) seen[reference[i]] = true;
+  for (var j = 0; j < list.length; j++) {
+    if (!seen[list[j]]) return false;
+  }
+  return true;
 }
 
 // ─── API Key Format Validator ─────────────────────────────────────────────
@@ -132,6 +220,61 @@ function cleanSourceContent(text) {
 
 function buildPrompt(article, cluster, settings) {
   var s = settings || {};
+
+  // ─── Dynamic classifier slugs ───────────────────────────────────────────
+  // Read the admin-configured author and category slugs so the prompt
+  // reflects whatever the admin imported. Falls back to the legacy
+  // hardcoded lists when the settings are empty / unparseable.
+  var authorSlugs = _getConfiguredAuthors();
+  var categorySlugs = _getConfiguredCategories();
+  var authorsAreCustom = !_slugListMatches(authorSlugs, _FALLBACK_AUTHOR_SLUGS);
+  var categoriesAreCustom = !_slugListMatches(categorySlugs, _FALLBACK_CATEGORY_SLUGS);
+  var exampleAuthorSlug = authorSlugs[0] || _FALLBACK_AUTHOR_SLUGS[0];
+  var exampleCategorySlug = categorySlugs[0] || _FALLBACK_CATEGORY_SLUGS[0];
+  var authorSlugCsv = authorSlugs.map(function (k) { return '"' + k + '"'; }).join(', ');
+  var categorySlugCsv = categorySlugs.map(function (k) { return '"' + k + '"'; }).join(', ');
+
+  // Legacy bullet-list descriptions — used only when the fallback slug list
+  // is in effect (i.e. no custom roster has been imported). When an admin
+  // imports their own roster, we switch to a plain slug-only list because
+  // the imported rosters have no human-written descriptions attached.
+  var categoryListLines;
+  if (categoriesAreCustom) {
+    categoryListLines = ['primary_category — choose the single best fit. Use "general" only if no other category fits:'];
+    for (var ci = 0; ci < categorySlugs.length; ci++) {
+      categoryListLines.push('  * ' + categorySlugs[ci]);
+    }
+  } else {
+    categoryListLines = [
+      'primary_category — choose the single best fit. Use "general" only if no other category fits:',
+      '  * entertainment: Bollywood, movies, OTT (Netflix/Hotstar), celebrities, actors, music, awards',
+      '  * cricket: IPL, BCCI, ICC, test/ODI/T20, players, match analysis',
+      '  * auto: bikes, cars, EVs, telecom (Jio/Airtel), smartphones, gadgets',
+      '  * finance: stocks (Sensex/Nifty), tax, banking (RBI), mutual funds, economy, insurance',
+      '  * fuel-prices: petrol, diesel, LPG, CNG, crude oil prices',
+      '  * gold-silver: gold rates, silver prices, bullion, MCX commodities',
+    ];
+  }
+
+  var authorListLines;
+  if (authorsAreCustom) {
+    authorListLines = ['author_beat — match the article topic to one of these author slugs:'];
+    for (var ai = 0; ai < authorSlugs.length; ai++) {
+      authorListLines.push('  * ' + authorSlugs[ai]);
+    }
+  } else {
+    authorListLines = [
+      'author_beat — match by topic expertise:',
+      '  * priya-mehta: Entertainment, Bollywood, OTT, celebrities',
+      '  * arjun-sharma: Cricket, IPL, sports, player profiles',
+      '  * rahul-desai: Auto (bikes/cars/EVs), technology, telecom, gadgets',
+      '  * deepa-nair: Finance (stocks/tax/banking), fuel prices, gold/silver',
+      '  * karan-verma: General news, politics, trending, viral, education, health, anything else',
+      '  * Note: "net worth" articles — assign by subject (cricketer→arjun-sharma, actor→priya-mehta, businessman→deepa-nair)',
+    ];
+  }
+
+  var classificationBlock = categoryListLines.concat(authorListLines).join('\n');
 
   // ─── Determine Output Language ────────────────────────────────────────────────
   // Rule: if ANY source article in the cluster is English → write in English.
@@ -389,20 +532,7 @@ function buildPrompt(article, cluster, settings) {
     '11. NEVER use hyphens or dashes (-, –, —) as punctuation within sentences or headlines. No em dashes, no en dashes, no hyphens used as separators or for parenthetical asides. Rewrite the sentence in plain English instead. Hyphenated compound adjectives (e.g. "well-known", "two-year") are the only exception.',
     customBlock,
     '# CLASSIFICATION (fill the classification object in your JSON response)',
-    'primary_category — choose the single best fit. Use "general" only if no other category fits:',
-    '  * entertainment: Bollywood, movies, OTT (Netflix/Hotstar), celebrities, actors, music, awards',
-    '  * cricket: IPL, BCCI, ICC, test/ODI/T20, players, match analysis',
-    '  * auto: bikes, cars, EVs, telecom (Jio/Airtel), smartphones, gadgets',
-    '  * finance: stocks (Sensex/Nifty), tax, banking (RBI), mutual funds, economy, insurance',
-    '  * fuel-prices: petrol, diesel, LPG, CNG, crude oil prices',
-    '  * gold-silver: gold rates, silver prices, bullion, MCX commodities',
-    'author_beat — match by topic expertise:',
-    '  * priya-mehta: Entertainment, Bollywood, OTT, celebrities',
-    '  * arjun-sharma: Cricket, IPL, sports, player profiles',
-    '  * rahul-desai: Auto (bikes/cars/EVs), technology, telecom, gadgets',
-    '  * deepa-nair: Finance (stocks/tax/banking), fuel prices, gold/silver',
-    '  * karan-verma: General news, politics, trending, viral, education, health, anything else',
-    '  * Note: "net worth" articles — assign by subject (cricketer→arjun-sharma, actor→priya-mehta, businessman→deepa-nair)',
+    classificationBlock,
     'tags: 5–8 proper tags. Use full names (Shah Rukh Khan, not SRK). Include people, teams, brands, events.',
     'confidence: 0.9+ if clearly one category, 0.5–0.8 if somewhat ambiguous, <0.5 if very generic.',
     '',
@@ -431,8 +561,8 @@ function buildPrompt(article, cluster, settings) {
     '  "language": "' + targetLang + '",',
     '  "word_count_body": 487,',
     '  "classification": {',
-    '    "primary_category": "entertainment",',
-    '    "author_beat": "priya-mehta",',
+    '    "primary_category": "' + exampleCategorySlug + '",',
+    '    "author_beat": "' + exampleAuthorSlug + '",',
     '    "tags": ["Tag One", "Tag Two", "Tag Three", "Tag Four", "Tag Five"],',
     '    "confidence": 0.92',
     '  }',
@@ -447,8 +577,8 @@ function buildPrompt(article, cluster, settings) {
     '- language: "' + targetLang + '"',
     '- word_count_body: integer count of words in body_markdown',
     '- classification: optional object — include it when you can confidently classify the article',
-    '  - primary_category: one of "entertainment", "cricket", "auto", "finance", "fuel-prices", "gold-silver", "general"',
-    '  - author_beat: one of "priya-mehta", "arjun-sharma", "rahul-desai", "deepa-nair", "karan-verma"',
+    '  - primary_category: one of ' + categorySlugCsv + ', "general"',
+    '  - author_beat: one of ' + authorSlugCsv,
     '  - tags: array of 5–8 SEO-friendly tag strings with proper names (Shah Rukh Khan, not SRK)',
     '  - confidence: number 0.0–1.0',
   ].join('\n');
@@ -1723,4 +1853,4 @@ async function fetchOpenRouterFreeModels(forceRefresh) {
   }
 }
 
-module.exports = { ArticleRewriter, AI_MODELS, fetchOpenRouterFreeModels };
+module.exports = { ArticleRewriter, AI_MODELS, fetchOpenRouterFreeModels, buildPrompt: buildPrompt };
