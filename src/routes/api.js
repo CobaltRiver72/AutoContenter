@@ -5778,6 +5778,91 @@ function createApiRouter(deps) {
       logger.warn('autopilot', 'Run-Now diagnostic failed: ' + diagErr.message);
     }
 
+    // ─── Deep trace: replicate _rewriteLoop's exact SQL with real LIMIT ─────
+    // The diagnostic above only runs the FILTERS, not the LIMIT or the
+    // blocked-keyword JS post-filter. This block runs the identical query
+    // the production loop uses, so we can see if the real candidate set
+    // is being cut by concurrency limits, rate caps, or topic filters.
+    try {
+      logger.info('autopilot',
+        'Run-Now state-before: rewriteRunning=' + !!pipeline._rewriteRunning +
+        ' publishRunning=' + !!pipeline._publishRunning);
+
+      var concurrency = parseInt(cfgGet('REWRITE_CONCURRENCY'), 10) || 3;
+      var dailyLimit = parseInt(cfgGet('AUTO_REWRITE_DAILY_LIMIT'), 10) || 100;
+      var hourlyLimit = parseInt(cfgGet('AUTO_REWRITE_HOURLY_LIMIT'), 10) || 20;
+      var rToday = (db.prepare(
+        "SELECT COUNT(*) AS n FROM draft_versions WHERE created_at >= date('now')"
+      ).get() || {}).n || 0;
+      var rHour = (db.prepare(
+        "SELECT COUNT(*) AS n FROM draft_versions WHERE created_at >= datetime('now', '-1 hour')"
+      ).get() || {}).n || 0;
+      var slots = Math.min(concurrency, dailyLimit - rToday, hourlyLimit - rHour);
+
+      logger.info('autopilot',
+        'Run-Now slots: concurrency=' + concurrency +
+        ' daily=' + rToday + '/' + dailyLimit +
+        ' hour=' + rHour + '/' + hourlyLimit +
+        ' -> slotsAvailable=' + slots);
+
+      if (slots > 0) {
+        // Identical to _rewriteLoop SELECT at pipeline.js:257-274
+        var realMinSources = parseInt(cfgGet('MIN_SOURCES_THRESHOLD'), 10);
+        if (isNaN(realMinSources) || realMinSources < 1) realMinSources = 2;
+        var realMinSim = parseFloat(cfgGet('AUTOPILOT_MIN_SIMILARITY'));
+        if (isNaN(realMinSim)) realMinSim = 0.30;
+
+        var loopRows = db.prepare(
+          "SELECT d.cluster_id, c.topic, c.trends_boosted, COUNT(*) as draft_count " +
+          "FROM drafts d " +
+          "JOIN clusters c ON d.cluster_id = c.id " +
+          "WHERE d.mode IN ('auto', 'manual_import') AND d.cluster_id IS NOT NULL AND d.status = 'draft' " +
+          "  AND c.status = 'queued' " +
+          "  AND c.article_count >= ? " +
+          "  AND (c.avg_similarity IS NULL OR c.avg_similarity >= ?) " +
+          "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
+          "  AND NOT EXISTS (" +
+          "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
+          "    AND d2.status = 'fetching' AND d2.mode IN ('auto', 'manual_import')" +
+          "  ) " +
+          "GROUP BY d.cluster_id " +
+          "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
+          "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
+          "LIMIT ?"
+        ).all(realMinSources, realMinSim, slots);
+
+        logger.info('autopilot',
+          'Run-Now real-SQL (LIMIT ' + slots + '): returned ' + loopRows.length + ' rows');
+
+        if (loopRows.length > 0) {
+          var blockedKwRaw = String(cfgGet('AUTOPILOT_BLOCKED_KEYWORDS') || '');
+          var blockedKw = blockedKwRaw.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+          var topics = loopRows.map(function (r) { return (r.topic || '').substring(0, 60); });
+          logger.info('autopilot', 'Run-Now top candidates: ' + JSON.stringify(topics));
+
+          if (blockedKw.length > 0) {
+            var kept = [];
+            var dropped = [];
+            for (var li = 0; li < loopRows.length; li++) {
+              var t = (loopRows[li].topic || '').toLowerCase();
+              var matched = null;
+              for (var ki = 0; ki < blockedKw.length; ki++) {
+                if (t.indexOf(blockedKw[ki]) !== -1) { matched = blockedKw[ki]; break; }
+              }
+              if (matched) dropped.push({ topic: (loopRows[li].topic || '').substring(0, 60), kw: matched });
+              else kept.push(loopRows[li]);
+            }
+            logger.info('autopilot',
+              'Run-Now blocked-kw filter: ' + loopRows.length + ' -> ' + kept.length +
+              (dropped.length ? ' dropped: ' + JSON.stringify(dropped) : ''));
+          }
+        }
+      }
+    } catch (traceErr) {
+      logger.warn('autopilot', 'Run-Now trace failed: ' + traceErr.message);
+    }
+    // ─── End deep trace ─────────────────────────────────────────────────────
+
     var startStats = Object.assign({}, pipeline.stats || {});
     var errors = [];
 
@@ -5787,6 +5872,10 @@ function createApiRouter(deps) {
       errors.push('rewrite: ' + e.message);
       logger.error('autopilot', 'Run-Now rewrite failed: ' + e.message);
     }
+
+    logger.info('autopilot',
+      'Run-Now state-after: rewriteRunning=' + !!pipeline._rewriteRunning +
+      ' publishRunning=' + !!pipeline._publishRunning);
     try {
       await pipeline._publishLoop();
     } catch (e) {
