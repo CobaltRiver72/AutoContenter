@@ -1708,7 +1708,8 @@ function createApiRouter(deps) {
       // SECURITY: Only allow known settings keys
       var ALLOWED_KEYS = [
         'FIREHOSE_TOKEN',
-        'WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS',
+        'WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY',
+        'WP_ALWAYS_APPEND_CATEGORY_ID', 'WP_POST_STATUS',
         'WP_COMMENT_STATUS', 'WP_PING_STATUS', 'CLASSIFIER_CATEGORY_TO_AUTHOR',
         'MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS',
         'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES',
@@ -1810,7 +1811,7 @@ function createApiRouter(deps) {
       loadRuntimeOverrides(db);
 
       // Re-initialize publisher if any WP credentials changed
-      var wpKeys = ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_POST_STATUS', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_SITE_URL'];
+      var wpKeys = ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_POST_STATUS', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_ALWAYS_APPEND_CATEGORY_ID', 'WP_SITE_URL'];
       var hasWpChange = validEntries.some(function (e) { return wpKeys.indexOf(e[0]) !== -1; });
       if (hasWpChange && publisher && typeof publisher.reinit === 'function') {
         publisher.reinit();

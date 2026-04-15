@@ -4445,6 +4445,19 @@
     fillSelect('editor-wp-primary-cat', cats, '— same as first selected —');
     fillSelect('editor-wp-tags', tags, null);
     fillSelect('editor-wp-author', authors, '— use rule/default —');
+
+    // Post Defaults — always-append category dropdown. Preserve the currently
+    // saved value across taxonomy refreshes so loadWPPublishingSettings()
+    // doesn't have to race with loadWPTaxonomy().
+    var appendSel = document.getElementById('wp-always-append-category');
+    if (appendSel) {
+      var prevAppend = appendSel.value || appendSel.dataset.savedValue || '';
+      appendSel.innerHTML = '<option value="">— none (disabled) —</option>' +
+        cats.map(function (c) {
+          return '<option value="' + c.wp_id + '"' + (String(c.wp_id) === String(prevAppend) ? ' selected' : '') + '>' +
+            escapeHtml(c.name) + (c.slug ? ' (/' + c.slug + ')' : '') + '</option>';
+        }).join('');
+    }
   }
 
   function syncWPTaxonomy() {
@@ -8588,12 +8601,15 @@
     var postStatus = $('wp-post-status');
     var authorId = $('wp-author-id');
     var defCat = $('wp-default-category');
+    var appendCat = $('wp-always-append-category');
     var defAuthorUser = $('wp-default-author-username');
     var commentStatus = $('wp-comment-status');
     var pingStatus = $('wp-ping-status');
     if (postStatus) updates.WP_POST_STATUS = postStatus.value;
     if (authorId && authorId.value) updates.WP_AUTHOR_ID = authorId.value;
     if (defCat && defCat.value) updates.WP_DEFAULT_CATEGORY = defCat.value;
+    // Send empty string to clear, numeric ID otherwise — backend treats "" as disabled
+    if (appendCat) updates.WP_ALWAYS_APPEND_CATEGORY_ID = appendCat.value || '';
     if (defAuthorUser) updates.DEFAULT_AUTHOR_USERNAME = defAuthorUser.value;
     if (commentStatus) updates.WP_COMMENT_STATUS = commentStatus.value;
     if (pingStatus) updates.WP_PING_STATUS = pingStatus.value;
@@ -8622,6 +8638,17 @@
       if (el) el.value = s.WP_AUTHOR_ID || '';
       el = $('wp-default-category');
       if (el) el.value = s.WP_DEFAULT_CATEGORY || '';
+      el = $('wp-always-append-category');
+      if (el) {
+        // Stash the saved ID as a data-attribute so _populateTaxonomySelects()
+        // can restore the selection even if it runs AFTER loadWPPublishingSettings
+        // (taxonomy load is async and may rebuild the <option>s later).
+        el.dataset.savedValue = s.WP_ALWAYS_APPEND_CATEGORY_ID || '';
+        var savedVal = String(s.WP_ALWAYS_APPEND_CATEGORY_ID || '');
+        if (savedVal && Array.from(el.options).some(function (o) { return o.value === savedVal; })) {
+          el.value = savedVal;
+        }
+      }
       el = $('wp-default-author-username');
       if (el) el.value = s.DEFAULT_AUTHOR_USERNAME || '';
       el = $('wp-comment-status');

@@ -38,7 +38,12 @@ function _resolveCategorySlugToId(db, slug) {
  *   authorId    = draft override → matching rule → DEFAULT_AUTHOR_USERNAME slug
  *                 → WP_AUTHOR_ID numeric fallback
  *   categoryIds = draft override → matching rule → DEFAULT_CATEGORY_SLUG slug
- *                 → WP_DEFAULT_CATEGORY numeric fallback
+ *                 → WP_ALWAYS_APPEND_CATEGORY_ID → WP_DEFAULT_CATEGORY numeric
+ *
+ * WP_ALWAYS_APPEND_CATEGORY_ID is dual-purpose: when set, it is (a) appended
+ * to every article's category list as a catch-all secondary, and (b) used as
+ * the ultimate fallback if no other layer resolves. Its ID never replaces the
+ * primary category — existing classifier/rule output remains primary.
  *
  * Returns: { categoryIds: number[], primaryCategoryId: number, tagIds: number[], authorId: number }
  */
@@ -49,8 +54,9 @@ function resolveTaxonomy(draft, db, config) {
     catch (e) { return []; }
   }
 
-  var defaultCategoryId = parseInt(config.WP_DEFAULT_CATEGORY, 10) || 1;
-  var defaultAuthorId   = parseInt(config.WP_AUTHOR_ID, 10) || 1;
+  var defaultCategoryId     = parseInt(config.WP_DEFAULT_CATEGORY, 10) || 1;
+  var alwaysAppendCategoryId = parseInt(config.WP_ALWAYS_APPEND_CATEGORY_ID, 10) || 0;
+  var defaultAuthorId       = parseInt(config.WP_AUTHOR_ID, 10) || 1;
 
   // Slug-based global defaults — resolve via wp_taxonomy_cache. These sit
   // BETWEEN the matching rule and the numeric config fallback so that admins
@@ -100,20 +106,27 @@ function resolveTaxonomy(draft, db, config) {
     }
   } catch (e) { /* rules table may not exist yet — ignore */ }
 
-  // --- Merge: draft override > rule > slug default > numeric default ---
+  // --- Merge: draft override > rule > slug default > always-append > numeric default ---
+  var fallbackCategoryId = slugCategoryId || alwaysAppendCategoryId || defaultCategoryId;
   var categoryIds = draftCategoryIds.length   ? draftCategoryIds
                   : (matchedRule && parseIds(matchedRule.wp_category_ids).length)
                       ? parseIds(matchedRule.wp_category_ids)
-                  : (slugCategoryId ? [slugCategoryId] : [defaultCategoryId]);
+                  : [fallbackCategoryId];
 
   var primaryCategoryId = draftPrimaryCatId
     || (matchedRule && matchedRule.wp_primary_cat_id ? Number(matchedRule.wp_primary_cat_id) : null)
     || categoryIds[0]
-    || slugCategoryId
-    || defaultCategoryId;
+    || fallbackCategoryId;
 
   // Primary category MUST be in the categories array (WP requirement)
   if (categoryIds.indexOf(primaryCategoryId) === -1) categoryIds = [primaryCategoryId].concat(categoryIds);
+
+  // Always-append: ensure WP_ALWAYS_APPEND_CATEGORY_ID is in the category list
+  // when admin has configured it. This is the "News as catch-all" use case —
+  // every article gets this category alongside its primary, never replacing it.
+  if (alwaysAppendCategoryId && categoryIds.indexOf(alwaysAppendCategoryId) === -1) {
+    categoryIds.push(alwaysAppendCategoryId);
+  }
 
   var tagIds = draftTagIds.length ? draftTagIds
              : (matchedRule && parseIds(matchedRule.wp_tag_ids).length)
