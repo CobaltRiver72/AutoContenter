@@ -36,6 +36,8 @@ var DEFAULTS = {
   WP_AUTHOR_ID: '1',
   WP_DEFAULT_CATEGORY: '1',
   WP_POST_STATUS: 'draft',
+  WP_COMMENT_STATUS: '',
+  WP_PING_STATUS: '',
   TIER1_SOURCES: 'ndtv.com,hindustantimes.com,timesofindia.indiatimes.com,thehindu.com,indianexpress.com',
   TIER2_SOURCES: 'livemint.com,business-standard.com,deccanherald.com,firstpost.com,news18.com',
   TIER3_SOURCES: 'zeenews.india.com,republicworld.com,wionews.com,aninews.in',
@@ -91,7 +93,7 @@ var DEFAULTS = {
   INFRANODUS_AUTO_ANALYZE: 'true',
   INFRANODUS_GOOGLE_ENABLED: 'false',
   // Content classifier
-  DEFAULT_AUTHOR_USERNAME: 'karan-verma',
+  DEFAULT_AUTHOR_USERNAME: '',
   AUTHOR_ASSIGNMENT_ENABLED: 'true',
   CLASSIFIER_CONFIDENCE_THRESHOLD: '15',
   AUTO_CREATE_WP_TAGS: 'true',
@@ -99,6 +101,7 @@ var DEFAULTS = {
   BLOCKED_TAGS: '',
   CLASSIFIER_CATEGORY_DICTIONARIES: '',
   CLASSIFIER_AUTHOR_DICTIONARIES: '',
+  CLASSIFIER_CATEGORY_TO_AUTHOR: '',
   CLASSIFIER_TAG_DICTIONARY: '',
   // Auto-Rewrite engine
   AUTO_REWRITE_ENABLED: 'false',

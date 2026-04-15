@@ -510,6 +510,12 @@ class WordPressPublisher {
       },
     };
 
+    // Optional admin-configured comment/ping status — empty means "use WP site default"
+    var cmtStatus = String(this.config.WP_COMMENT_STATUS || '').toLowerCase().trim();
+    var pngStatus = String(this.config.WP_PING_STATUS || '').toLowerCase().trim();
+    if (cmtStatus === 'open' || cmtStatus === 'closed') postData.comment_status = cmtStatus;
+    if (pngStatus === 'open' || pngStatus === 'closed') postData.ping_status = pngStatus;
+
     var postResult = await this.createPost(postData);
 
     // Step 4: Update schema with actual post URL (non-critical)

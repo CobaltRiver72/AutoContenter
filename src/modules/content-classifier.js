@@ -13,17 +13,11 @@ var STOPWORDS = new Set([
   'india','indian','news','report','reports','according','update','updates','latest',
 ]);
 
-// ─── Category → Author mapping ───────────────────────────────────────────────
-
-var CATEGORY_TO_AUTHOR = {
-  'entertainment': 'priya-mehta',
-  'cricket':       'arjun-sharma',
-  'auto':          'rahul-desai',
-  'finance':       'deepa-nair',
-  'fuel-prices':   'deepa-nair',
-  'gold-silver':   'deepa-nair',
-};
-var DEFAULT_AUTHOR = 'karan-verma';
+// Category → Author mapping is admin-configurable via CLASSIFIER_CATEGORY_TO_AUTHOR
+// (JSON string of {category: author-slug}). Default is empty — when unset, the
+// classifier does not assign any author and the publisher falls back to
+// WP_AUTHOR_ID from settings. This avoids shipping author slugs that don't
+// exist on the admin's WordPress site.
 
 // ─── Source category hints ────────────────────────────────────────────────────
 
@@ -253,6 +247,17 @@ class ContentClassifier {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
+  _getCategoryAuthorMap() {
+    var raw = this.config.get('CLASSIFIER_CATEGORY_TO_AUTHOR');
+    if (!raw) return {};
+    try { var parsed = JSON.parse(raw); return (parsed && typeof parsed === 'object') ? parsed : {}; }
+    catch (e) { return {}; }
+  }
+
+  _getDefaultAuthor() {
+    return (this.config.get('DEFAULT_AUTHOR_USERNAME') || '').trim();
+  }
+
   _loadDictionaries() {
     var catRaw = this.config.get('CLASSIFIER_CATEGORY_DICTIONARIES');
     var authRaw = this.config.get('CLASSIFIER_AUTHOR_DICTIONARIES');
@@ -330,6 +335,7 @@ class ContentClassifier {
     }
 
     // Domain hints → +10 to category score and matching author score
+    var catAuthorMap = this._getCategoryAuthorMap();
     var domainCatKeys = Object.keys(DOMAIN_HINTS);
     for (var di = 0; di < domainCatKeys.length; di++) {
       var dCatKey = domainCatKeys[di];
@@ -341,8 +347,8 @@ class ContentClassifier {
           }
           categoryScores[dCatKey].score += 10;
 
-          // Boost the matching author too
-          var matchingAuthor = CATEGORY_TO_AUTHOR[dCatKey];
+          // Boost the matching author too (only if admin has mapped one)
+          var matchingAuthor = catAuthorMap[dCatKey];
           if (matchingAuthor) {
             if (!authorScores[matchingAuthor]) {
               authorScores[matchingAuthor] = { score: 0, matchedTerms: [] };
@@ -441,10 +447,14 @@ class ContentClassifier {
     // 10. Build reasons
     var matchReasons = this._buildReasons(bestCat, bestAuthor);
 
-    // If the best category author slot is empty, derive author from category
+    // If the best category author slot is empty, derive author from the
+    // admin-configured category→author map, falling back to the configured
+    // default author username. Both come from settings; empty string means
+    // "no classifier author, let publish rules / global default decide".
     var resolvedAuthor = bestAuthor.key;
     if (!resolvedAuthor || bestAuthor.score < CONFIDENCE_THRESHOLD) {
-      resolvedAuthor = CATEGORY_TO_AUTHOR[bestCat.key] || DEFAULT_AUTHOR;
+      var catAuthorMap = this._getCategoryAuthorMap();
+      resolvedAuthor = catAuthorMap[bestCat.key] || this._getDefaultAuthor() || '';
     }
 
     var catConfident    = bestCat.score >= CONFIDENCE_THRESHOLD;
@@ -483,13 +493,6 @@ class ContentClassifier {
     } catch (e) {
       if (this.logger) this.logger.warn('[content-classifier] getCategoryWpIdMap error: ' + e.message);
     }
-    // Known internal key → WP ID fallbacks
-    map['entertainment'] = map['entertainment'] || 5;
-    map['cricket']       = map['cricket']       || 6;
-    map['auto']          = map['auto']           || 7;
-    map['finance']       = map['finance']        || 8;
-    map['fuel-prices']   = map['fuel-prices']    || 9;
-    map['gold-silver']   = map['gold-silver']    || 10;
     return map;
   }
 
@@ -586,4 +589,4 @@ class ContentClassifier {
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
-module.exports = { ContentClassifier, CATEGORY_TO_AUTHOR, DEFAULT_AUTHOR };
+module.exports = { ContentClassifier };

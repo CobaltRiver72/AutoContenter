@@ -843,7 +843,7 @@ function runMigrations() {
         INFRANODUS_TEXT_LIMIT: '12000',
         INFRANODUS_AUTO_ANALYZE: 'true',
         INFRANODUS_GOOGLE_ENABLED: 'false',
-        DEFAULT_AUTHOR_USERNAME: 'karan-verma',
+        DEFAULT_AUTHOR_USERNAME: '',
         AUTHOR_ASSIGNMENT_ENABLED: 'true',
         CLASSIFIER_CONFIDENCE_THRESHOLD: '15',
         AUTO_CREATE_WP_TAGS: 'true',

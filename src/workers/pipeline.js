@@ -556,7 +556,10 @@ class Pipeline {
               l1Score: localScore.category.score, l2Conf: aiCls.confidence,
               reasons: ['ai_fallback (l1_score:' + localScore.category.score + ')'] };
           } else {
-            finalCls = { category: 'general', author: 'karan-verma',
+            // No confident match — leave author empty so the publish-rule
+            // engine / global WP_AUTHOR_ID takes over. Hardcoding a username
+            // here would silently miscategorize posts on admin's WP site.
+            finalCls = { category: 'general', author: '',
               tags: localScore.tags, source: 'default_fallback',
               l1Score: 0, l2Conf: 0, reasons: ['no_confident_match'] };
           }
@@ -567,6 +570,25 @@ class Pipeline {
           var wpCatId = catMap[finalCls.category] || null;
           var wpAuthId = authMap[finalCls.author] || null;
 
+          // Resolve tag names → WP tag IDs (creates missing tags, caches them).
+          // Bounded by maxCreatePerCall to prevent flooding WP on a single rewrite.
+          // Non-blocking: failure here must not break the rewrite → publish flow.
+          var wpTagIds = [];
+          if (Array.isArray(finalCls.tags) && finalCls.tags.length > 0 && !primaryDraft.wp_tag_ids) {
+            try {
+              var _wpTaxonomy = require('../modules/wp-taxonomy');
+              wpTagIds = await _wpTaxonomy.resolveTagNames(
+                this.db,
+                require('../utils/config').getConfig(),
+                finalCls.tags,
+                { logger: this.logger, maxCreatePerCall: 12 }
+              );
+            } catch (tagErr) {
+              this.logger.warn(MODULE, 'Tag resolution failed (non-fatal): ' + tagErr.message);
+              wpTagIds = [];
+            }
+          }
+
           var colParts = [], colVals = [];
           if (wpCatId && !primaryDraft.wp_category_ids) {
             colParts.push('wp_category_ids = ?', 'wp_primary_cat_id = ?');
@@ -575,6 +597,10 @@ class Pipeline {
           if (wpAuthId && !primaryDraft.wp_author_id_override) {
             colParts.push('wp_author_id_override = ?');
             colVals.push(wpAuthId);
+          }
+          if (wpTagIds.length > 0 && !primaryDraft.wp_tag_ids) {
+            colParts.push('wp_tag_ids = ?');
+            colVals.push(JSON.stringify(wpTagIds));
           }
           if (colParts.length) {
             colVals.push(primaryDraft.id);
@@ -594,7 +620,8 @@ class Pipeline {
           });
 
           this.logger.info(MODULE, 'Classified → cat:' + finalCls.category +
-            ' author:' + finalCls.author + ' tags:' + finalCls.tags.length +
+            ' author:' + finalCls.author +
+            ' tags:' + finalCls.tags.length + ' (wp:' + wpTagIds.length + ')' +
             ' src:' + finalCls.source);
         } catch (clsErr) {
           this.logger.warn(MODULE, 'Classification failed (non-fatal): ' + clsErr.message);

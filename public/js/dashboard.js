@@ -8283,13 +8283,28 @@
   }
 
   function saveWPPublishingSettings() {
+    var updates = {};
     var siteUrl = $('wp-site-url');
     var username = $('wp-pub-username');
     var password = $('wp-pub-password');
-    var updates = {};
     if (siteUrl && siteUrl.value && siteUrl.value.indexOf('••') === -1) updates.WP_SITE_URL = siteUrl.value;
     if (username && username.value && username.value.indexOf('••') === -1) updates.WP_USERNAME = username.value;
     if (password && password.value && password.value.indexOf('••') === -1) updates.WP_APP_PASSWORD = password.value;
+
+    // Post defaults — read every time (they're already visible as real values)
+    var postStatus = $('wp-post-status');
+    var authorId = $('wp-author-id');
+    var defCat = $('wp-default-category');
+    var defAuthorUser = $('wp-default-author-username');
+    var commentStatus = $('wp-comment-status');
+    var pingStatus = $('wp-ping-status');
+    if (postStatus) updates.WP_POST_STATUS = postStatus.value;
+    if (authorId && authorId.value) updates.WP_AUTHOR_ID = authorId.value;
+    if (defCat && defCat.value) updates.WP_DEFAULT_CATEGORY = defCat.value;
+    if (defAuthorUser) updates.DEFAULT_AUTHOR_USERNAME = defAuthorUser.value;
+    if (commentStatus) updates.WP_COMMENT_STATUS = commentStatus.value;
+    if (pingStatus) updates.WP_PING_STATUS = pingStatus.value;
+
     if (!Object.keys(updates).length) { showToast('No changes to save', 'info'); return; }
     fetchApi('/api/settings', { method: 'PUT', body: updates })
       .then(function() { showToast('WordPress settings saved', 'success'); })
@@ -8306,6 +8321,20 @@
       if (el) el.placeholder = s.WP_USERNAME ? '(saved — enter new to change)' : 'WordPress username';
       el = $('wp-pub-password');
       if (el) el.placeholder = s.WP_APP_PASSWORD ? '(saved — enter new to change)' : 'App password';
+
+      // Post defaults — all safe to show as plain values
+      el = $('wp-post-status');
+      if (el) el.value = s.WP_POST_STATUS || 'draft';
+      el = $('wp-author-id');
+      if (el) el.value = s.WP_AUTHOR_ID || '';
+      el = $('wp-default-category');
+      if (el) el.value = s.WP_DEFAULT_CATEGORY || '';
+      el = $('wp-default-author-username');
+      if (el) el.value = s.DEFAULT_AUTHOR_USERNAME || '';
+      el = $('wp-comment-status');
+      if (el) el.value = s.WP_COMMENT_STATUS || '';
+      el = $('wp-ping-status');
+      if (el) el.value = s.WP_PING_STATUS || '';
     }).catch(function() {});
   }
 

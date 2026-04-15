@@ -2,6 +2,14 @@
 
 const MODULE = 'metals-posts';
 const crypto = require('crypto');
+const _cfg = require('../utils/config');
+
+// Read admin-configured post status — respect Settings → WP_POST_STATUS.
+function _wpPostStatus() {
+  var v = (_cfg.get('WP_POST_STATUS') || '').toLowerCase().trim();
+  var allowed = ['publish', 'draft', 'pending', 'private'];
+  return allowed.indexOf(v) !== -1 ? v : 'publish';
+}
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 
@@ -288,7 +296,7 @@ class MetalsPostCreator {
       content: html,
       categoryNames: [config.label],
       metaDescription,
-      status: 'publish',
+      status: _wpPostStatus(),
       meta: {
         _hdf_metal_city: city,
         _hdf_metal_type: metalType,
@@ -546,7 +554,7 @@ class MetalsPostCreator {
       content: html,
       categoryNames: [config.label],
       metaDescription,
-      status: 'publish',
+      status: _wpPostStatus(),
       meta: {
         _hdf_metal_state: state,
         _hdf_metal_type: metalType,
@@ -740,7 +748,7 @@ class MetalsPostCreator {
       content: html,
       categoryNames: [config.label],
       metaDescription,
-      status: 'publish',
+      status: _wpPostStatus(),
       meta: {
         _hdf_metal_type: metalType,
         _hdf_metal_is_national: '1',
