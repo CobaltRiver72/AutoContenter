@@ -595,7 +595,7 @@
         _publishedPage = 1;
         loadPublished();
         break;
-      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); loadPipelineEngineSettings(); break;
+      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); loadPipelineEngineSettings(); initBulkImport(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
@@ -7710,6 +7710,7 @@
     },
     'openManualImportModal':   function () { __openManualImportModal(); },
     'closeManualImportModal':  function () { __closeManualImportModal(); },
+    'closeBulkImportModal':    function () { __closeBulkImportModal(); },
     'submitManualImport':      function () { __submitManualImport(); },
     'editRule':                function (el) {
       var ds = el.dataset;
@@ -8336,6 +8337,439 @@
       el = $('wp-ping-status');
       if (el) el.value = s.WP_PING_STATUS || '';
     }).catch(function() {});
+  }
+
+  // ─── Bulk Config Import ──────────────────────────────────────────────────
+  // Frontend wiring for the JSON-based bulk-import system. Endpoints live
+  // behind BULK_IMPORT_ENABLED; the UI reads/writes that flag through the
+  // same /api/settings PUT path as the rest of the settings page so admins
+  // never need to touch the DB or env vars.
+
+  var _bulkImportSelectedFile = null;
+  var _bulkImportPreviewId = null;
+  var _bulkImportLastSnapshotId = null;
+  var _bulkImportEnabled = false;
+
+  function initBulkImport() {
+    if ($('bulk-import-section')._wired) {
+      // Re-wired, just refresh the dynamic data
+      _refreshBulkImportStatus();
+      _loadBulkImportSnapshots();
+      return;
+    }
+    $('bulk-import-section')._wired = true;
+
+    var fileInput = $('bulk-import-file');
+    if (fileInput) {
+      fileInput.addEventListener('change', function () {
+        if (!this.files || this.files.length === 0) {
+          _bulkImportSelectedFile = null;
+          $('bulk-import-filename').textContent = 'No file selected';
+          $('bulk-import-preview-btn').disabled = true;
+          return;
+        }
+        var f = this.files[0];
+        if (f.size > 5 * 1024 * 1024) {
+          showToast('File is larger than 5 MB — rejected', 'error');
+          this.value = '';
+          return;
+        }
+        _bulkImportSelectedFile = f;
+        $('bulk-import-filename').textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB)';
+        $('bulk-import-preview-btn').disabled = !_bulkImportEnabled;
+      });
+    }
+
+    var toggleBtn = $('bulk-import-toggle-btn');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', function () {
+        var newVal = _bulkImportEnabled ? 'false' : 'true';
+        toggleBtn.disabled = true;
+        fetchApi('/api/settings', { method: 'PUT', body: { BULK_IMPORT_ENABLED: newVal } })
+          .then(function () {
+            _bulkImportEnabled = (newVal === 'true');
+            _renderBulkImportStatus();
+            showToast('Bulk import ' + (_bulkImportEnabled ? 'enabled' : 'disabled'), 'success');
+            if (_bulkImportEnabled) _loadBulkImportSnapshots();
+          })
+          .catch(function (err) { showToast('Toggle failed: ' + err.message, 'error'); })
+          .finally(function () { toggleBtn.disabled = false; });
+      });
+    }
+
+    var previewBtn = $('bulk-import-preview-btn');
+    if (previewBtn) previewBtn.addEventListener('click', _bulkImportPreview);
+
+    var exportBtn = $('bulk-import-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', _bulkImportExport);
+
+    var templateBtn = $('bulk-import-template-btn');
+    if (templateBtn) templateBtn.addEventListener('click', _bulkImportDownloadTemplate);
+
+    var applyBtn = $('bulk-import-apply-btn');
+    if (applyBtn) applyBtn.addEventListener('click', _bulkImportApply);
+
+    _refreshBulkImportStatus();
+    _loadBulkImportSnapshots();
+  }
+
+  function _refreshBulkImportStatus() {
+    fetchApi('/api/settings', { cacheMs: 0 }).then(function (data) {
+      var s = data.settings || {};
+      var v = s.BULK_IMPORT_ENABLED;
+      _bulkImportEnabled = (v === true || v === 'true' || v === 1 || v === '1');
+      _renderBulkImportStatus();
+    }).catch(function () {});
+  }
+
+  function _renderBulkImportStatus() {
+    var pill = $('bulk-import-status-pill');
+    var btn = $('bulk-import-toggle-btn');
+    var previewBtn = $('bulk-import-preview-btn');
+    var exportBtn = $('bulk-import-export-btn');
+    if (pill) {
+      pill.textContent = _bulkImportEnabled ? 'Enabled' : 'Disabled';
+      pill.className = 'status-pill ' + (_bulkImportEnabled ? 'status-enabled' : 'status-disabled');
+    }
+    if (btn) {
+      btn.textContent = _bulkImportEnabled ? 'Disable' : 'Enable';
+      btn.className = 'btn btn-sm ' + (_bulkImportEnabled ? 'btn-warning' : 'btn-primary');
+    }
+    if (previewBtn) previewBtn.disabled = !_bulkImportEnabled || !_bulkImportSelectedFile;
+    if (exportBtn) exportBtn.disabled = !_bulkImportEnabled;
+  }
+
+  function _bulkImportPreview() {
+    if (!_bulkImportSelectedFile || !_bulkImportEnabled) return;
+    var btn = $('bulk-import-preview-btn');
+    btn.disabled = true;
+    btn.textContent = 'Validating...';
+
+    var fd = new FormData();
+    fd.append('file', _bulkImportSelectedFile);
+
+    fetch('/api/config/import/preview', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: fd,
+    })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); })
+      .then(function (resp) {
+        btn.disabled = false;
+        btn.innerHTML = '<svg data-lucide="eye" class="icon"></svg> Preview Changes';
+        _refreshIcons();
+        if (!resp.json.ok) {
+          var msgs = (resp.json.errors || []).map(function (e) { return (e.path ? '[' + e.path + '] ' : '') + e.message; }).join('\n');
+          showToast('Preview failed:\n' + (msgs || resp.json.error || 'unknown'), 'error');
+          return;
+        }
+        _bulkImportPreviewId = resp.json.preview_id;
+        _renderBulkImportPreview(resp.json);
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.innerHTML = '<svg data-lucide="eye" class="icon"></svg> Preview Changes';
+        _refreshIcons();
+        showToast('Preview failed: ' + err.message, 'error');
+      });
+  }
+
+  function _renderBulkImportPreview(resp) {
+    var modal = $('bulk-import-modal');
+    var summary = $('bulk-import-modal-summary');
+    var fullDiff = $('bulk-import-modal-fulldiff-pre');
+    var title = $('bulk-import-modal-title');
+    if (!modal || !summary) return;
+
+    if (title) title.textContent = 'Preview Changes: ' + (resp.filename || 'config.json');
+
+    var changes = resp.changes || {};
+    var html = '<div class="bulk-import-summary">';
+
+    // Defaults
+    var defAfter = changes.defaults && changes.defaults.after ? Object.keys(changes.defaults.after) : [];
+    if (defAfter.length > 0) {
+      html += '<div class="bulk-import-summary-row">';
+      html += '<span class="bi-icon">&#10003;</span> <strong>Defaults:</strong> ' + defAfter.length + ' setting(s) will change';
+      html += '</div>';
+    }
+
+    // Authors
+    var a = changes.authors || {};
+    if ((a.added || []).length || (a.updated || []).length) {
+      html += '<div class="bulk-import-summary-row"><span class="bi-icon">&#10003;</span> <strong>Authors:</strong> ' +
+        (a.added || []).length + ' new, ' + (a.updated || []).length + ' updated, ' + (a.unchanged || []).length + ' unchanged</div>';
+    }
+
+    // Categories
+    var c = changes.categories || {};
+    if ((c.added || []).length || (c.updated || []).length) {
+      html += '<div class="bulk-import-summary-row"><span class="bi-icon">&#10003;</span> <strong>Categories:</strong> ' +
+        (c.added || []).length + ' new, ' + (c.updated || []).length + ' updated';
+      if ((c.missing_on_wp || []).length) {
+        html += ' <span class="bi-warn">(' + c.missing_on_wp.length + ' will be auto-created on WordPress)</span>';
+      }
+      html += '</div>';
+    }
+
+    // Tags
+    var t = changes.tags || {};
+    if (t.added || t.updated || t.removed) {
+      html += '<div class="bulk-import-summary-row"><span class="bi-icon">&#10003;</span> <strong>Tags:</strong> ' +
+        t.added + ' new, ' + t.updated + ' updated, ' + t.removed + ' removed</div>';
+    }
+
+    // Routing hints
+    var rh = changes.routing_hints || {};
+    var rhTotal = (rh.domains_changed || 0) + (rh.source_categories_changed || 0) + (rh.category_to_author_changed || 0);
+    if (rhTotal > 0) {
+      html += '<div class="bulk-import-summary-row"><span class="bi-icon">&#10003;</span> <strong>Routing hints:</strong> ' + rhTotal + ' change(s)</div>';
+    }
+
+    // Publish rules
+    var pr = changes.publish_rules || {};
+    if ((pr.added || []).length || (pr.updated || []).length) {
+      html += '<div class="bulk-import-summary-row"><span class="bi-icon">&#10003;</span> <strong>Publish rules:</strong> ' +
+        (pr.added || []).length + ' new, ' + (pr.updated || []).length + ' updated</div>';
+    }
+
+    // Modules
+    var m = changes.modules || {};
+    if (m.after) {
+      html += '<div class="bulk-import-summary-row"><span class="bi-icon">&#10003;</span> <strong>Module routing:</strong> stored (forward-compat, not yet active)</div>';
+    }
+
+    if (html === '<div class="bulk-import-summary">') {
+      html += '<div class="bulk-import-summary-row" style="color:#888;">No changes detected — this file matches the current state.</div>';
+    }
+    html += '</div>';
+
+    // Warnings
+    var warnings = resp.warnings || [];
+    if (warnings.length > 0) {
+      html += '<div class="bulk-import-warnings">';
+      html += '<div class="bulk-import-warnings-header">&#9888; Warnings (' + warnings.length + ')</div>';
+      html += '<ul>';
+      for (var wi = 0; wi < warnings.length; wi++) {
+        html += '<li><strong>' + escapeHtml(warnings[wi].path || '') + '</strong> ' + escapeHtml(warnings[wi].message) + '</li>';
+      }
+      html += '</ul></div>';
+    }
+
+    summary.innerHTML = html;
+
+    if (fullDiff) {
+      try { fullDiff.textContent = JSON.stringify(changes, null, 2); }
+      catch (e) { fullDiff.textContent = '(failed to serialize diff)'; }
+    }
+
+    modal.classList.remove('hidden');
+    _refreshIcons();
+  }
+
+  window.__closeBulkImportModal = function () {
+    var modal = $('bulk-import-modal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  function _bulkImportApply() {
+    if (!_bulkImportPreviewId) {
+      showToast('No preview to apply — re-upload the file', 'error');
+      return;
+    }
+    var btn = $('bulk-import-apply-btn');
+    btn.disabled = true;
+    btn.textContent = 'Applying...';
+
+    fetchApi('/api/config/import/apply', {
+      method: 'POST',
+      body: { preview_id: _bulkImportPreviewId },
+    })
+      .then(function (resp) {
+        btn.disabled = false;
+        btn.innerHTML = '<svg data-lucide="check" class="icon"></svg> Apply Changes';
+        _refreshIcons();
+        if (!resp.ok) {
+          showToast('Apply failed: ' + (resp.error || (resp.errors && resp.errors[0] && resp.errors[0].message) || 'unknown'), 'error');
+          return;
+        }
+        _bulkImportLastSnapshotId = resp.snapshot_id;
+        window.__closeBulkImportModal();
+        _bulkImportPreviewId = null;
+        _showUndoToast(resp);
+        _loadBulkImportSnapshots();
+        forceApiRefresh('/api/settings');
+        forceApiRefresh('/api/publish-rules');
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.innerHTML = '<svg data-lucide="check" class="icon"></svg> Apply Changes';
+        _refreshIcons();
+        showToast('Apply failed: ' + err.message, 'error');
+      });
+  }
+
+  function _showUndoToast(resp) {
+    var sum = resp.summary || {};
+    var total = (sum.defaults_changed || 0) + (sum.authors_added || 0) + (sum.authors_updated || 0) +
+                (sum.categories_added || 0) + (sum.categories_updated || 0) + (sum.tags_changed || 0) +
+                (sum.routing_hints_changed || 0) + (sum.publish_rules_added || 0) + (sum.publish_rules_updated || 0);
+
+    var container = $('toastContainer');
+    if (!container) return;
+    var toast = document.createElement('div');
+    toast.className = 'toast toast-success bulk-import-undo-toast';
+    toast.innerHTML =
+      '<div style="display:flex;align-items:center;gap:12px;">' +
+        '<div>' +
+          '<div style="font-weight:600;">Config imported</div>' +
+          '<div style="font-size:11px;opacity:0.85;">' + total + ' items applied. Snapshot #' + resp.snapshot_id + '.</div>' +
+        '</div>' +
+        '<button class="btn btn-xs btn-secondary bulk-undo-btn" type="button">Undo</button>' +
+      '</div>';
+    container.appendChild(toast);
+
+    var undoBtn = toast.querySelector('.bulk-undo-btn');
+    var snapshotId = resp.snapshot_id;
+    var dismissed = false;
+    var timer = setTimeout(function () {
+      dismissed = true;
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 60000);
+
+    undoBtn.addEventListener('click', function () {
+      if (dismissed) return;
+      undoBtn.disabled = true;
+      undoBtn.textContent = 'Restoring...';
+      // Restore the snapshot the apply CREATED (which was the BEFORE state)
+      // Actually the apply returns its own NEW snapshot id; we restore that
+      // earlier baseline. Server returns snapshot_id = the snapshot it just
+      // captured before applying, so restoring it brings us back to pre-import.
+      fetchApi('/api/config/import/rollback/' + snapshotId, { method: 'POST' })
+        .then(function (r) {
+          if (r.ok) {
+            showToast('Reverted to snapshot #' + snapshotId, 'success');
+            _loadBulkImportSnapshots();
+            forceApiRefresh('/api/settings');
+            forceApiRefresh('/api/publish-rules');
+          } else {
+            showToast('Undo failed: ' + (r.error || 'unknown'), 'error');
+          }
+        })
+        .catch(function (err) { showToast('Undo failed: ' + err.message, 'error'); })
+        .finally(function () {
+          clearTimeout(timer);
+          if (toast.parentNode) toast.parentNode.removeChild(toast);
+        });
+    });
+  }
+
+  function _bulkImportExport() {
+    if (!_bulkImportEnabled) {
+      showToast('Enable bulk import first', 'info');
+      return;
+    }
+    // Plain anchor download — easier than fetching as blob since the server
+    // already sets Content-Disposition.
+    window.location.href = '/api/config/export';
+  }
+
+  function _bulkImportDownloadTemplate() {
+    var template = {
+      version: '1.0',
+      generated_at: new Date().toISOString(),
+      notes: 'Blank template — fill in the sections you need and remove the rest.',
+      defaults: {
+        post_status: 'draft',
+        comment_status: '',
+        ping_status: '',
+        default_author_username: '',
+        default_category_slug: ''
+      },
+      authors: [
+        { username: 'example-author', display_name: 'Example Author', beats: ['general'], keywords: { 'sample': 5 } }
+      ],
+      categories: [
+        { slug: 'general', display_name: 'General', default_author_username: 'example-author', keywords: { 'news': 5 } }
+      ],
+      tags: { 'sample term': 'Sample Tag' },
+      routing_hints: { domains: {}, source_categories: {}, category_to_author: {} },
+      publish_rules: [
+        {
+          key: 'example_rule',
+          name: 'Example rule',
+          priority: 100,
+          is_active: true,
+          match: { source_domain: 'example.com', source_category: null, title_keyword: null },
+          assign: { category_slugs: ['general'], primary_category_slug: 'general', tag_slugs: [], author_username: 'example-author' }
+        }
+      ]
+    };
+    var blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'hdf-config-template.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  }
+
+  function _loadBulkImportSnapshots() {
+    var container = $('bulk-import-snapshots-list');
+    if (!container) return;
+    if (!_bulkImportEnabled) {
+      container.innerHTML = '<p class="placeholder-text" style="font-size:12px;">Enable bulk import to see snapshots.</p>';
+      return;
+    }
+    fetchApi('/api/config/import/snapshots', { cacheMs: 0 })
+      .then(function (resp) {
+        if (!resp.ok || !resp.data || resp.data.length === 0) {
+          container.innerHTML = '<p class="placeholder-text" style="font-size:12px;">No snapshots yet.</p>';
+          return;
+        }
+        var html = '';
+        for (var i = 0; i < resp.data.length; i++) {
+          var s = resp.data[i];
+          var when = s.created_at ? timeAgo(s.created_at + 'Z') : '';
+          var byline = s.created_by ? ' · ' + escapeHtml(s.created_by) : '';
+          var fname = s.import_filename ? ' · ' + escapeHtml(s.import_filename) : '';
+          html += '<div class="bulk-snapshot-row">';
+          html += '<span class="bulk-snapshot-id">#' + s.id + '</span>';
+          html += '<span class="bulk-snapshot-label">' + escapeHtml(s.label) + '</span>';
+          html += '<span class="bulk-snapshot-meta">' + when + byline + fname + '</span>';
+          html += '<button class="btn btn-xs btn-secondary" data-snapshot-restore="' + s.id + '">Restore</button>';
+          html += '</div>';
+        }
+        container.innerHTML = html;
+        var restoreBtns = container.querySelectorAll('[data-snapshot-restore]');
+        for (var ri = 0; ri < restoreBtns.length; ri++) {
+          restoreBtns[ri].addEventListener('click', function () {
+            var sid = parseInt(this.getAttribute('data-snapshot-restore'), 10);
+            _bulkImportRestore(sid);
+          });
+        }
+      })
+      .catch(function (err) {
+        container.innerHTML = '<p class="placeholder-text" style="font-size:12px;color:var(--danger);">Failed: ' + escapeHtml(err.message) + '</p>';
+      });
+  }
+
+  function _bulkImportRestore(snapshotId) {
+    if (!confirm('Restore snapshot #' + snapshotId + '? This will replace your current import-managed settings and rules.\n\nNote: Categories and tags created in WordPress by previous imports will NOT be deleted — only your local config is restored.')) return;
+    fetchApi('/api/config/import/rollback/' + snapshotId, { method: 'POST' })
+      .then(function (r) {
+        if (r.ok) {
+          showToast('Restored to snapshot #' + snapshotId, 'success');
+          _loadBulkImportSnapshots();
+          forceApiRefresh('/api/settings');
+          forceApiRefresh('/api/publish-rules');
+        } else {
+          showToast('Restore failed: ' + (r.error || 'unknown'), 'error');
+        }
+      })
+      .catch(function (err) { showToast('Restore failed: ' + err.message, 'error'); });
   }
 
   // ─── Shared helpers (Day 3) ──────────────────────────────────────────────

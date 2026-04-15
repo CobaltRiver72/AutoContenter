@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/dashboard.css?v=30">
+  <link rel="stylesheet" href="/css/dashboard.css?v=31">
 </head>
 <body>
 
@@ -611,6 +611,57 @@
             <button class="btn btn-purple" data-click="saveWPPublishingSettings"><svg data-lucide="save" class="icon"></svg> Save</button>
           </div>
           <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
+        </div>
+
+        <!-- ─── Bulk Config Import ──────────────────────────────────── -->
+        <div class="settings-form" id="bulk-import-section">
+          <div class="settings-group">
+            <div class="settings-group-title">
+              <svg data-lucide="upload-cloud" class="icon"></svg>
+              Bulk Config Import
+            </div>
+            <small style="color:#888;display:block;margin-bottom:12px;">Upload a JSON file to configure authors, categories, tags, classifier dictionaries, and publish rules in one shot. Or export your current config to back it up or share it.</small>
+
+            <!-- Status + enable toggle -->
+            <div class="bulk-import-status">
+              <span>Status:</span>
+              <span id="bulk-import-status-pill" class="status-pill status-disabled">Disabled</span>
+              <button class="btn btn-sm btn-primary" id="bulk-import-toggle-btn" type="button">Enable</button>
+            </div>
+
+            <!-- File picker + actions -->
+            <div class="bulk-import-actions">
+              <input type="file" id="bulk-import-file" accept=".json,application/json" class="bulk-import-file-input" />
+              <label for="bulk-import-file" class="btn btn-secondary" id="bulk-import-file-label">
+                <svg data-lucide="file-plus" class="icon"></svg> Choose File...
+              </label>
+              <span id="bulk-import-filename" class="bulk-import-filename">No file selected</span>
+            </div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+              <button class="btn btn-primary" id="bulk-import-preview-btn" type="button" disabled>
+                <svg data-lucide="eye" class="icon"></svg> Preview Changes
+              </button>
+              <button class="btn btn-secondary" id="bulk-import-export-btn" type="button">
+                <svg data-lucide="download" class="icon"></svg> Export Current Config
+              </button>
+              <button class="btn btn-ghost btn-sm" id="bulk-import-template-btn" type="button">
+                <svg data-lucide="file-code" class="icon"></svg> Download Blank Template
+              </button>
+            </div>
+
+            <small style="color:#666;display:block;margin-top:8px;font-size:11px;">
+              Accepts: .json files up to 5 MB. Schema version 1.0. All sections are optional.
+            </small>
+
+            <!-- Recent snapshots panel -->
+            <div class="bulk-import-snapshots">
+              <div class="settings-group-title" style="font-size:13px;margin-bottom:8px;">Recent Snapshots</div>
+              <div id="bulk-import-snapshots-list" class="bulk-import-snapshots-list">
+                <p class="placeholder-text" style="font-size:12px;">Loading...</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- WP Taxonomy & Routing Rules -->
@@ -1827,6 +1878,30 @@
   <!-- Toast container -->
   <div id="toastContainer" class="toast-container"></div>
 
+  <!-- Bulk Config Import: Preview Diff Modal -->
+  <div id="bulk-import-modal" class="bulk-import-modal hidden" role="dialog" aria-labelledby="bulk-import-modal-title">
+    <div class="bulk-import-modal-backdrop" data-click="closeBulkImportModal"></div>
+    <div class="bulk-import-modal-content">
+      <div class="bulk-import-modal-header">
+        <h2 id="bulk-import-modal-title">Preview Changes</h2>
+        <button type="button" class="bulk-import-modal-close" data-click="closeBulkImportModal" aria-label="Close">&times;</button>
+      </div>
+      <div class="bulk-import-modal-body">
+        <div id="bulk-import-modal-summary"></div>
+        <details id="bulk-import-modal-fulldiff" style="margin-top:14px;">
+          <summary style="cursor:pointer;color:var(--accent);font-size:13px;font-weight:600;">Show full diff</summary>
+          <pre id="bulk-import-modal-fulldiff-pre" class="bulk-import-fulldiff"></pre>
+        </details>
+      </div>
+      <div class="bulk-import-modal-footer">
+        <button class="btn btn-ghost" data-click="closeBulkImportModal" type="button">Cancel</button>
+        <button class="btn btn-success" id="bulk-import-apply-btn" type="button">
+          <svg data-lucide="check" class="icon"></svg> Apply Changes
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Manual URL Import Modal -->
   <div id="manual-import-modal" class="manual-import-modal hidden" role="dialog" aria-labelledby="manual-import-title">
     <div class="manual-import-backdrop" data-click="closeManualImportModal"></div>
@@ -1865,6 +1940,6 @@
   </div>
 
   <script src="/js/lucide.min.js"></script>
-  <script src="/js/dashboard.js?v=61"></script>
+  <script src="/js/dashboard.js?v=62"></script>
 </body>
 </html>
