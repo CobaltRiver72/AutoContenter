@@ -589,7 +589,12 @@
       case 'clusters': loadClusters(); break;
       case 'ready': navigateTo('autopilot'); break; // redirected to Autopilot queue
       case 'failed': loadFailedDrafts(); break;
-      case 'published': loadPublished(); break;
+      case 'published':
+        // Reset to page 1 when user navigates fresh to Published page
+        // (vs. in-page reloads triggered by save/publish/delete actions)
+        _publishedPage = 1;
+        loadPublished();
+        break;
       case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); loadPipelineEngineSettings(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
@@ -2725,6 +2730,16 @@
 
   var publishedPollInterval = null;
   var _lastPublishedHash = null;
+  var _publishedPage = 1;
+  var _publishedPerPage = (function () {
+    var stored = parseInt(localStorage.getItem('hdf_published_per_page'), 10);
+    var allowed = [10, 25, 50, 100];
+    return allowed.indexOf(stored) !== -1 ? stored : 50;
+  })();
+
+  function _publishedQs() {
+    return '?page=' + _publishedPage + '&perPage=' + _publishedPerPage;
+  }
 
   function loadPublished() {
     // Guard: never run two loadPublished() calls in parallel.
@@ -2746,10 +2761,19 @@
     if (container) container.innerHTML = '<p class="placeholder-text">Loading...</p>';
     if (pagination) pagination.innerHTML = '';
 
-    fetchApi('/api/drafts')
+    fetchApi('/api/drafts' + _publishedQs())
       .then(function (data) {
         var drafts = data.data || [];
         renderDraftsView(container, drafts);
+        // Pagination footer
+        var total = data.total || drafts.length;
+        var totalPages = Math.max(1, Math.ceil(total / _publishedPerPage));
+        renderPaginationById('publishedPagination', _publishedPage, totalPages, function (p) {
+          _publishedPage = p;
+          forceApiRefresh('/api/drafts');
+          loadPublished();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
         startPublishedPolling();
       })
       .catch(function (err) {
@@ -2825,6 +2849,13 @@
       if (allExtracted && !hasRewrite) readyForRewriteCount++;
     }
 
+    var sizes = [10, 25, 50, 100];
+    var perPageOptions = '';
+    for (var psi = 0; psi < sizes.length; psi++) {
+      perPageOptions += '<option value="' + sizes[psi] + '"' +
+        (sizes[psi] === _publishedPerPage ? ' selected' : '') + '>' + sizes[psi] + '</option>';
+    }
+
     var filterHTML =
       '<div class="published-toolbar">' +
         // ─── Row 1: Filter buttons ───────────────────────────────
@@ -2840,6 +2871,10 @@
           '<button class="filter-btn" data-filter="ready">Ready (' + counts.ready + ')</button>' +
           '<button class="filter-btn" data-filter="published">Published (' + counts.published + ')</button>' +
           (counts.failed > 0 ? '<button class="filter-btn" data-filter="failed">&#10060; Failed (' + counts.failed + ')</button>' : '') +
+          '<span class="filter-divider"></span>' +
+          '<label class="per-page-label">Show ' +
+            '<select id="publishedPerPageSel" class="per-page-select">' + perPageOptions + '</select>' +
+          ' per page</label>' +
         '</div>' +
 
         // ─── Row 2: Extraction Progress Bar ──────────────────────
@@ -3008,6 +3043,20 @@
         var filter = this.getAttribute('data-filter');
         _publishedFilter = filter;
         applyPublishedFilter(filter);
+      });
+    }
+
+    // Per-page selector — persists to localStorage and reloads with new page size.
+    var perPageSel = container.querySelector('#publishedPerPageSel');
+    if (perPageSel) {
+      perPageSel.addEventListener('change', function () {
+        var n = parseInt(this.value, 10);
+        if (!n) return;
+        _publishedPerPage = n;
+        _publishedPage = 1;
+        try { localStorage.setItem('hdf_published_per_page', String(n)); } catch (e) {}
+        forceApiRefresh('/api/drafts');
+        loadPublished();
       });
     }
 
@@ -3769,10 +3818,19 @@
 
           // Step 2 — digest says something changed, fetch the full list and
           // re-render. Uses the same renderDraftsView path as the initial load.
-          return fetchApi('/api/drafts', { cacheMs: 0 }).then(function (data) {
+          return fetchApi('/api/drafts' + _publishedQs(), { cacheMs: 0 }).then(function (data) {
             var drafts = data.data || [];
             var pollContainer = $('publishedList');
             renderDraftsView(pollContainer, drafts);
+            // Keep pagination in sync if total changed (new drafts arrived, etc.)
+            var total = data.total || drafts.length;
+            var totalPages = Math.max(1, Math.ceil(total / _publishedPerPage));
+            renderPaginationById('publishedPagination', _publishedPage, totalPages, function (p) {
+              _publishedPage = p;
+              forceApiRefresh('/api/drafts');
+              loadPublished();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
             if (!hasActive) {
               clearInterval(publishedPollInterval);
               publishedPollInterval = null;

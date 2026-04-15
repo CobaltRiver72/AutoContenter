@@ -107,7 +107,10 @@ function createApiRouter(deps) {
 
   function parsePageParam(req, defaultPerPage) {
     var page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    var perPage = defaultPerPage || 20;
+    var def = defaultPerPage || 20;
+    var reqPp = parseInt(req.query.perPage, 10);
+    // Honor client's perPage but hard-cap at 100 to prevent accidental DoS
+    var perPage = (reqPp > 0) ? Math.min(100, reqPp) : def;
     return { page: page, perPage: perPage };
   }
 
@@ -2780,22 +2783,35 @@ function createApiRouter(deps) {
     }
   });
 
-  // GET /api/drafts — List all drafts
+  // GET /api/drafts — List drafts.
+  //
+  // Query params:
+  //   ?status=       — filter by draft status (e.g. 'ready', 'draft')
+  //   ?mode=         — filter by mode ('auto', 'manual_import', 'manual')
+  //   ?cluster_id=   — filter by a specific cluster (bypasses pagination)
+  //   ?page=         — 1-based page number (enables pagination)
+  //   ?perPage=      — page size, hard-capped at 100
+  //
+  // If neither page nor perPage is passed, returns the full list
+  // (backwards-compatible). When paginated, the response also includes
+  // total/page/perPage fields for pagination UI.
   router.get('/drafts', function (req, res) {
     try {
       var status = req.query.status || null;
       var mode = req.query.mode || null;
       var clusterId = req.query.cluster_id || null;
 
+      // Pagination only activates when caller explicitly asked. cluster_id
+      // drill-down intentionally bypasses it so the editor can still fetch
+      // a full cluster in one call.
+      var paginate = (req.query.page != null || req.query.perPage != null) && !clusterId;
+      var pp = paginate ? parsePageParam(req, 50) : null;
+
       // Explicit column list: large text blobs (rewritten_html, extracted_content,
       // source_content_markdown, body_markdown, faq_json, ai_signals, infranodus_data)
       // are excluded or truncated to keep the listing payload small and avoid
       // ERR_HTTP2_PROTOCOL_ERROR on connections with many drafts.
-      //   extracted_chars  — exact byte length before truncation (for UI display)
-      //   extracted_content  — first 1200 chars (enough for 800-char card preview)
-      //   rewritten_html  — stub '1'/NULL so JS truthiness checks still work;
-      //                      full HTML is fetched per-draft in the editor
-      var query = `SELECT
+      var columns = `
         id, source_article_id, source_url, source_domain, source_title,
         source_language, source_category, source_publish_time,
         COALESCE(LENGTH(extracted_content), 0) AS extracted_chars,
@@ -2814,7 +2830,7 @@ function createApiRouter(deps) {
         retry_count, max_retries, error_message, last_error_at, failed_permanent,
         cluster_id, cluster_role,
         locked_by, locked_at, lease_expires_at, next_run_at
-      FROM drafts`;
+      `;
       var conditions = [];
       var params = [];
 
@@ -2822,17 +2838,34 @@ function createApiRouter(deps) {
       if (mode) { conditions.push('mode = ?'); params.push(mode); }
       if (clusterId) { conditions.push('cluster_id = ?'); params.push(clusterId); }
 
-      if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
-      }
+      var whereClause = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
       // Order: cluster primary drafts first within their group, then by date
-      query += ' ORDER BY cluster_id DESC NULLS LAST, ' +
-               "CASE WHEN cluster_role = 'primary' THEN 0 ELSE 1 END, " +
-               'created_at DESC';
+      var orderClause = ' ORDER BY cluster_id DESC NULLS LAST, ' +
+                        "CASE WHEN cluster_role = 'primary' THEN 0 ELSE 1 END, " +
+                        'created_at DESC';
 
-      var stmt = db.prepare(query);
-      var drafts = stmt.all.apply(stmt, params);
-      return res.json({ success: true, data: drafts });
+      if (paginate) {
+        var offset = (pp.page - 1) * pp.perPage;
+        var pagedStmt = db.prepare('SELECT ' + columns + ' FROM drafts' + whereClause + orderClause + ' LIMIT ? OFFSET ?');
+        var pagedParams = params.concat([pp.perPage, offset]);
+        var drafts = pagedStmt.all.apply(pagedStmt, pagedParams);
+
+        var countStmt = db.prepare('SELECT COUNT(*) AS total FROM drafts' + whereClause);
+        var totalRow = countStmt.get.apply(countStmt, params);
+        var total = (totalRow && totalRow.total) || 0;
+
+        return res.json({
+          success: true,
+          data: drafts,
+          total: total,
+          page: pp.page,
+          perPage: pp.perPage
+        });
+      }
+
+      var stmt = db.prepare('SELECT ' + columns + ' FROM drafts' + whereClause + orderClause);
+      var draftsAll = stmt.all.apply(stmt, params);
+      return res.json({ success: true, data: draftsAll });
     } catch (err) {
       logger.error('api', 'GET /api/drafts failed: ' + err.message);
       return res.status(500).json({ success: false, error: err.message });
