@@ -511,8 +511,11 @@ function _applyTx(db, parsed, maps) {
     }
   }
 
-  // authors
-  if (Array.isArray(parsed.authors) && parsed.authors.length > 0) {
+  // authors — runs if the section is a present array, even if empty.
+  // Writing an empty array is a no-op for the dictionary, but the consistent
+  // gate matches how defaults/tags/publish_rules are handled (no length check)
+  // and rules out any silent-skip scenario during debugging.
+  if (Array.isArray(parsed.authors)) {
     var currentAuthorDicts = _parseJsonSetting(db, 'CLASSIFIER_AUTHOR_DICTIONARIES', {});
     for (var ai = 0; ai < parsed.authors.length; ai++) {
       var author = parsed.authors[ai];
@@ -525,8 +528,8 @@ function _applyTx(db, parsed, maps) {
     _setSetting(db, 'CLASSIFIER_AUTHOR_DICTIONARIES', JSON.stringify(currentAuthorDicts));
   }
 
-  // categories
-  if (Array.isArray(parsed.categories) && parsed.categories.length > 0) {
+  // categories — same treatment, runs if present even if empty.
+  if (Array.isArray(parsed.categories)) {
     var currentCatDicts = _parseJsonSetting(db, 'CLASSIFIER_CATEGORY_DICTIONARIES', {});
     var currentCatToAuthor = _parseJsonSetting(db, 'CLASSIFIER_CATEGORY_TO_AUTHOR', {});
     for (var ci = 0; ci < parsed.categories.length; ci++) {

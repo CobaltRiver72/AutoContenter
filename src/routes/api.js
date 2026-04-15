@@ -5946,6 +5946,84 @@ function createApiRouter(deps) {
     }
   });
 
+  // GET /api/config/import/diagnostic — raw state dump for debugging
+  //
+  // Returns the actual contents of the settings table for every
+  // IMPORT_MANAGED_SETTING_KEYS key (with length/shape summaries instead of
+  // full values, since dictionaries can be megabytes), counts of publish_rules
+  // by source, and the latest 10 snapshots. Use this to answer "did the import
+  // actually land?" without squinting at exportConfig's parsed view.
+  router.get('/config/import/diagnostic', _importGate, function (req, res) {
+    try {
+      var IMPORT_KEYS = require('../utils/config-import-keys').IMPORT_MANAGED_SETTING_KEYS;
+      var db = req.app.locals.db;
+
+      var settingsState = {};
+      for (var i = 0; i < IMPORT_KEYS.length; i++) {
+        var row = db.prepare('SELECT value, updated_at FROM settings WHERE key = ?').get(IMPORT_KEYS[i]);
+        if (!row) {
+          settingsState[IMPORT_KEYS[i]] = { present: false, value: null };
+          continue;
+        }
+        var raw = row.value == null ? '' : String(row.value);
+        var summary = { present: true, length: raw.length, updated_at: row.updated_at };
+        // For JSON settings, show parsed top-level shape
+        if (raw.length > 0 && (raw[0] === '{' || raw[0] === '[')) {
+          try {
+            var parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              summary.type = 'array';
+              summary.count = parsed.length;
+            } else if (parsed && typeof parsed === 'object') {
+              summary.type = 'object';
+              summary.keys = Object.keys(parsed).length;
+              summary.topKeys = Object.keys(parsed).slice(0, 8);
+            }
+          } catch (e) {
+            summary.parse_error = e.message;
+          }
+        } else {
+          summary.type = 'scalar';
+          summary.value = raw.length > 80 ? raw.substring(0, 77) + '...' : raw;
+        }
+        settingsState[IMPORT_KEYS[i]] = summary;
+      }
+
+      var publishRuleCounts = db.prepare(
+        "SELECT COALESCE(source, 'null') AS source, COUNT(*) AS cnt FROM publish_rules GROUP BY source"
+      ).all();
+      var totalRules = db.prepare('SELECT COUNT(*) AS cnt FROM publish_rules').get().cnt;
+      var rulesWithKey = db.prepare('SELECT COUNT(*) AS cnt FROM publish_rules WHERE key IS NOT NULL').get().cnt;
+
+      var snapshots = db.prepare(
+        'SELECT id, label, created_by, import_filename, is_baseline, created_at, ' +
+        'LENGTH(settings_json) AS settings_bytes, LENGTH(publish_rules_json) AS rules_bytes ' +
+        'FROM config_snapshots ORDER BY id DESC LIMIT 10'
+      ).all();
+
+      var wpCacheCounts = db.prepare(
+        "SELECT tax_type, COUNT(*) AS cnt FROM wp_taxonomy_cache GROUP BY tax_type"
+      ).all();
+
+      res.json({
+        ok: true,
+        generated_at: new Date().toISOString(),
+        settings_state: settingsState,
+        publish_rules: {
+          total: totalRules,
+          with_key: rulesWithKey,
+          by_source: publishRuleCounts,
+        },
+        snapshots: snapshots,
+        wp_taxonomy_cache: wpCacheCounts,
+        bulk_import_enabled: _isBulkImportEnabled(),
+      });
+    } catch (err) {
+      logger.error('config-import', 'Diagnostic failed: ' + (err.stack || err.message));
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════════════════
   // END BULK CONFIG IMPORT
   // ═══════════════════════════════════════════════════════════════════════
