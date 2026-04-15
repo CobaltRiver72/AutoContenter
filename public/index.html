@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/dashboard.css?v=31">
+  <link rel="stylesheet" href="/css/dashboard.css?v=32">
 </head>
 <body>
 
@@ -77,6 +77,9 @@
         <span class="nav-section-label">System</span>
         <a href="#settings" class="nav-link" data-page="settings">
           <svg data-lucide="settings" class="icon"></svg> Settings
+        </a>
+        <a href="#wp-settings" class="nav-link" data-page="wp-settings">
+          <svg data-lucide="newspaper" class="icon"></svg> WP Settings
         </a>
         <a href="#logs" class="nav-link" data-page="logs">
           <svg data-lucide="scroll-text" class="icon"></svg> Logs
@@ -545,177 +548,9 @@
           <button class="btn btn-purple btn-full" id="saveFuelMetalsSettingsBtn" style="margin-top:15px;" data-click="saveFuelMetalsSettings">Save Fuel & Metals Keys</button>
         </div>
 
-        <!-- WordPress Publishing -->
-        <div class="settings-form" id="wp-publishing-settings-section">
-          <div class="settings-group">
-            <div class="settings-group-title">WordPress Publishing</div>
-            <small style="color:#888;display:block;margin-bottom:12px;">WordPress REST API credentials. Create an Application Password in WordPress under Users → Your Profile → Application Passwords.</small>
-            <div class="settings-row">
-              <label class="settings-label">Site URL</label>
-              <input type="url" id="wp-site-url" placeholder="https://example.com" />
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">Username</label>
-              <input type="text" id="wp-pub-username" placeholder="autopub" />
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">App Password</label>
-              <input type="password" id="wp-pub-password" placeholder="xxxx xxxx xxxx xxxx" />
-            </div>
-          </div>
-
-          <div class="settings-group" style="margin-top:18px;">
-            <div class="settings-group-title">Post Defaults</div>
-            <small style="color:#888;display:block;margin-bottom:12px;">Fallback values used when no publish rule matches and no per-draft override is set. Per-article overrides in the editor always win.</small>
-            <div class="settings-row">
-              <label class="settings-label">Default Post Status</label>
-              <select id="wp-post-status" class="settings-input">
-                <option value="draft">Draft</option>
-                <option value="publish">Publish immediately</option>
-                <option value="pending">Pending Review</option>
-                <option value="private">Private</option>
-              </select>
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">Default Author ID</label>
-              <input type="number" id="wp-author-id" placeholder="1" min="1" />
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">Default Category ID</label>
-              <input type="number" id="wp-default-category" placeholder="1" min="1" />
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">Classifier Default Author <small style="color:#666;">(username slug)</small></label>
-              <input type="text" id="wp-default-author-username" placeholder="(leave blank to use Default Author ID)" />
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">Comment Status</label>
-              <select id="wp-comment-status" class="settings-input">
-                <option value="">— WordPress default —</option>
-                <option value="open">Open (allow comments)</option>
-                <option value="closed">Closed (disable comments)</option>
-              </select>
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">Ping Status</label>
-              <select id="wp-ping-status" class="settings-input">
-                <option value="">— WordPress default —</option>
-                <option value="open">Open (allow trackbacks)</option>
-                <option value="closed">Closed</option>
-              </select>
-            </div>
-          </div>
-
-          <div style="display:flex;gap:8px;margin-top:12px;">
-            <button class="btn btn-sm btn-secondary" data-click="testWPConnection"><svg data-lucide="plug" class="icon"></svg> Test Connection</button>
-            <button class="btn btn-purple" data-click="saveWPPublishingSettings"><svg data-lucide="save" class="icon"></svg> Save</button>
-          </div>
-          <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
-        </div>
-
-        <!-- ─── Bulk Config Import ──────────────────────────────────── -->
-        <div class="settings-form" id="bulk-import-section">
-          <div class="settings-group">
-            <div class="settings-group-title">
-              <svg data-lucide="upload-cloud" class="icon"></svg>
-              Bulk Config Import
-            </div>
-            <small style="color:#888;display:block;margin-bottom:12px;">Upload a JSON file to configure authors, categories, tags, classifier dictionaries, and publish rules in one shot. Or export your current config to back it up or share it.</small>
-
-            <!-- Status + enable toggle -->
-            <div class="bulk-import-status">
-              <span>Status:</span>
-              <span id="bulk-import-status-pill" class="status-pill status-disabled">Disabled</span>
-              <button class="btn btn-sm btn-primary" id="bulk-import-toggle-btn" type="button">Enable</button>
-            </div>
-
-            <!-- File picker + actions -->
-            <div class="bulk-import-actions">
-              <input type="file" id="bulk-import-file" accept=".json,application/json" class="bulk-import-file-input" />
-              <label for="bulk-import-file" class="btn btn-secondary" id="bulk-import-file-label">
-                <svg data-lucide="file-plus" class="icon"></svg> Choose File...
-              </label>
-              <span id="bulk-import-filename" class="bulk-import-filename">No file selected</span>
-            </div>
-
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-              <button class="btn btn-primary" id="bulk-import-preview-btn" type="button" disabled>
-                <svg data-lucide="eye" class="icon"></svg> Preview Changes
-              </button>
-              <button class="btn btn-secondary" id="bulk-import-export-btn" type="button">
-                <svg data-lucide="download" class="icon"></svg> Export Current Config
-              </button>
-              <button class="btn btn-ghost btn-sm" id="bulk-import-template-btn" type="button">
-                <svg data-lucide="file-code" class="icon"></svg> Download Blank Template
-              </button>
-            </div>
-
-            <small style="color:#666;display:block;margin-top:8px;font-size:11px;">
-              Accepts: .json files up to 5 MB. Schema version 1.0. All sections are optional.
-            </small>
-
-            <!-- Recent snapshots panel -->
-            <div class="bulk-import-snapshots">
-              <div class="settings-group-title" style="font-size:13px;margin-bottom:4px;">Recent Snapshots</div>
-              <small style="color:#888;display:block;margin-bottom:8px;font-size:11px;">Each "before_import" snapshot captures the state immediately before an Apply. Click <strong>Restore</strong> to <strong>undo</strong> that import — not to load the imported rules.</small>
-              <div id="bulk-import-snapshots-list" class="bulk-import-snapshots-list">
-                <p class="placeholder-text" style="font-size:12px;">Loading...</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- WP Taxonomy & Routing Rules -->
-        <div class="settings-form" id="wp-taxonomy-section">
-          <div class="settings-group">
-            <div class="settings-group-title">WordPress Taxonomy &amp; Routing</div>
-            <small style="color:#888;display:block;margin-bottom:12px;">Sync categories, tags and authors from your WordPress site. Then create rules to automatically assign them to articles.</small>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-              <button class="btn btn-secondary" data-click="syncWPTaxonomy" id="wpTaxSyncBtn">&#8635; Sync from WordPress</button>
-              <span id="wpTaxSyncStatus" style="font-size:12px;color:#888;"></span>
-            </div>
-            <!-- Taxonomy cache display (collapsed) -->
-            <div id="wpTaxCacheWrap" style="display:none;margin-bottom:14px;">
-              <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-xs btn-secondary" data-tax-tab="category" data-click="showTaxTab" data-tax="category">Categories</button>
-                <button class="btn btn-xs btn-secondary" data-tax-tab="tag" data-click="showTaxTab" data-tax="tag">Tags</button>
-                <button class="btn btn-xs btn-secondary" data-tax-tab="author" data-click="showTaxTab" data-tax="author">Authors</button>
-              </div>
-              <div id="wpTaxTableWrap" style="max-height:320px;overflow-y:auto;margin-top:4px;"></div>
-            </div>
-            <!-- Rules -->
-            <div class="settings-group-title" style="margin-top:16px;">Publishing Rules</div>
-            <small style="color:#888;display:block;margin-bottom:10px;">Rules run in priority order (highest first). First match sets categories, tags &amp; author for the article.</small>
-            <button class="btn btn-xs btn-primary" data-click="addPublishRule" style="margin-bottom:10px;">+ Add Rule</button>
-            <div id="publishRulesList"></div>
-            <!-- Rule editor (inline) -->
-            <div id="publishRuleEditor" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-top:12px;">
-              <input type="hidden" id="ruleEditorId" value="" />
-              <div class="settings-row"><label class="settings-label">Rule Name</label><input type="text" id="ruleEditorName" class="settings-input" placeholder="e.g. Cricket Articles" /></div>
-              <div class="settings-row"><label class="settings-label">Priority</label><input type="number" id="ruleEditorPriority" class="settings-input" value="10" style="width:80px;" /></div>
-              <div class="settings-row"><label class="settings-label">Match Domain</label><input type="text" id="ruleEditorDomain" class="settings-input" placeholder="ndtv.com (optional)" /></div>
-              <div class="settings-row"><label class="settings-label">Match Source Category</label><input type="text" id="ruleEditorSrcCat" class="settings-input" placeholder="sports (optional)" /></div>
-              <div class="settings-row"><label class="settings-label">Match Title Keyword</label><input type="text" id="ruleEditorKeyword" class="settings-input" placeholder="IPL (optional)" /></div>
-              <div class="settings-row">
-                <label class="settings-label">Categories <small style="color:#888">(multi-select)</small></label>
-                <select id="ruleEditorCategories" multiple class="settings-input" style="height:90px;"></select>
-              </div>
-              <div class="settings-row">
-                <label class="settings-label">Primary Category <small style="color:#888">(for permalink)</small></label>
-                <select id="ruleEditorPrimaryCat" class="settings-input"></select>
-              </div>
-              <div class="settings-row">
-                <label class="settings-label">Tags <small style="color:#888">(multi-select)</small></label>
-                <select id="ruleEditorTags" multiple class="settings-input" style="height:90px;"></select>
-              </div>
-              <div class="settings-row"><label class="settings-label">Author</label><select id="ruleEditorAuthor" class="settings-input"></select></div>
-              <div style="display:flex;gap:8px;margin-top:12px;">
-                <button class="btn btn-primary" data-click="savePublishRule">&#128190; Save Rule</button>
-                <button class="btn btn-secondary" data-click="cancelPublishRule">Cancel</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <!-- NOTE: WordPress Publishing, Bulk Config Import, and WP Taxonomy &
+             Routing moved to the dedicated #page-wp-settings page. Nav link
+             is in the System section of the sidebar. -->
 
         <!-- Historical Data Import -->
         <div class="settings-form" id="csv-import-section">
@@ -918,6 +753,199 @@
           <div id="wpErrorLogContent" class="wp-error-log-content">
             <p class="placeholder-text">Loading...</p>
           </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ WORDPRESS SETTINGS PAGE ═══════════════════════════ -->
+      <section class="page hidden" id="page-wp-settings">
+        <div class="page-header">
+          <h2 class="page-title">WordPress Settings</h2>
+        </div>
+        <div class="page-content settings-content">
+
+          <!-- WordPress Publishing credentials + post defaults -->
+          <div class="settings-form" id="wp-publishing-settings-section">
+            <div class="settings-group">
+              <div class="settings-group-title">WordPress Publishing</div>
+              <small style="color:#888;display:block;margin-bottom:12px;">WordPress REST API credentials. Create an Application Password in WordPress under Users → Your Profile → Application Passwords.</small>
+              <div class="settings-row">
+                <label class="settings-label">Site URL</label>
+                <input type="url" id="wp-site-url" placeholder="https://example.com" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Username</label>
+                <input type="text" id="wp-pub-username" placeholder="autopub" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">App Password</label>
+                <input type="password" id="wp-pub-password" placeholder="xxxx xxxx xxxx xxxx" />
+              </div>
+            </div>
+
+            <div class="settings-group" style="margin-top:18px;">
+              <div class="settings-group-title">Post Defaults</div>
+              <small style="color:#888;display:block;margin-bottom:12px;">Fallback values used when no publish rule matches and no per-draft override is set. Per-article overrides in the editor always win.</small>
+              <div class="settings-row">
+                <label class="settings-label">Default Post Status</label>
+                <select id="wp-post-status" class="settings-input">
+                  <option value="draft">Draft</option>
+                  <option value="publish">Publish immediately</option>
+                  <option value="pending">Pending Review</option>
+                  <option value="private">Private</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Default Author ID</label>
+                <input type="number" id="wp-author-id" placeholder="1" min="1" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Default Category ID</label>
+                <input type="number" id="wp-default-category" placeholder="1" min="1" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Classifier Default Author <small style="color:#666;">(username slug)</small></label>
+                <input type="text" id="wp-default-author-username" placeholder="(leave blank to use Default Author ID)" />
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Comment Status</label>
+                <select id="wp-comment-status" class="settings-input">
+                  <option value="">— WordPress default —</option>
+                  <option value="open">Open (allow comments)</option>
+                  <option value="closed">Closed (disable comments)</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Ping Status</label>
+                <select id="wp-ping-status" class="settings-input">
+                  <option value="">— WordPress default —</option>
+                  <option value="open">Open (allow trackbacks)</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <button class="btn btn-sm btn-secondary" data-click="testWPConnection"><svg data-lucide="plug" class="icon"></svg> Test Connection</button>
+              <button class="btn btn-purple" data-click="saveWPPublishingSettings"><svg data-lucide="save" class="icon"></svg> Save</button>
+            </div>
+            <div id="wp-test-result" style="margin-top:8px;font-size:13px;"></div>
+          </div>
+
+          <!-- Bulk Config Import -->
+          <div class="settings-form" id="bulk-import-section">
+            <div class="settings-group">
+              <div class="settings-group-title">
+                <svg data-lucide="upload-cloud" class="icon"></svg>
+                Bulk Config Import
+              </div>
+              <small style="color:#888;display:block;margin-bottom:12px;">Upload a JSON file to configure authors, categories, tags, classifier dictionaries, and publish rules in one shot. Or export your current config to back it up or share it.</small>
+
+              <div class="bulk-import-status">
+                <span>Status:</span>
+                <span id="bulk-import-status-pill" class="status-pill status-disabled">Disabled</span>
+                <button class="btn btn-sm btn-primary" id="bulk-import-toggle-btn" type="button">Enable</button>
+              </div>
+
+              <div class="bulk-import-actions">
+                <input type="file" id="bulk-import-file" accept=".json,application/json" class="bulk-import-file-input" />
+                <label for="bulk-import-file" class="btn btn-secondary" id="bulk-import-file-label">
+                  <svg data-lucide="file-plus" class="icon"></svg> Choose File...
+                </label>
+                <span id="bulk-import-filename" class="bulk-import-filename">No file selected</span>
+              </div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                <button class="btn btn-primary" id="bulk-import-preview-btn" type="button" disabled>
+                  <svg data-lucide="eye" class="icon"></svg> Preview Changes
+                </button>
+                <button class="btn btn-secondary" id="bulk-import-export-btn" type="button">
+                  <svg data-lucide="download" class="icon"></svg> Export Current Config
+                </button>
+                <button class="btn btn-ghost btn-sm" id="bulk-import-template-btn" type="button">
+                  <svg data-lucide="file-code" class="icon"></svg> Download Blank Template
+                </button>
+              </div>
+
+              <small style="color:#666;display:block;margin-top:8px;font-size:11px;">
+                Accepts: .json files up to 5 MB. Schema version 1.0. All sections are optional.
+              </small>
+
+              <div class="bulk-import-snapshots">
+                <div class="settings-group-title" style="font-size:13px;margin-bottom:4px;">Recent Snapshots</div>
+                <small style="color:#888;display:block;margin-bottom:8px;font-size:11px;">Each "before_import" snapshot captures the state immediately before an Apply. Click <strong>Restore</strong> to <strong>undo</strong> that import — not to load the imported rules.</small>
+                <div id="bulk-import-snapshots-list" class="bulk-import-snapshots-list">
+                  <p class="placeholder-text" style="font-size:12px;">Loading...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Configuration Viewer — renders the live state of the imported config -->
+          <div class="settings-form" id="active-config-viewer-section">
+            <div class="settings-group">
+              <div class="settings-group-title">
+                <svg data-lucide="eye" class="icon"></svg>
+                Active Configuration
+                <button class="btn btn-xs btn-ghost" id="active-config-refresh-btn" type="button" style="margin-left:auto;">
+                  <svg data-lucide="refresh-cw" class="icon"></svg> Refresh
+                </button>
+              </div>
+              <small style="color:#888;display:block;margin-bottom:12px;">Live view of every routing rule and classifier dictionary currently in use. Updates automatically after each apply or rollback.</small>
+              <div id="active-config-viewer">
+                <p class="placeholder-text" style="font-size:12px;">Loading...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- WordPress Taxonomy & Routing Rules -->
+          <div class="settings-form" id="wp-taxonomy-section">
+            <div class="settings-group">
+              <div class="settings-group-title">WordPress Taxonomy &amp; Routing</div>
+              <small style="color:#888;display:block;margin-bottom:12px;">Sync categories, tags and authors from your WordPress site. Then create rules to automatically assign them to articles.</small>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <button class="btn btn-secondary" data-click="syncWPTaxonomy" id="wpTaxSyncBtn">&#8635; Sync from WordPress</button>
+                <span id="wpTaxSyncStatus" style="font-size:12px;color:#888;"></span>
+              </div>
+              <div id="wpTaxCacheWrap" style="display:none;margin-bottom:14px;">
+                <div style="display:flex;gap:8px;margin-bottom:8px;">
+                  <button class="btn btn-xs btn-secondary" data-tax-tab="category" data-click="showTaxTab" data-tax="category">Categories</button>
+                  <button class="btn btn-xs btn-secondary" data-tax-tab="tag" data-click="showTaxTab" data-tax="tag">Tags</button>
+                  <button class="btn btn-xs btn-secondary" data-tax-tab="author" data-click="showTaxTab" data-tax="author">Authors</button>
+                </div>
+                <div id="wpTaxTableWrap" style="max-height:320px;overflow-y:auto;margin-top:4px;"></div>
+              </div>
+              <div class="settings-group-title" style="margin-top:16px;">Publishing Rules</div>
+              <small style="color:#888;display:block;margin-bottom:10px;">Rules run in priority order (highest first). First match sets categories, tags &amp; author for the article.</small>
+              <button class="btn btn-xs btn-primary" data-click="addPublishRule" style="margin-bottom:10px;">+ Add Rule</button>
+              <div id="publishRulesList"></div>
+              <div id="publishRuleEditor" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-top:12px;">
+                <input type="hidden" id="ruleEditorId" value="" />
+                <div class="settings-row"><label class="settings-label">Rule Name</label><input type="text" id="ruleEditorName" class="settings-input" placeholder="e.g. Cricket Articles" /></div>
+                <div class="settings-row"><label class="settings-label">Priority</label><input type="number" id="ruleEditorPriority" class="settings-input" value="10" style="width:80px;" /></div>
+                <div class="settings-row"><label class="settings-label">Match Domain</label><input type="text" id="ruleEditorDomain" class="settings-input" placeholder="ndtv.com (optional)" /></div>
+                <div class="settings-row"><label class="settings-label">Match Source Category</label><input type="text" id="ruleEditorSrcCat" class="settings-input" placeholder="sports (optional)" /></div>
+                <div class="settings-row"><label class="settings-label">Match Title Keyword</label><input type="text" id="ruleEditorKeyword" class="settings-input" placeholder="IPL (optional)" /></div>
+                <div class="settings-row">
+                  <label class="settings-label">Categories <small style="color:#888">(multi-select)</small></label>
+                  <select id="ruleEditorCategories" multiple class="settings-input" style="height:90px;"></select>
+                </div>
+                <div class="settings-row">
+                  <label class="settings-label">Primary Category <small style="color:#888">(for permalink)</small></label>
+                  <select id="ruleEditorPrimaryCat" class="settings-input"></select>
+                </div>
+                <div class="settings-row">
+                  <label class="settings-label">Tags <small style="color:#888">(multi-select)</small></label>
+                  <select id="ruleEditorTags" multiple class="settings-input" style="height:90px;"></select>
+                </div>
+                <div class="settings-row"><label class="settings-label">Author</label><select id="ruleEditorAuthor" class="settings-input"></select></div>
+                <div style="display:flex;gap:8px;margin-top:12px;">
+                  <button class="btn btn-primary" data-click="savePublishRule">&#128190; Save Rule</button>
+                  <button class="btn btn-secondary" data-click="cancelPublishRule">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       </section>
 
@@ -1941,6 +1969,6 @@
   </div>
 
   <script src="/js/lucide.min.js"></script>
-  <script src="/js/dashboard.js?v=65"></script>
+  <script src="/js/dashboard.js?v=66"></script>
 </body>
 </html>

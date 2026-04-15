@@ -4536,3 +4536,171 @@ svg.icon, [data-lucide] { width: 16px; height: 16px; }
 }
 
 .bulk-import-undo-toast .bulk-undo-btn { white-space: nowrap; }
+
+/* ─── Active Configuration Viewer ───────────────────────────────────────── */
+#active-config-viewer-section .settings-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#active-config-viewer .cfg-card {
+  margin-bottom: 14px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+#active-config-viewer .cfg-card-title {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-surface-1);
+  border-bottom: 1px solid var(--border-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#active-config-viewer .config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+#active-config-viewer .config-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.01);
+}
+#active-config-viewer .config-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: top;
+}
+#active-config-viewer .config-table tr:last-child td { border-bottom: none; }
+#active-config-viewer .config-table .cfg-key {
+  font-family: 'SF Mono', Consolas, monospace;
+  color: var(--accent);
+  font-size: 11px;
+}
+#active-config-viewer .config-table .cfg-val,
+#active-config-viewer .config-table .cfg-user {
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+#active-config-viewer .config-table .cfg-user small {
+  display: block;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 10px;
+  margin-top: 2px;
+}
+#active-config-viewer .config-table .cfg-arrow {
+  color: var(--text-tertiary);
+  padding: 0 4px;
+  text-align: center;
+  width: 1%;
+}
+#active-config-viewer .config-table .cfg-canon {
+  font-weight: 600;
+  color: var(--text-primary);
+  width: 30%;
+}
+#active-config-viewer .config-table .cfg-raws code {
+  display: inline-block;
+  margin: 1px 4px 1px 0;
+  padding: 1px 6px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+#active-config-viewer .cfg-kw-cell {
+  max-width: 420px;
+  line-height: 1.8;
+}
+#active-config-viewer .cfg-kw-chip {
+  display: inline-block;
+  margin: 1px 4px 1px 0;
+  padding: 1px 6px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 3px;
+  font-size: 10px;
+  color: #93c5fd;
+}
+#active-config-viewer .cfg-kw-chip small {
+  margin-left: 4px;
+  color: #60a5fa;
+  opacity: 0.85;
+}
+#active-config-viewer .cfg-kw-more {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+#active-config-viewer .cfg-subsection {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+#active-config-viewer .cfg-subsection:last-child { border-bottom: none; }
+#active-config-viewer .cfg-subsection h5 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#active-config-viewer .config-rules .cfg-pri { width: 1%; }
+#active-config-viewer .cfg-prio-pill {
+  display: inline-block;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'SF Mono', Consolas, monospace;
+}
+#active-config-viewer .cfg-key-cell code {
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+#active-config-viewer .cfg-key-cell small {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  margin-top: 2px;
+}
+#active-config-viewer .cfg-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+#active-config-viewer .cfg-badge-off {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+#active-config-viewer .cfg-raw {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  color: #c9d1d9;
+  background: #0d1117;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 240px;
+}
