@@ -5693,6 +5693,78 @@ function createApiRouter(deps) {
     }
   });
 
+  // POST /api/autopilot/run-now — manually trigger one rewrite + publish cycle.
+  // Runs the exact same methods the scheduler calls on every tick. Gates
+  // (AUTO_REWRITE_ENABLED, AUTOPILOT_ENABLED, rate limits, quality filters)
+  // still apply, so the logs show real production behaviour.
+  router.post('/autopilot/run-now', async function (req, res) {
+    var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
+    if (!pipeline) {
+      return res.status(500).json({ ok: false, error: 'scheduler not initialised' });
+    }
+    var autoRw = cfgGet('AUTO_REWRITE_ENABLED');
+    var autoPub = cfgGet('AUTOPILOT_ENABLED');
+    var gateSummary = 'rewrite=' + autoRw + ' publish=' + autoPub;
+    logger.info('autopilot', 'Run-Now triggered by user (' + gateSummary + ')');
+
+    var startStats = Object.assign({}, pipeline.stats || {});
+    var errors = [];
+
+    try {
+      await pipeline._rewriteLoop();
+    } catch (e) {
+      errors.push('rewrite: ' + e.message);
+      logger.error('autopilot', 'Run-Now rewrite failed: ' + e.message);
+    }
+    try {
+      await pipeline._publishLoop();
+    } catch (e) {
+      errors.push('publish: ' + e.message);
+      logger.error('autopilot', 'Run-Now publish failed: ' + e.message);
+    }
+
+    var endStats = pipeline.stats || {};
+    var delta = {
+      rewritesStarted: (endStats.rewritesStarted || 0) - (startStats.rewritesStarted || 0),
+      rewritesCompleted: (endStats.rewritesCompleted || 0) - (startStats.rewritesCompleted || 0),
+      rewritesFailed: (endStats.rewritesFailed || 0) - (startStats.rewritesFailed || 0),
+      publishesCompleted: (endStats.publishesCompleted || 0) - (startStats.publishesCompleted || 0),
+      publishesFailed: (endStats.publishesFailed || 0) - (startStats.publishesFailed || 0),
+    };
+    logger.info('autopilot', 'Run-Now finished (delta ' + JSON.stringify(delta) + ')');
+
+    res.json({
+      ok: errors.length === 0,
+      gates: { rewriteEnabled: String(autoRw) === 'true', publishEnabled: String(autoPub) === 'true' },
+      delta: delta,
+      errors: errors,
+    });
+  });
+
+  // GET /api/autopilot/logs — recent log rows from modules relevant to the
+  // autopilot pipeline. Supports ?since=<id> for incremental polling and
+  // ?limit=<n> (default 100, max 500).
+  router.get('/autopilot/logs', function (req, res) {
+    try {
+      var db = req.app.locals.db;
+      var since = parseInt(req.query.since, 10);
+      if (isNaN(since) || since < 0) since = 0;
+      var limit = parseInt(req.query.limit, 10);
+      if (isNaN(limit) || limit <= 0) limit = 100;
+      if (limit > 500) limit = 500;
+
+      var rows = db.prepare(
+        "SELECT id, level, module, message, created_at FROM logs " +
+        "WHERE id > ? AND module IN ('pipeline','rewriter','autopilot','publisher','extractor','wp-publisher') " +
+        "ORDER BY id DESC LIMIT ?"
+      ).all(since, limit);
+
+      res.json({ ok: true, data: rows.reverse(), lastId: rows.length ? rows[rows.length - 1].id : since });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // GET /api/autopilot/queue — unified article queue (status='ready' primary drafts)
   router.get('/autopilot/queue', function (req, res) {
     try {
