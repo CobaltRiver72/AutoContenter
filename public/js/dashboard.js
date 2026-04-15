@@ -10531,6 +10531,7 @@
         var d = res && res.delta ? res.delta : {};
         var gates = res && res.gates ? res.gates : {};
         var diag = res && res.diagnostic ? res.diagnostic : null;
+        var skipped = res && res.skipped ? res.skipped : {};
         var summary = 'rewrites:' + (d.rewritesCompleted || 0) + '/' + (d.rewritesStarted || 0) +
                       ' publishes:' + (d.publishesCompleted || 0) +
                       ' (rewrite ' + (gates.rewriteEnabled ? 'ON' : 'OFF') +
@@ -10538,8 +10539,16 @@
         var level = (res && res.errors && res.errors.length) ? 'error' : 'success';
         showToast('Run Now: ' + summary, level);
 
-        // If rewrites=0 and we have diagnostic data, point at the biggest drop.
-        if (diag && !d.rewritesStarted) {
+        // If the scheduler was already mid-cycle, the loops were skipped. Tell
+        // the user that explicitly so a zero delta doesn't look like a bug.
+        if (skipped.rewrite || skipped.publish) {
+          var parts = [];
+          if (skipped.rewrite) parts.push('rewrite');
+          if (skipped.publish) parts.push('publish');
+          showToast('Scheduler is already running — ' + parts.join('+') + ' loop skipped (not a bug)', 'info');
+        } else if (diag && !d.rewritesStarted) {
+          // Only surface the filter-drop blocker if we actually RAN the loop
+          // and still got zero. Otherwise it's misleading.
           if (diag.biggestDrop) {
             var bd = diag.biggestDrop;
             showToast(
