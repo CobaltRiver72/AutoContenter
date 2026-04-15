@@ -8347,7 +8347,6 @@
 
   var _bulkImportSelectedFile = null;
   var _bulkImportPreviewId = null;
-  var _bulkImportLastSnapshotId = null;
   var _bulkImportEnabled = false;
 
   function initBulkImport() {
@@ -8448,28 +8447,28 @@
     var fd = new FormData();
     fd.append('file', _bulkImportSelectedFile);
 
-    fetch('/api/config/import/preview', {
-      method: 'POST',
-      credentials: 'same-origin',
-      body: fd,
-    })
-      .then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); })
+    var resetBtn = function () {
+      btn.disabled = false;
+      btn.innerHTML = '<svg data-lucide="eye" class="icon"></svg> Preview Changes';
+      _refreshIcons();
+    };
+
+    // fetchApi passes FormData through untouched (it only JSON-wraps plain
+    // objects) so multipart uploads go through the same error-handling and
+    // auth-redirect path as every other API call.
+    fetchApi('/api/config/import/preview', { method: 'POST', body: fd, cacheMs: 0 })
       .then(function (resp) {
-        btn.disabled = false;
-        btn.innerHTML = '<svg data-lucide="eye" class="icon"></svg> Preview Changes';
-        _refreshIcons();
-        if (!resp.json.ok) {
-          var msgs = (resp.json.errors || []).map(function (e) { return (e.path ? '[' + e.path + '] ' : '') + e.message; }).join('\n');
-          showToast('Preview failed:\n' + (msgs || resp.json.error || 'unknown'), 'error');
+        resetBtn();
+        if (!resp.ok) {
+          var msgs = (resp.errors || []).map(function (e) { return (e.path ? '[' + e.path + '] ' : '') + e.message; }).join('\n');
+          showToast('Preview failed:\n' + (msgs || resp.error || 'unknown'), 'error');
           return;
         }
-        _bulkImportPreviewId = resp.json.preview_id;
-        _renderBulkImportPreview(resp.json);
+        _bulkImportPreviewId = resp.preview_id;
+        _renderBulkImportPreview(resp);
       })
       .catch(function (err) {
-        btn.disabled = false;
-        btn.innerHTML = '<svg data-lucide="eye" class="icon"></svg> Preview Changes';
-        _refreshIcons();
+        resetBtn();
         showToast('Preview failed: ' + err.message, 'error');
       });
   }
@@ -8593,7 +8592,6 @@
           showToast('Apply failed: ' + (resp.error || (resp.errors && resp.errors[0] && resp.errors[0].message) || 'unknown'), 'error');
           return;
         }
-        _bulkImportLastSnapshotId = resp.snapshot_id;
         window.__closeBulkImportModal();
         _bulkImportPreviewId = null;
         _showUndoToast(resp);

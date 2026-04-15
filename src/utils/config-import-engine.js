@@ -68,13 +68,16 @@ function _mergeWithNullDelete(current, patch) {
 // SELECT queries against wp_taxonomy_cache to flag missing slugs/usernames.
 
 function computeDiff(parsed, db) {
+  // Merge semantics: the import engine NEVER removes entries in v1. Fields
+  // like `removed` / `publish_rules.unchanged` were stubbed in early drafts
+  // but nothing populates them, so they're omitted from the diff shape.
   var changes = {
     defaults:      { before: {}, after: {} },
-    authors:       { added: [], updated: [], unchanged: [], removed: [] },
-    categories:    { added: [], updated: [], unchanged: [], removed: [], missing_on_wp: [] },
+    authors:       { added: [], updated: [], unchanged: [] },
+    categories:    { added: [], updated: [], unchanged: [], missing_on_wp: [] },
     tags:          { added: 0, updated: 0, removed: 0 },
     routing_hints: { domains_changed: 0, source_categories_changed: 0, category_to_author_changed: 0 },
-    publish_rules: { added: [], updated: [], unchanged: [], removed: [] },
+    publish_rules: { added: [], updated: [] },
     modules:       { before: null, after: null },
   };
   var warnings = [];
@@ -777,6 +780,9 @@ var EXPORT_CREDENTIAL_DENYLIST = [
 ];
 
 function exportConfig(db) {
+  // Note: the initial `modules: null` used to sit here, but the validator
+  // rejects null for that field. It's added conditionally at the bottom of
+  // this function only if MODULE_ROUTING_CONFIG is actually set.
   var out = {
     version: '1.0',
     generated_at: new Date().toISOString(),
@@ -787,10 +793,12 @@ function exportConfig(db) {
     tags: {},
     routing_hints: {},
     publish_rules: [],
-    modules: null,
   };
 
-  // defaults — read each managed key, skip credentials
+  // defaults — read each managed key. Credentials are not in the managed
+  // key list, so they can't leak through here by construction. The
+  // EXPORT_CREDENTIAL_DENYLIST constant is kept as a defense-in-depth
+  // reference for any future export path that iterates all settings.
   var defaultsKeyReverseMap = {
     WP_POST_STATUS:          'post_status',
     WP_COMMENT_STATUS:       'comment_status',
@@ -800,14 +808,17 @@ function exportConfig(db) {
   };
   var dKeys = Object.keys(defaultsKeyReverseMap);
   for (var di = 0; di < dKeys.length; di++) {
-    if (_indexOf(EXPORT_CREDENTIAL_DENYLIST, dKeys[di]) !== -1) continue;
     var v = _getSetting(db, dKeys[di]);
     if (v !== null && v !== undefined && v !== '') {
       out.defaults[defaultsKeyReverseMap[dKeys[di]]] = v;
     }
   }
 
-  // authors — derive from CLASSIFIER_AUTHOR_DICTIONARIES
+  // authors — derive from CLASSIFIER_AUTHOR_DICTIONARIES. display_name and
+  // beats are spec'd as optional; we don't store them locally, so omit them
+  // from the export rather than emitting empty stubs. Admin can add them
+  // to their source file and round-trip still validates (unknown-to-old-
+  // import-but-known-to-schema fields pass through untouched).
   var authorDicts = _parseJsonSetting(db, 'CLASSIFIER_AUTHOR_DICTIONARIES', {});
   var authorUsernames = Object.keys(authorDicts);
   var wpAuthors = _loadWpAuthorMap(db);
@@ -815,15 +826,13 @@ function exportConfig(db) {
     var un = authorUsernames[au];
     out.authors.push({
       username: un,
-      display_name: '', // not stored locally; admin can fill in if needed
-      beats: [],        // not stored locally
       keywords: authorDicts[un] || {},
     });
   }
 
-  // categories — derive from CLASSIFIER_CATEGORY_DICTIONARIES. Omit
-  // default_author_username entirely when there's no mapping (the validator
-  // rejects null for that field, and the export must be re-importable as-is).
+  // categories — derive from CLASSIFIER_CATEGORY_DICTIONARIES. Only include
+  // default_author_username when there's a real mapping (validator rejects
+  // null for that field, and the export must be re-importable as-is).
   var catDicts = _parseJsonSetting(db, 'CLASSIFIER_CATEGORY_DICTIONARIES', {});
   var catToAuthor = _parseJsonSetting(db, 'CLASSIFIER_CATEGORY_TO_AUTHOR', {});
   var catSlugs = Object.keys(catDicts);
@@ -831,7 +840,6 @@ function exportConfig(db) {
     var slug = catSlugs[cs];
     var catRow = {
       slug: slug,
-      display_name: '',
       keywords: catDicts[slug] || {},
     };
     if (catToAuthor[slug]) catRow.default_author_username = catToAuthor[slug];
@@ -923,11 +931,6 @@ function _invertMap(map) {
     out[map[keys[i]]] = keys[i];
   }
   return out;
-}
-
-function _indexOf(arr, val) {
-  for (var i = 0; i < arr.length; i++) if (arr[i] === val) return i;
-  return -1;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

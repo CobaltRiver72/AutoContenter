@@ -8,11 +8,11 @@
  * checks separately. Synchronous and pure — same input, same output.
  *
  * @param {object} parsedConfig — already JSON.parse'd, never null
- * @returns {{ ok: boolean, errors: Array<{path, message, severity}>, warnings: Array<{path, message}> }}
+ * @returns {{ ok: boolean, errors: Array<{path, message}>, warnings: Array<{path, message}> }}
  *
- * - errors with severity 'hard' block the import (preview returns ok:false, apply rejected)
- * - errors with severity 'soft' currently behave like warnings but exist for future tightening
- * - warnings never block; they're informational
+ * Any entry in `errors` blocks the import (ok=false). Non-blocking issues
+ * go to `warnings` instead. Earlier drafts had a 'soft' severity tier for
+ * future tightening, but no caller differentiated — removed for clarity.
  */
 
 var SLUG_RE = /^[a-z0-9-]+$/;
@@ -81,11 +81,10 @@ function _hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function _pushError(errors, path, message, severity) {
+function _pushError(errors, path, message) {
   errors.push({
     path: path,
     message: message,
-    severity: severity || 'hard',
   });
 }
 
@@ -444,8 +443,7 @@ function _validateTags(tags, errors, warnings) {
           canonical.length +
           ' exceeds maximum of ' +
           MAX_TAG_CANONICAL_LENGTH +
-          ' characters (will be truncated at apply time)',
-        'soft'
+          ' characters (will be truncated at apply time)'
       );
     }
     if (_hasOwn(canonicalToRaw, canonical)) {

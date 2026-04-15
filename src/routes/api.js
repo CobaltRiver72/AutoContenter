@@ -5813,15 +5813,18 @@ function createApiRouter(deps) {
   // POST /api/config/import/preview
   router.post('/config/import/preview', _importGate, configImportUpload.single('file'), function (req, res) {
     try {
-      if (!req.file) return res.status(400).json({ ok: false, errors: [{ path: '', message: 'No file uploaded (use multipart field "file")', severity: 'hard' }] });
+      if (!req.file) {
+        // Matches either "no file sent" or "multer fileFilter rejected it"
+        return res.status(400).json({ ok: false, errors: [{ path: '', message: 'No valid .json file uploaded (must be under 5 MB, multipart field "file")' }] });
+      }
       var raw;
       try { raw = req.file.buffer.toString('utf-8'); }
-      catch (e) { return res.status(400).json({ ok: false, errors: [{ path: '', message: 'File is not valid UTF-8', severity: 'hard' }] }); }
+      catch (e) { return res.status(400).json({ ok: false, errors: [{ path: '', message: 'File is not valid UTF-8' }] }); }
 
       var parsed;
       try { parsed = JSON.parse(raw); }
       catch (parseErr) {
-        return res.status(400).json({ ok: false, errors: [{ path: '', message: 'Invalid JSON: ' + parseErr.message, severity: 'hard' }] });
+        return res.status(400).json({ ok: false, errors: [{ path: '', message: 'Invalid JSON: ' + parseErr.message }] });
       }
 
       var validation = configImportValidator.validate(parsed);
