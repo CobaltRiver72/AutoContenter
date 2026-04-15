@@ -521,10 +521,18 @@ class ContentClassifier {
     var map = {};
     try {
       var rows = this.db.prepare(
-        "SELECT name, wp_id FROM wp_taxonomy_cache WHERE tax_type = 'tag'"
+        "SELECT name, slug, wp_id FROM wp_taxonomy_cache WHERE tax_type = 'tag'"
       ).all();
       for (var i = 0; i < rows.length; i++) {
-        map[rows[i].name] = rows[i].wp_id;
+        var row = rows[i];
+        if (row.name) {
+          var nameKey = String(row.name).trim().toLowerCase().replace(/\s+/g, ' ');
+          if (nameKey) map[nameKey] = row.wp_id;
+        }
+        if (row.slug) {
+          var slugKey = String(row.slug).trim().toLowerCase();
+          if (slugKey) map[slugKey] = row.wp_id;
+        }
       }
     } catch (e) {
       if (this.logger) this.logger.warn('[content-classifier] getTagWpIdMap error: ' + e.message);
