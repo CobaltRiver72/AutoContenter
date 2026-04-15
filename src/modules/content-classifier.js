@@ -258,29 +258,30 @@ class ContentClassifier {
     return (this.config.get('DEFAULT_AUTHOR_USERNAME') || '').trim();
   }
 
+  // Parse a JSON-string config value, returning the fallback object on any
+  // parse failure or empty value. Used for all dictionary/hint overrides
+  // populated by the bulk import system.
+  _parseJsonSetting(key, fallback) {
+    var raw = this.config.get(key);
+    if (!raw) return fallback;
+    try {
+      var parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : fallback;
+    } catch (e) {
+      if (this.logger) this.logger.warn('[content-classifier] bad JSON in ' + key + ', falling back');
+      return fallback;
+    }
+  }
+
+  // Load all classifier scoring data sources. Setting values populated by the
+  // bulk import system override the corresponding hardcoded module constants.
+  // This is purely a data-source extension — no scoring logic changes.
   _loadDictionaries() {
-    var catRaw = this.config.get('CLASSIFIER_CATEGORY_DICTIONARIES');
-    var authRaw = this.config.get('CLASSIFIER_AUTHOR_DICTIONARIES');
-
-    if (catRaw) {
-      try {
-        this.categoryDictionaries = JSON.parse(catRaw);
-      } catch (e) {
-        this.categoryDictionaries = DEFAULT_CATEGORY_DICTIONARIES;
-      }
-    } else {
-      this.categoryDictionaries = DEFAULT_CATEGORY_DICTIONARIES;
-    }
-
-    if (authRaw) {
-      try {
-        this.authorDictionaries = JSON.parse(authRaw);
-      } catch (e) {
-        this.authorDictionaries = DEFAULT_AUTHOR_DICTIONARIES;
-      }
-    } else {
-      this.authorDictionaries = DEFAULT_AUTHOR_DICTIONARIES;
-    }
+    this.categoryDictionaries     = this._parseJsonSetting('CLASSIFIER_CATEGORY_DICTIONARIES', DEFAULT_CATEGORY_DICTIONARIES);
+    this.authorDictionaries       = this._parseJsonSetting('CLASSIFIER_AUTHOR_DICTIONARIES',   DEFAULT_AUTHOR_DICTIONARIES);
+    this.tagWorthyTerms           = this._parseJsonSetting('CLASSIFIER_TAG_NORMALIZATION',     TAG_WORTHY_TERMS);
+    this.domainHints              = this._parseJsonSetting('CLASSIFIER_DOMAIN_HINTS',          DOMAIN_HINTS);
+    this.sourceCategoryHints      = this._parseJsonSetting('CLASSIFIER_SOURCE_CATEGORY_HINTS', SOURCE_CATEGORY_HINTS);
   }
 
   _scoreDictionary(terms, dictionary) {
@@ -319,10 +320,11 @@ class ContentClassifier {
     var sourceCatLower = (sourceCategory || '').toLowerCase();
 
     // Source category hints → +8 to category score
-    var catKeys = Object.keys(SOURCE_CATEGORY_HINTS);
+    var sourceCatHints = this.sourceCategoryHints || SOURCE_CATEGORY_HINTS;
+    var catKeys = Object.keys(sourceCatHints);
     for (var ci = 0; ci < catKeys.length; ci++) {
       var catKey = catKeys[ci];
-      var hints = SOURCE_CATEGORY_HINTS[catKey];
+      var hints = sourceCatHints[catKey];
       for (var hi = 0; hi < hints.length; hi++) {
         if (sourceCatLower.indexOf(hints[hi]) !== -1) {
           if (!categoryScores[catKey]) {
@@ -336,10 +338,11 @@ class ContentClassifier {
 
     // Domain hints → +10 to category score and matching author score
     var catAuthorMap = this._getCategoryAuthorMap();
-    var domainCatKeys = Object.keys(DOMAIN_HINTS);
+    var domHints = this.domainHints || DOMAIN_HINTS;
+    var domainCatKeys = Object.keys(domHints);
     for (var di = 0; di < domainCatKeys.length; di++) {
       var dCatKey = domainCatKeys[di];
-      var domainList = DOMAIN_HINTS[dCatKey];
+      var domainList = domHints[dCatKey];
       for (var dhi = 0; dhi < domainList.length; dhi++) {
         if (domainLower.indexOf(domainList[dhi]) !== -1) {
           if (!categoryScores[dCatKey]) {
@@ -364,10 +367,11 @@ class ContentClassifier {
   _extractTags(tokens, bigrams) {
     var all = tokens.concat(bigrams);
     var tags = [];
+    var tagMap = this.tagWorthyTerms || TAG_WORTHY_TERMS;
     for (var i = 0; i < all.length; i++) {
       var term = all[i];
-      if (TAG_WORTHY_TERMS[term] !== undefined) {
-        var tag = TAG_WORTHY_TERMS[term];
+      if (tagMap[term] !== undefined) {
+        var tag = tagMap[term];
         if (tags.indexOf(tag) === -1) {
           tags.push(tag);
         }

@@ -260,4 +260,135 @@ async function resolveTagNames(db, config, tagNames, opts) {
   return ids;
 }
 
-module.exports = { syncTaxonomyFromWP, getCachedTaxonomy, getLastSyncedAt, resolveTagNames };
+/**
+ * Resolve an array of category slug strings to an array of WP category IDs.
+ * Looks up each slug in wp_taxonomy_cache first; for any misses, creates the
+ * category via the WP REST API and caches the new ID. Returns integer IDs only.
+ *
+ * Safe against launch-time volume: batches WP cache reads, never fails the
+ * whole batch if one category creation errors, and caches slug lookups.
+ *
+ * @param {Database} db
+ * @param {object}   config  — must expose WP_URL, WP_USERNAME, WP_APP_PASSWORD
+ * @param {string[]} slugs
+ * @param {object}   [opts]  — { logger, maxCreatePerCall: 12 }
+ * @returns {Promise<number[]>}
+ */
+async function resolveCategorySlugs(db, config, slugs, opts) {
+  opts = opts || {};
+  var logger = opts.logger || null;
+  var maxCreate = opts.maxCreatePerCall || 12;
+
+  if (!Array.isArray(slugs) || slugs.length === 0) return [];
+
+  // Deduplicate + normalize
+  var seen = {};
+  var wanted = [];
+  for (var i = 0; i < slugs.length; i++) {
+    var raw = slugs[i];
+    if (!raw) continue;
+    var key = String(raw).trim().toLowerCase();
+    if (!key || seen[key]) continue;
+    seen[key] = true;
+    wanted.push({ raw: key, key: key });
+  }
+  if (wanted.length === 0) return [];
+
+  // ── Step 1: Build an in-memory cache from wp_taxonomy_cache ────────────
+  var cacheBySlug = {};
+  try {
+    var rows = db.prepare(
+      "SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'category'"
+    ).all();
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      if (row.slug) cacheBySlug[String(row.slug).trim().toLowerCase()] = row.wp_id;
+    }
+  } catch (e) {
+    if (logger) logger.warn('[wp-taxonomy] resolveCategorySlugs: cache read failed: ' + e.message);
+  }
+
+  // ── Step 2: Separate cache hits from misses ────────────────────────────
+  var ids = [];
+  var misses = [];
+  for (var w = 0; w < wanted.length; w++) {
+    var hit = cacheBySlug[wanted[w].key];
+    if (hit) {
+      ids.push(hit);
+    } else {
+      misses.push(wanted[w]);
+    }
+  }
+
+  if (misses.length === 0) return ids;
+
+  // ── Step 3: Create missing categories in WP (bounded per call) ─────────
+  var wpUrl = (config.WP_URL || '').replace(/\/+$/, '');
+  var username = config.WP_USERNAME || '';
+  var password = config.WP_APP_PASSWORD || '';
+  if (!wpUrl || !username || !password) {
+    if (logger) logger.warn('[wp-taxonomy] resolveCategorySlugs: WP credentials missing, skipping category creation');
+    return ids;
+  }
+
+  try { assertSafeUrl(wpUrl); }
+  catch (e) {
+    if (logger) logger.warn('[wp-taxonomy] resolveCategorySlugs: unsafe WP URL, skipping: ' + e.message);
+    return ids;
+  }
+
+  var authHeader = 'Basic ' + Buffer.from(username + ':' + password).toString('base64');
+
+  var upsertStmt = null;
+  try {
+    upsertStmt = db.prepare(
+      'INSERT OR REPLACE INTO wp_taxonomy_cache (tax_type, wp_id, name, slug, parent_id, synced_at) ' +
+      'VALUES (?, ?, ?, ?, 0, datetime(\'now\'))'
+    );
+  } catch (e) {
+    if (logger) logger.warn('[wp-taxonomy] resolveCategorySlugs: prepare failed: ' + e.message);
+  }
+
+  var toCreate = misses.slice(0, maxCreate);
+  for (var c = 0; c < toCreate.length; c++) {
+    var cat = toCreate[c];
+    var createUrl = wpUrl + '/?rest_route=' + encodeURIComponent('/wp/v2/categories');
+    try {
+      assertSafeUrl(createUrl);
+      var resp = await axios.post(createUrl, { name: cat.raw, slug: cat.raw }, safeAxiosOptions({
+        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+        timeout: 15000,
+        validateStatus: function (s) { return (s >= 200 && s < 300) || s === 400; },
+      }));
+
+      var created = resp.data || {};
+
+      // If category already existed, WP returns 400 with the existing term's ID in data
+      if (resp.status === 400 && created.data && created.data.term_id) {
+        var existingId = Number(created.data.term_id);
+        if (Number.isFinite(existingId)) {
+          ids.push(existingId);
+          if (upsertStmt) {
+            try { upsertStmt.run('category', existingId, cat.raw, cat.raw); } catch (e) {}
+          }
+        }
+        continue;
+      }
+
+      if (created.id && Number.isFinite(Number(created.id))) {
+        var newId = Number(created.id);
+        ids.push(newId);
+        if (upsertStmt) {
+          try { upsertStmt.run('category', newId, _decodeHtml(created.name || cat.raw), created.slug || cat.raw); } catch (e) {}
+        }
+      }
+    } catch (err) {
+      // Non-blocking: log and continue. A single failed category must not fail the publish.
+      if (logger) logger.warn('[wp-taxonomy] resolveCategorySlugs: create failed for "' + cat.raw + '": ' + err.message);
+    }
+  }
+
+  return ids;
+}
+
+module.exports = { syncTaxonomyFromWP, getCachedTaxonomy, getLastSyncedAt, resolveTagNames, resolveCategorySlugs };
