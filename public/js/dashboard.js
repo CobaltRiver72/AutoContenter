@@ -560,7 +560,8 @@
       var PAGE_TITLES = {
         overview: 'Overview', feed: 'Live Feed', rules: 'Firehose Rules',
         trends: 'Trends', clusters: 'Clusters', failed: 'Failed Drafts',
-        published: 'Published', settings: 'Settings', logs: 'Logs',
+        published: 'Published', settings: 'Settings',
+        'wp-settings': 'WordPress Settings', logs: 'Logs',
         sources: 'Sources', fuel: 'Fuel Prices', metals: 'Metals',
         lottery: 'Lottery', autopilot: 'Autopilot'
       };
@@ -595,7 +596,8 @@
         _publishedPage = 1;
         loadPublished();
         break;
-      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); loadPipelineEngineSettings(); initBulkImport(); break;
+      case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadPipelineEngineSettings(); break;
+      case 'wp-settings': loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); initBulkImport(); loadActiveConfigViewer(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
@@ -8622,6 +8624,7 @@
         if (typeof loadPublishRules === 'function') loadPublishRules();
         if (typeof loadWPPublishingSettings === 'function') loadWPPublishingSettings();
         if (typeof loadWPTaxonomy === 'function') loadWPTaxonomy();
+        if (typeof loadActiveConfigViewer === 'function') loadActiveConfigViewer();
       })
       .catch(function (err) {
         btn.disabled = false;
@@ -8824,11 +8827,210 @@
           forceApiRefresh('/api/wp/taxonomy');
           if (typeof loadPublishRules === 'function') loadPublishRules();
           if (typeof loadWPPublishingSettings === 'function') loadWPPublishingSettings();
+          if (typeof loadActiveConfigViewer === 'function') loadActiveConfigViewer();
         } else {
           showToast('Restore failed: ' + (r.error || 'unknown'), 'error');
         }
       })
       .catch(function (err) { showToast('Restore failed: ' + err.message, 'error'); });
+  }
+
+  // ─── Active Configuration Viewer ────────────────────────────────────────
+  // Renders the full live state of the import system as a human-readable
+  // report on the WP Settings page. Fetches /api/config/export (the same
+  // endpoint the Export button hits) so it's always in sync with what the
+  // engine would actually write out.
+  function loadActiveConfigViewer() {
+    var container = $('active-config-viewer');
+    if (!container) return;
+    container.innerHTML = '<p class="placeholder-text" style="font-size:12px;">Loading...</p>';
+
+    var refreshBtn = $('active-config-refresh-btn');
+    if (refreshBtn && !refreshBtn._wired) {
+      refreshBtn._wired = true;
+      refreshBtn.addEventListener('click', function () {
+        forceApiRefresh('/api/config');
+        loadActiveConfigViewer();
+      });
+    }
+
+    fetch('/api/config/export', { credentials: 'same-origin' })
+      .then(function (r) {
+        if (r.status === 404) {
+          container.innerHTML = '<p class="placeholder-text" style="font-size:12px;color:var(--warning);">Bulk import is disabled. Enable it above to see the active configuration.</p>';
+          return null;
+        }
+        if (!r.ok) throw new Error('Failed to load config (HTTP ' + r.status + ')');
+        return r.json();
+      })
+      .then(function (cfg) {
+        if (!cfg) return;
+        container.innerHTML = _renderActiveConfig(cfg);
+        _refreshIcons();
+      })
+      .catch(function (err) {
+        container.innerHTML = '<p class="placeholder-text" style="font-size:12px;color:var(--danger);">' + escapeHtml(err.message) + '</p>';
+      });
+  }
+
+  function _renderActiveConfig(cfg) {
+    var out = '';
+    var hasAny = false;
+
+    // 1. Defaults
+    var defs = cfg.defaults || {};
+    var defKeys = Object.keys(defs);
+    if (defKeys.length) {
+      hasAny = true;
+      out += _configCard('Global Defaults',
+        '<table class="config-table"><tbody>' +
+        defKeys.map(function (k) {
+          return '<tr><td class="cfg-key">' + escapeHtml(k) + '</td><td class="cfg-val">' + escapeHtml(defs[k]) + '</td></tr>';
+        }).join('') +
+        '</tbody></table>'
+      );
+    }
+
+    // 2. Authors
+    var authors = cfg.authors || [];
+    if (authors.length) {
+      hasAny = true;
+      var authorRows = authors.map(function (a) {
+        var kwCount = Object.keys(a.keywords || {}).length;
+        var beats = (a.beats || []).join(', ');
+        var topKeywords = Object.keys(a.keywords || {}).slice(0, 8).map(function (k) {
+          return '<span class="cfg-kw-chip">' + escapeHtml(k) + '<small>' + a.keywords[k] + '</small></span>';
+        }).join('');
+        var overflow = kwCount > 8 ? '<span class="cfg-kw-more">+' + (kwCount - 8) + ' more</span>' : '';
+        return '<tr>' +
+          '<td class="cfg-user">' + escapeHtml(a.username) + (a.display_name ? '<small>' + escapeHtml(a.display_name) + '</small>' : '') + '</td>' +
+          '<td>' + escapeHtml(beats) + '</td>' +
+          '<td>' + kwCount + '</td>' +
+          '<td class="cfg-kw-cell">' + topKeywords + overflow + '</td>' +
+          '</tr>';
+      }).join('');
+      out += _configCard('Authors (' + authors.length + ')',
+        '<table class="config-table"><thead><tr><th>Username</th><th>Beats</th><th>#KW</th><th>Top keywords</th></tr></thead><tbody>' +
+        authorRows + '</tbody></table>'
+      );
+    }
+
+    // 3. Categories
+    var cats = cfg.categories || [];
+    if (cats.length) {
+      hasAny = true;
+      var catRows = cats.map(function (c) {
+        var kwCount = Object.keys(c.keywords || {}).length;
+        var topKeywords = Object.keys(c.keywords || {}).slice(0, 8).map(function (k) {
+          return '<span class="cfg-kw-chip">' + escapeHtml(k) + '<small>' + c.keywords[k] + '</small></span>';
+        }).join('');
+        var overflow = kwCount > 8 ? '<span class="cfg-kw-more">+' + (kwCount - 8) + ' more</span>' : '';
+        return '<tr>' +
+          '<td class="cfg-user">' + escapeHtml(c.slug) + '</td>' +
+          '<td>' + escapeHtml(c.default_author_username || '—') + '</td>' +
+          '<td>' + kwCount + '</td>' +
+          '<td class="cfg-kw-cell">' + topKeywords + overflow + '</td>' +
+          '</tr>';
+      }).join('');
+      out += _configCard('Categories (' + cats.length + ')',
+        '<table class="config-table"><thead><tr><th>Slug</th><th>Default author</th><th>#KW</th><th>Top keywords</th></tr></thead><tbody>' +
+        catRows + '</tbody></table>'
+      );
+    }
+
+    // 4. Tags (grouped by canonical)
+    var tags = cfg.tags || {};
+    var tagKeys = Object.keys(tags);
+    if (tagKeys.length) {
+      hasAny = true;
+      var canonGroups = {};
+      tagKeys.forEach(function (raw) {
+        var canon = tags[raw];
+        (canonGroups[canon] = canonGroups[canon] || []).push(raw);
+      });
+      var canonSorted = Object.keys(canonGroups).sort();
+      var tagRows = canonSorted.map(function (canon) {
+        return '<tr><td class="cfg-canon">' + escapeHtml(canon) + '</td><td class="cfg-raws">' +
+          canonGroups[canon].map(function (r) { return '<code>' + escapeHtml(r) + '</code>'; }).join(' ') +
+          '</td></tr>';
+      }).join('');
+      out += _configCard('Tag Normalization (' + tagKeys.length + ' raw → ' + canonSorted.length + ' canonical)',
+        '<table class="config-table"><thead><tr><th>Canonical tag</th><th>Raw terms</th></tr></thead><tbody>' +
+        tagRows + '</tbody></table>'
+      );
+    }
+
+    // 5. Routing hints
+    var rh = cfg.routing_hints || {};
+    var rhKeys = ['domains', 'source_categories', 'category_to_author'];
+    var rhTotal = rhKeys.reduce(function (a, k) { return a + Object.keys(rh[k] || {}).length; }, 0);
+    if (rhTotal > 0) {
+      hasAny = true;
+      var rhBody = '';
+      rhKeys.forEach(function (k) {
+        var obj = rh[k] || {};
+        var keys = Object.keys(obj);
+        if (!keys.length) return;
+        var label = k === 'domains' ? 'Domain hints' : k === 'source_categories' ? 'Source category hints' : 'Category → author fallback';
+        rhBody += '<div class="cfg-subsection"><h5>' + label + ' (' + keys.length + ')</h5>';
+        rhBody += '<table class="config-table"><tbody>';
+        rhBody += keys.map(function (kk) {
+          return '<tr><td class="cfg-key">' + escapeHtml(kk) + '</td><td class="cfg-arrow">→</td><td>' + escapeHtml(obj[kk]) + '</td></tr>';
+        }).join('');
+        rhBody += '</tbody></table></div>';
+      });
+      out += _configCard('Routing Hints', rhBody);
+    }
+
+    // 6. Publish rules
+    var rules = cfg.publish_rules || [];
+    if (rules.length) {
+      hasAny = true;
+      var sorted = rules.slice().sort(function (a, b) { return (b.priority || 0) - (a.priority || 0); });
+      var ruleRows = sorted.map(function (r) {
+        var m = r.match || {};
+        var a = r.assign || {};
+        var matchParts = [];
+        if (m.source_domain) matchParts.push('<strong>domain</strong>=' + escapeHtml(m.source_domain));
+        if (m.source_category) matchParts.push('<strong>src_cat</strong>=' + escapeHtml(m.source_category));
+        if (m.title_keyword) matchParts.push('<strong>title</strong>~' + escapeHtml(m.title_keyword));
+        var matchText = matchParts.length ? matchParts.join(' & ') : '<em style="color:var(--text-tertiary);">any</em>';
+        var assignParts = [];
+        if (a.author_username) assignParts.push('<strong>→</strong> ' + escapeHtml(a.author_username));
+        if (a.category_slugs && a.category_slugs.length) assignParts.push('<strong>cats:</strong> ' + a.category_slugs.map(escapeHtml).join(', '));
+        if (a.tag_slugs && a.tag_slugs.length) assignParts.push('<strong>tags:</strong> ' + a.tag_slugs.map(escapeHtml).join(', '));
+        var activeBadge = r.is_active === false ? '<span class="cfg-badge cfg-badge-off">off</span>' : '';
+        return '<tr>' +
+          '<td class="cfg-pri"><span class="cfg-prio-pill">P' + (r.priority || 0) + '</span></td>' +
+          '<td class="cfg-key-cell"><code>' + escapeHtml(r.key || '—') + '</code>' + activeBadge + '<br><small>' + escapeHtml(r.name || '') + '</small></td>' +
+          '<td>' + matchText + '</td>' +
+          '<td>' + (assignParts.join(' · ') || '<em>none</em>') + '</td>' +
+          '</tr>';
+      }).join('');
+      out += _configCard('Publish Rules (' + rules.length + ', by priority)',
+        '<table class="config-table config-rules"><thead><tr><th>Pri</th><th>Key</th><th>Match IF</th><th>Assign THEN</th></tr></thead><tbody>' +
+        ruleRows + '</tbody></table>'
+      );
+    }
+
+    // 7. Modules (forward-compat)
+    var mods = cfg.modules;
+    if (mods && typeof mods === 'object' && Object.keys(mods).length) {
+      hasAny = true;
+      out += _configCard('Module Routing (stored, not yet active)',
+        '<pre class="cfg-raw">' + escapeHtml(JSON.stringify(mods, null, 2)) + '</pre>'
+      );
+    }
+
+    if (!hasAny) {
+      out = '<p class="placeholder-text" style="font-size:12px;">No configuration imported yet. Upload a JSON file above to get started.</p>';
+    }
+
+    return out;
+  }
+
+  function _configCard(title, body) {
+    return '<div class="cfg-card"><div class="cfg-card-title">' + escapeHtml(title) + '</div>' + body + '</div>';
   }
 
   // ─── Shared helpers (Day 3) ──────────────────────────────────────────────
