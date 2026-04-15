@@ -8877,6 +8877,23 @@
     var out = '';
     var hasAny = false;
 
+    // 0. Health banner — shows at a glance which sections are configured
+    //    vs empty. Admins who see "only defaults set" know immediately that
+    //    their JSON upload never applied (or was rolled back).
+    var health = _renderConfigHealth(cfg);
+    out += health.html;
+    var nonDefaultsCount = health.populatedSections - (Object.keys(cfg.defaults || {}).length ? 1 : 0);
+    var hasImportedData = nonDefaultsCount > 0;
+    if (!hasImportedData && Object.keys(cfg.defaults || {}).length > 0) {
+      // User has manually-set defaults but no imported content. Warn them.
+      out += '<div class="cfg-empty-warning">' +
+        '<strong>&#9888; Only global defaults are set.</strong> ' +
+        'No authors, categories, tags, or publish rules have been imported yet. ' +
+        'If you uploaded a JSON file but don\'t see your data here, click <strong>Preview Changes</strong> in the Bulk Config Import card above, then <strong>Apply Changes</strong> in the modal. ' +
+        'Do <strong>NOT</strong> click Restore after applying — that UNDOES the import.' +
+        '</div>';
+    }
+
     // 1. Authors Overview — per-author roll-up of everything routed to them
     //    (beats, mapped categories, publish rules by match type, tag coverage,
     //    keyword count + top). Shown first because it's the admin's primary
@@ -9041,6 +9058,36 @@
 
   function _configCard(title, body) {
     return '<div class="cfg-card"><div class="cfg-card-title">' + escapeHtml(title) + '</div>' + body + '</div>';
+  }
+
+  // Quick-glance health banner — shows 7 pills, one per config section, each
+  // green (populated) or grey (empty). Makes it instantly obvious which parts
+  // of the import actually landed vs. which are still empty.
+  function _renderConfigHealth(cfg) {
+    var sections = [
+      { key: 'defaults',      label: 'Defaults',    count: Object.keys(cfg.defaults || {}).length },
+      { key: 'authors',       label: 'Authors',     count: (cfg.authors || []).length },
+      { key: 'categories',    label: 'Categories',  count: (cfg.categories || []).length },
+      { key: 'tags',          label: 'Tags',        count: Object.keys(cfg.tags || {}).length },
+      { key: 'routing_hints', label: 'Routing',     count:
+          Object.keys((cfg.routing_hints || {}).domains || {}).length +
+          Object.keys((cfg.routing_hints || {}).source_categories || {}).length +
+          Object.keys((cfg.routing_hints || {}).category_to_author || {}).length
+      },
+      { key: 'publish_rules', label: 'Rules',       count: (cfg.publish_rules || []).length },
+      { key: 'modules',       label: 'Modules',     count: cfg.modules && typeof cfg.modules === 'object' ? Object.keys(cfg.modules).length : 0 },
+    ];
+    var populatedSections = 0;
+    var pills = sections.map(function (s) {
+      var cls = s.count > 0 ? 'cfg-health-pill cfg-health-ok' : 'cfg-health-pill cfg-health-empty';
+      if (s.count > 0) populatedSections++;
+      var glyph = s.count > 0 ? '\u2713' : '\u2014';
+      return '<span class="' + cls + '">' + glyph + ' ' + s.label + ' <strong>' + s.count + '</strong></span>';
+    }).join('');
+    return {
+      html: '<div class="cfg-health-banner">' + pills + '</div>',
+      populatedSections: populatedSections,
+    };
   }
 
   // ─── Authors Overview ────────────────────────────────────────────────────
