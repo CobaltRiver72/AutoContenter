@@ -292,17 +292,36 @@ test('engine: restore does NOT delete manual publish rules', function () {
   assert.equal(manualCountAfter, manualCountBefore, 'manual rules must survive restore');
 });
 
-test('engine: snapshot pruning keeps day-zero (id=1)', function () {
+test('engine: snapshot pruning keeps baseline (is_baseline=1), not hardcoded id=1', function () {
   _resetState();
-  // Create 15 snapshots — pruning should keep day-zero + last 10
+  // Create 15 snapshots — pruning should keep baseline + last 10
   for (var i = 0; i < 15; i++) {
     engine.captureSnapshot(db, { label: 'prune-test-' + i, createdBy: 'test' });
   }
   engine.pruneSnapshots(db);
   var snaps = engine.listSnapshots(db);
-  // day-zero (1) + 10 most recent = 11
+  // baseline + 10 most recent = 11
   assert.ok(snaps.length <= 11, 'should keep at most 11 snapshots, got ' + snaps.length);
-  assert.ok(snaps.find(function (s) { return s.id === 1; }), 'day-zero must survive pruning');
+  // The baseline is marked by is_baseline=1, not by id. Verify via SQL.
+  var baseline = db.prepare("SELECT id FROM config_snapshots WHERE is_baseline = 1").get();
+  assert.ok(baseline, 'baseline row (is_baseline=1) must survive pruning');
+});
+
+test('engine: prune respects is_baseline marker even when baseline id is NOT 1', function () {
+  _resetState();
+  // Simulate a re-seeded install where the baseline got id=99
+  db.prepare("DELETE FROM config_snapshots WHERE is_baseline = 1").run();
+  db.prepare(
+    "INSERT INTO config_snapshots (id, label, settings_json, publish_rules_json, created_by, is_baseline) " +
+    "VALUES (99, 'factory_default_reseeded', '{}', '[]', 'system', 1)"
+  ).run();
+  // Now create 12 normal snapshots
+  for (var i = 0; i < 12; i++) {
+    engine.captureSnapshot(db, { label: 'post-reseed-' + i, createdBy: 'test' });
+  }
+  engine.pruneSnapshots(db);
+  var survives = db.prepare("SELECT id FROM config_snapshots WHERE id = 99").get();
+  assert.ok(survives, 'baseline with id=99 must survive pruning via is_baseline marker');
 });
 
 test('engine: applyImport invokes classifier.reloadDictionaries on success', async function () {
@@ -346,6 +365,34 @@ test('engine: applyImport snapshot points to BEFORE-state for undo', async funct
   engine.restoreSnapshot(db, result.snapshot_id);
   var restored = db.prepare("SELECT value FROM settings WHERE key='WP_POST_STATUS'").get();
   assert.equal(restored.value, 'draft', 'snapshot must capture the BEFORE-state, not the after-state');
+});
+
+test('engine: silent-truncation guard — applyImport throws if a referenced category cannot be resolved', async function () {
+  _resetState();
+  _seedWpCache([{ id: 1, slug: 'admin' }], [], []);
+  // Seed a config that references a category slug which will NOT exist in
+  // wp_taxonomy_cache after resolveCategorySlugs runs (we pass an empty config
+  // so the resolver can't actually call WP). With the truncation guard, this
+  // must throw a clear error — without it, publish_rules would save null IDs.
+  var cfg = {
+    version: '1.0',
+    authors: [{ username: 'admin', keywords: {} }],
+    publish_rules: [{
+      key: 'ghost_rule',
+      name: 'References a ghost category',
+      priority: 10,
+      is_active: true,
+      match: { source_domain: 'example.com', source_category: null, title_keyword: null },
+      assign: { category_slugs: ['ghost-cat-does-not-exist'], primary_category_slug: 'ghost-cat-does-not-exist', tag_slugs: [], author_username: 'admin' },
+    }],
+  };
+  // config:{} has no WP credentials, so resolveCategorySlugs will skip creation
+  // but applyImport should then detect the missing slug and throw.
+  await assert.rejects(
+    engine.applyImport(cfg, _baseCtx()),
+    /ghost-cat-does-not-exist/,
+    'apply must throw naming the unresolved category slug'
+  );
 });
 
 test('validator + engine: routing_hints diff reports change counts', function () {
