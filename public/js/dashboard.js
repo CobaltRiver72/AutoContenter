@@ -443,17 +443,55 @@
     }, 3600);
   }
 
+  // ─── API client with TTL cache + in-flight dedupe + invalidation ────────
+  // Revisiting a page within a few seconds returns cached data instantly.
+  // Concurrent calls to the same GET URL share one network request.
+  // Any POST/PUT/DELETE to /api/foo/... invalidates every GET /api/foo cache entry.
+  var _apiCache = new Map(); // url -> { data, fetchedAt }
+  var _apiInflight = new Map(); // url -> Promise
+  var _API_DEFAULT_TTL_MS = 10000;
+
+  function _apiInvalidate(mutationUrl) {
+    var match = mutationUrl.match(/^(\/api\/[^/?]+)/);
+    if (!match) { _apiCache.clear(); return; }
+    var prefix = match[1];
+    var toDelete = [];
+    _apiCache.forEach(function (_v, k) { if (k.indexOf(prefix) === 0) toDelete.push(k); });
+    for (var i = 0; i < toDelete.length; i++) _apiCache.delete(toDelete[i]);
+  }
+
+  // Global helper: refresh buttons call this before re-running a loadX()
+  // so the user always gets fresh data when they explicitly hit Refresh.
+  function forceApiRefresh(prefix) {
+    if (prefix) _apiInvalidate(prefix);
+    else _apiCache.clear();
+  }
+
   function fetchApi(url, options) {
     options = options || {};
     options.credentials = 'same-origin';
     if (!options.headers) options.headers = {};
+
+    var method = (options.method || 'GET').toUpperCase();
+    var isGet = method === 'GET';
+    var cacheMs = options.cacheMs != null ? options.cacheMs : (isGet ? _API_DEFAULT_TTL_MS : 0);
+    var bypass = options.bypassCache === true;
+
+    if (isGet && cacheMs > 0 && !bypass) {
+      var cached = _apiCache.get(url);
+      if (cached && (Date.now() - cached.fetchedAt) < cacheMs) {
+        return Promise.resolve(cached.data);
+      }
+      var inflight = _apiInflight.get(url);
+      if (inflight) return inflight;
+    }
 
     if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
       options.headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(options.body);
     }
 
-    return fetch(url, options).then(function (res) {
+    var promise = fetch(url, options).then(function (res) {
       if (res.status === 401) {
         window.location.href = '/login';
         throw new Error('Unauthorized');
@@ -469,7 +507,21 @@
         });
       }
       return res.json();
+    }).then(function (data) {
+      if (isGet && cacheMs > 0) {
+        _apiCache.set(url, { data: data, fetchedAt: Date.now() });
+      } else if (!isGet) {
+        _apiInvalidate(url);
+      }
+      _apiInflight.delete(url);
+      return data;
+    }).catch(function (err) {
+      _apiInflight.delete(url);
+      throw err;
     });
+
+    if (isGet && cacheMs > 0 && !bypass) _apiInflight.set(url, promise);
+    return promise;
   }
 
   // ─── Router ─────────────────────────────────────────────────────────────
@@ -1813,6 +1865,7 @@
     var refreshBtn = $('rulesRefreshBtn');
     if (refreshBtn) {
       refreshBtn.onclick = function () {
+        forceApiRefresh();
         loadFirehoseStatus();
         loadFirehoseRules();
         loadFirehoseStatsWidget();
@@ -3697,7 +3750,7 @@
       // Step 1 — hit the tiny digest endpoint (~30 bytes/draft instead of
       // ~500). Hash the response and bail out if nothing changed. The full
       // drafts fetch + render only happens on a real state change.
-      fetchApi('/api/drafts/status-digest')
+      fetchApi('/api/drafts/status-digest', { cacheMs: 0 })
         .then(function (digest) {
           var rows = digest.data || [];
           var hasActive = !!digest.hasActive;
@@ -3716,7 +3769,7 @@
 
           // Step 2 — digest says something changed, fetch the full list and
           // re-render. Uses the same renderDraftsView path as the initial load.
-          return fetchApi('/api/drafts').then(function (data) {
+          return fetchApi('/api/drafts', { cacheMs: 0 }).then(function (data) {
             var drafts = data.data || [];
             var pollContainer = $('publishedList');
             renderDraftsView(pollContainer, drafts);
@@ -7573,7 +7626,7 @@
     'testFuelFetch':           function (el) { testFuelFetch(el); },
     'triggerFuelFetch':        function () { triggerFuelFetch(); },
     'triggerFuelPosts':        function () { triggerFuelPosts(); },
-    'loadFuelPage':            function () { loadFuelPage(); },
+    'loadFuelPage':            function () { forceApiRefresh('/api/fuel'); loadFuelPage(); },
     'switchFuelTab':           function (el) { switchFuelTab(el.dataset.tab); },
     'toggleFuelCity':          function (el) { toggleFuelCity(el.dataset.city, Number(el.dataset.enable)); },
     'fetchSingleFuelCity':     function (el) { fetchSingleFuelCity(el.dataset.city, el); },
@@ -7585,7 +7638,7 @@
     'testMetalsFetch':         function (el) { testMetalsFetch(el); },
     'triggerMetalsFetch':      function (el) { triggerMetalsFetch(el); },
     'triggerMetalsPosts':      function () { triggerMetalsPosts(); },
-    'loadMetalsPage':          function () { loadMetalsPage(); },
+    'loadMetalsPage':          function () { forceApiRefresh('/api/metals'); loadMetalsPage(); },
     'switchMetal':             function (el) { switchMetal(el.dataset.metal); },
     'switchMetalsTab':         function (el) { switchMetalsTab(el.dataset.tab); },
     'toggleMetalsCity':        function (el) { toggleMetalsCity(el.dataset.city, Number(el.dataset.enable)); },
@@ -9062,7 +9115,7 @@
     loadAutopilotDecisions();
 
     var refreshBtn = $('autopilotRefreshBtn');
-    if (refreshBtn) refreshBtn.onclick = function () { loadAutopilot(); showToast('Refreshed', 'info'); };
+    if (refreshBtn) refreshBtn.onclick = function () { forceApiRefresh(); loadAutopilot(); showToast('Refreshed', 'info'); };
 
     var simBtn = $('autopilotSimulateBtn');
     if (simBtn) simBtn.onclick = runAutopilotSimulate;
@@ -9087,7 +9140,7 @@
     var queueRefreshBtn = $('queueRefreshBtn');
     if (queueRefreshBtn && !queueRefreshBtn.__wired) {
       queueRefreshBtn.__wired = true;
-      queueRefreshBtn.onclick = function () { loadAutopilotQueue(); };
+      queueRefreshBtn.onclick = function () { forceApiRefresh('/api/autopilot'); loadAutopilotQueue(); };
     }
 
     var queuePublishAllBtn = $('queuePublishAllBtn');
@@ -9550,7 +9603,7 @@
     loadLotterySlots();
 
     var refreshBtn = $('lotteryRefreshBtn');
-    if (refreshBtn) refreshBtn.onclick = function () { loadLotteryPage(); showToast('Refreshed', 'info'); };
+    if (refreshBtn) refreshBtn.onclick = function () { forceApiRefresh('/api/lottery'); loadLotteryPage(); showToast('Refreshed', 'info'); };
 
     var fetchAllBtn = $('lotteryFetchAllBtn');
     if (fetchAllBtn) fetchAllBtn.onclick = function () {
