@@ -1457,6 +1457,9 @@
         <div class="page-header">
           <h2 class="page-title">Autopilot</h2>
           <div class="page-actions">
+            <button class="btn btn-sm btn-primary" id="autopilotRunNowBtn">
+              <svg data-lucide="play" class="icon"></svg> Run Now
+            </button>
             <button class="btn btn-sm btn-outline" id="autopilotSimulateBtn">
               <svg data-lucide="flask-conical" class="icon"></svg> Simulate
             </button>
@@ -1645,6 +1648,38 @@
           <div class="card-title">Recent Decisions</div>
           <div id="autopilot-decisions-list">
             <p class="placeholder-text">Loading...</p>
+          </div>
+        </div>
+
+        <!-- Live Log Panel — pipeline/rewriter/autopilot/publisher/extractor -->
+        <div class="card" style="margin-top:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div class="card-title" style="margin:0;">Autopilot Logs</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" id="autopilotLogsAutoScroll" checked /> Auto-scroll
+              </label>
+              <button class="btn btn-sm btn-ghost" id="autopilotLogsClearBtn">Clear</button>
+              <button class="btn btn-sm btn-ghost" id="autopilotLogsRefreshBtn">
+                <svg data-lucide="refresh-cw" class="icon"></svg> Refresh
+              </button>
+            </div>
+          </div>
+          <div id="autopilot-logs-box" style="
+            background:#0a0a0a;
+            border:1px solid var(--border);
+            border-radius:6px;
+            padding:10px 12px;
+            height:320px;
+            overflow-y:auto;
+            font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+            font-size:11px;
+            line-height:1.55;
+            color:#d4d4d4;
+            white-space:pre-wrap;
+            word-break:break-word;
+          ">
+            <div style="color:var(--text-muted);">Polling will start when this page is active…</div>
           </div>
         </div>
       </section>

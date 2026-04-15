@@ -10494,6 +10494,105 @@
       queuePublishAllBtn.__wired = true;
       queuePublishAllBtn.onclick = function () { window.__publishAllReady(); };
     }
+
+    var runNowBtn = $('autopilotRunNowBtn');
+    if (runNowBtn && !runNowBtn.__wired) {
+      runNowBtn.__wired = true;
+      runNowBtn.onclick = runAutopilotNow;
+    }
+
+    var logsClearBtn = $('autopilotLogsClearBtn');
+    if (logsClearBtn && !logsClearBtn.__wired) {
+      logsClearBtn.__wired = true;
+      logsClearBtn.onclick = function () {
+        var box = $('autopilot-logs-box');
+        if (box) box.innerHTML = '<div style="color:var(--text-muted);">Cleared. New lines will appear on next poll…</div>';
+        _autopilotLogsLastId = 0;
+      };
+    }
+
+    var logsRefreshBtn = $('autopilotLogsRefreshBtn');
+    if (logsRefreshBtn && !logsRefreshBtn.__wired) {
+      logsRefreshBtn.__wired = true;
+      logsRefreshBtn.onclick = function () { loadAutopilotLogs(); };
+    }
+
+    startAutopilotLogPolling();
+  }
+
+  var _autopilotLogsLastId = 0;
+
+  function runAutopilotNow() {
+    var btn = $('autopilotRunNowBtn');
+    if (btn) { btn.disabled = true; var prev = btn.innerHTML; btn.innerHTML = 'Running...'; btn.__prev = prev; }
+    showToast('Triggering autopilot cycle...', 'info');
+    fetchApi('/api/autopilot/run-now', { method: 'POST' })
+      .then(function (res) {
+        var d = res && res.delta ? res.delta : {};
+        var gates = res && res.gates ? res.gates : {};
+        var summary = 'rewrites:' + (d.rewritesCompleted || 0) + '/' + (d.rewritesStarted || 0) +
+                      ' publishes:' + (d.publishesCompleted || 0) +
+                      ' (rewrite gate ' + (gates.rewriteEnabled ? 'ON' : 'OFF') +
+                      ', publish gate ' + (gates.publishEnabled ? 'ON' : 'OFF') + ')';
+        var level = (res && res.errors && res.errors.length) ? 'error' : 'success';
+        showToast('Run Now: ' + summary, level);
+        loadAutopilotLogs();
+        loadAutopilotStatus();
+        loadAutoRewriteStatus();
+        loadAutopilotQueue();
+        loadAutopilotDecisions();
+      })
+      .catch(function (err) { showToast('Run Now failed: ' + err.message, 'error'); })
+      .finally(function () {
+        if (btn) { btn.disabled = false; if (btn.__prev) btn.innerHTML = btn.__prev; }
+        if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+      });
+  }
+
+  function loadAutopilotLogs() {
+    var box = $('autopilot-logs-box');
+    if (!box) return;
+    fetchApi('/api/autopilot/logs?since=' + _autopilotLogsLastId + '&limit=200')
+      .then(function (res) {
+        var rows = (res && res.data) || [];
+        if (rows.length === 0) return;
+        if (_autopilotLogsLastId === 0) box.innerHTML = '';
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          if (r.id > _autopilotLogsLastId) _autopilotLogsLastId = r.id;
+          box.appendChild(_renderAutopilotLogLine(r));
+        }
+        // Trim if the buffer grows beyond 500 lines
+        while (box.children.length > 500) box.removeChild(box.firstChild);
+        var autoScroll = $('autopilotLogsAutoScroll');
+        if (!autoScroll || autoScroll.checked) box.scrollTop = box.scrollHeight;
+      })
+      .catch(function () { /* silent on transient errors */ });
+  }
+
+  function _renderAutopilotLogLine(row) {
+    var line = document.createElement('div');
+    var colors = { info: '#60a5fa', warn: '#fbbf24', error: '#f87171', debug: '#9ca3af' };
+    var color = colors[row.level] || '#d4d4d4';
+    var ts = (row.created_at || '').replace('T', ' ').replace('Z', '').substring(5, 19);
+    var lvl = (row.level || 'info').toUpperCase().padEnd(5, ' ');
+    var mod = (row.module || '-').substring(0, 10).padEnd(10, ' ');
+    var ts_span = '<span style="color:#6b7280;">' + ts + '</span>';
+    var lvl_span = '<span style="color:' + color + ';font-weight:600;">' + lvl + '</span>';
+    var mod_span = '<span style="color:#a78bfa;">' + mod + '</span>';
+    var msg = (row.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    line.innerHTML = ts_span + ' ' + lvl_span + ' ' + mod_span + ' ' + msg;
+    return line;
+  }
+
+  function startAutopilotLogPolling() {
+    _autopilotLogsLastId = 0;
+    loadAutopilotLogs();
+    var timer = setInterval(function () {
+      if (state.currentPage !== 'autopilot') { clearInterval(timer); return; }
+      loadAutopilotLogs();
+    }, 3000);
+    state.refreshTimers.push(timer);
   }
 
   function runAutopilotSimulate() {
