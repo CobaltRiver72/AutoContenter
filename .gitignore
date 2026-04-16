@@ -22,3 +22,12 @@ Untitled.canvas
 
 # Claude Code per-user state
 .claude/
+
+# Never commit new markdown files (old prompts, scratch notes stay local).
+# Existing reference docs below are kept as GitHub backup.
+*.md
+!CLAUDE.md
+!INFRANODUS_API_REFERENCE.md
+!SECURITY-AUDIT.md
+!PLAN.md
+!docs/superpowers/plans/2026-04-12-ai-security-fixes.md
