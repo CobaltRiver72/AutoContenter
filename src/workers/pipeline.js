@@ -866,9 +866,18 @@ class Pipeline {
           avg_similarity: readyPrimary.avg_similarity || 0,
           article_count: readyPrimary.article_count || 1,
         };
+        // Detect language: prefer stored source_language, else detect from
+        // rewritten title + extracted content so existing rows with NULL
+        // source_language are still filtered correctly.
+        var _detectedLang = readyPrimary.source_language;
+        if (!_detectedLang) {
+          var _langSample = (readyPrimary.rewritten_title || readyPrimary.source_title || '') +
+                            ' ' + (readyPrimary.extracted_content || '').slice(0, 500);
+          _detectedLang = /[\u0900-\u097F]{3,}/.test(_langSample) ? 'hi' : 'en';
+        }
         var draftForAutopilot = {
           title: readyPrimary.rewritten_title || readyPrimary.source_title || '',
-          language: readyPrimary.source_language || 'en',
+          language: _detectedLang,
           word_count: readyPrimary.rewritten_word_count || 0,
           tier: 3,
           domain: readyPrimary.source_domain || '',
@@ -1336,18 +1345,20 @@ class Pipeline {
       var insertDraft = this.db.prepare(
         "INSERT OR IGNORE INTO drafts (" +
         "  source_article_id, source_url, source_domain, source_title," +
-        "  source_content_markdown, target_platform, status, mode," +
+        "  source_content_markdown, source_language, target_platform, status, mode," +
         "  cluster_id, cluster_role, extraction_status" +
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
 
       var self = this;
       var createDrafts = this.db.transaction(function () {
         for (var i = 0; i < articles.length; i++) {
           var a = articles[i];
+          var langSample = (a.title || '') + ' ' + (a.content_markdown || '').slice(0, 300);
+          var artLang = /[\u0900-\u097F]{3,}/.test(langSample) ? 'hi' : 'en';
           insertDraft.run(
             a.id, a.url, a.domain, a.title,
-            a.content_markdown || '', 'wordpress',
+            a.content_markdown || '', artLang, 'wordpress',
             'fetching', 'auto',
             cluster.id, i === 0 ? 'primary' : 'source', 'pending'
           );
