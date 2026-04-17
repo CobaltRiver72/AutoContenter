@@ -6738,7 +6738,6 @@
     // Standard groups (AI is handled by its own section now)
     var standardGroups = {
       'Firehose': ['FIREHOSE_TOKEN'],
-      'WordPress': ['WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD', 'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_POST_STATUS'],
       'Pipeline': ['MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
       'InfraNodus': ['INFRANODUS_ENABLED', 'INFRANODUS_API_KEY'],
@@ -7065,10 +7064,10 @@
         }
         el = $('openai-key');
         if (el && data.openaiKey) el.placeholder = data.openaiKey;
-        el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o-mini';
+        el = $('openai-model'); if (el) el.value = data.openaiModel || '';
         el = $('openrouter-key');
         if (el && data.openrouterKey) el.placeholder = data.openrouterKey;
-        window.__lastSavedOpenrouterModel = data.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
+        window.__lastSavedOpenrouterModel = data.openrouterModel || '';
         el = $('openrouter-model'); if (el) el.value = window.__lastSavedOpenrouterModel;
         el = $('ai-fallback'); if (el) el.checked = data.enableFallback !== false;
         el = $('ai-max-tokens'); if (el) el.value = data.maxTokens || 4096;

@@ -51,7 +51,7 @@ async function _wpFetchAll(wpBaseUrl, authHeader, restPath, extraParams) {
  * Returns { categories, tags, authors, errors[] }
  */
 async function syncTaxonomyFromWP(db, config) {
-  var wpUrl = (config.WP_URL || '').replace(/\/+$/, '');
+  var wpUrl = (config.WP_SITE_URL || config.WP_URL || '').replace(/\/+$/, '');
   var username = config.WP_USERNAME || '';
   var password = config.WP_APP_PASSWORD || '';
 
@@ -192,7 +192,7 @@ async function resolveTagNames(db, config, tagNames, opts) {
   if (misses.length === 0) return ids;
 
   // ── Step 3: Create missing tags in WP (bounded per call) ───────────────
-  var wpUrl = (config.WP_URL || '').replace(/\/+$/, '');
+  var wpUrl = (config.WP_SITE_URL || config.WP_URL || '').replace(/\/+$/, '');
   var username = config.WP_USERNAME || '';
   var password = config.WP_APP_PASSWORD || '';
   if (!wpUrl || !username || !password) {
@@ -323,7 +323,7 @@ async function resolveCategorySlugs(db, config, slugs, opts) {
   if (misses.length === 0) return ids;
 
   // ── Step 3: Create missing categories in WP (bounded per call) ─────────
-  var wpUrl = (config.WP_URL || '').replace(/\/+$/, '');
+  var wpUrl = (config.WP_SITE_URL || config.WP_URL || '').replace(/\/+$/, '');
   var username = config.WP_USERNAME || '';
   var password = config.WP_APP_PASSWORD || '';
   if (!wpUrl || !username || !password) {

@@ -1014,28 +1014,26 @@ class ArticleRewriter {
 
   _loadConfig() {
     this._cfg = {
-      provider:         this._getSetting('AI_PROVIDER')         || process.env.AI_PROVIDER         || 'openrouter',
+      // No hardcoded provider/model defaults — admin must choose in Settings.
+      // If provider is empty, rewrite() will throw a clear "not configured" error.
+      provider:         this._getSetting('AI_PROVIDER')         || process.env.AI_PROVIDER         || '',
       anthropicKey:     this._getSetting('ANTHROPIC_API_KEY')    || process.env.ANTHROPIC_API_KEY    || '',
-      anthropicModel:   this._getSetting('ANTHROPIC_MODEL')      || process.env.ANTHROPIC_MODEL      || 'claude-haiku-4-5-20251001',
+      anthropicModel:   this._getSetting('ANTHROPIC_MODEL')      || process.env.ANTHROPIC_MODEL      || '',
       openaiKey:        this._getSetting('OPENAI_API_KEY')       || process.env.OPENAI_API_KEY       || '',
-      openaiModel:      this._getSetting('OPENAI_MODEL')         || process.env.OPENAI_MODEL         || 'gpt-4o-mini',
+      openaiModel:      this._getSetting('OPENAI_MODEL')         || process.env.OPENAI_MODEL         || '',
       openrouterKey:    this._getSetting('OPENROUTER_API_KEY')   || process.env.OPENROUTER_API_KEY   || '',
-      openrouterModel:  this._getSetting('OPENROUTER_MODEL')     || process.env.OPENROUTER_MODEL     || 'meta-llama/llama-3.3-70b-instruct:free',
+      openrouterModel:  this._getSetting('OPENROUTER_MODEL')     || process.env.OPENROUTER_MODEL     || '',
       enableFallback:   (this._getSetting('ENABLE_FALLBACK')     || process.env.ENABLE_FALLBACK     || 'true') === 'true',
       maxTokens:        parseInt(this._getSetting('MAX_TOKENS')  || process.env.MAX_TOKENS           || '4096', 10),
       temperature:      parseFloat(this._getSetting('TEMPERATURE') || process.env.TEMPERATURE        || '0.7'),
     };
 
-    // Validate model IDs against known models — fix stale DB values
-    this._cfg.anthropicModel = this._validateModelId('anthropic', this._cfg.anthropicModel, 'claude-haiku-4-5-20251001');
-    this._cfg.openaiModel = this._validateModelId('openai', this._cfg.openaiModel, 'gpt-4o-mini');
-    // OpenRouter models are fetched dynamically from their API,
-    // so we cannot validate against AI_MODELS.openrouter (which is empty by design).
-    // Trust whatever the user picked — OpenRouter API will return a clear error
-    // if the model ID is invalid.
-    if (!this._cfg.openrouterModel || typeof this._cfg.openrouterModel !== 'string') {
-      this._cfg.openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free';
-    }
+    // Warn on unrecognised model IDs but KEEP the admin's choice — never reset
+    // silently to a hardcoded default. If the model is genuinely invalid the
+    // provider API will return a clear error; resetting here would override the
+    // admin setting without their knowledge.
+    this._cfg.anthropicModel = this._validateModelId('anthropic', this._cfg.anthropicModel);
+    this._cfg.openaiModel = this._validateModelId('openai', this._cfg.openaiModel);
 
     // AI_PRIMARY_MODEL / AI_FALLBACK_MODEL — cross-provider shortcuts.
     // These override per-provider model keys WITHOUT touching the DB
@@ -1070,25 +1068,21 @@ class ArticleRewriter {
     }
   }
 
-  _validateModelId(provider, currentId, defaultId) {
-    if (!currentId) return defaultId;
+  _validateModelId(provider, currentId) {
+    if (!currentId) return currentId; // Empty stays empty — no default imposed
 
     var knownModels = AI_MODELS[provider] || [];
-    var isValid = knownModels.some(function(m) { return m.id === currentId; });
-
-    if (!isValid) {
-      this.logger.warn('rewriter',
-        'Invalid ' + provider + ' model ID "' + currentId + '" in settings. ' +
-        'Resetting to default: "' + defaultId + '". ' +
-        'Valid: ' + knownModels.map(function(m) { return m.id; }).join(', ')
-      );
-      var dbKeyMap = { anthropic: 'ANTHROPIC_MODEL', openai: 'OPENAI_MODEL', openrouter: 'OPENROUTER_MODEL' };
-      try {
-        this._setSetting(dbKeyMap[provider], defaultId);
-      } catch (e) { /* silent */ }
-      return defaultId;
+    if (knownModels.length > 0) {
+      var isValid = knownModels.some(function(m) { return m.id === currentId; });
+      if (!isValid) {
+        // Warn but honour the admin's choice — never silently overwrite their setting.
+        // If the model ID is genuinely wrong, the provider API will surface a clear error.
+        this.logger.warn('rewriter',
+          'Unrecognised ' + provider + ' model "' + currentId + '" (not in known list). ' +
+          'Using as-is. Known: ' + knownModels.map(function(m) { return m.id; }).join(', ')
+        );
+      }
     }
-
     return currentId;
   }
 
@@ -1181,7 +1175,9 @@ class ArticleRewriter {
   _getProviderKeyModel(provider, opts) {
     if (provider === 'anthropic') return { key: this._cfg.anthropicKey, model: opts.model || this._cfg.anthropicModel };
     if (provider === 'openrouter') return { key: this._cfg.openrouterKey, model: opts.model || this._cfg.openrouterModel };
-    return { key: this._cfg.openaiKey, model: opts.model || this._cfg.openaiModel };
+    if (provider === 'openai') return { key: this._cfg.openaiKey, model: opts.model || this._cfg.openaiModel };
+    // No provider configured — fail loudly so the admin knows to set it.
+    throw new Error('AI provider not configured. Go to Settings → AI Rewrite Models and select a Primary Provider.');
   }
 
   async rewrite(article, cluster, options) {
@@ -1648,7 +1644,8 @@ class ArticleRewriter {
       if (provider === 'anthropic') {
         var Anthropic = require('@anthropic-ai/sdk');
         var aClient = new Anthropic({ apiKey: apiKey.trim() });
-        var aModel = modelOverride || 'claude-haiku-4-5-20251001';
+        var aModel = modelOverride || this._cfg.anthropicModel;
+        if (!aModel) throw new Error('Anthropic model not configured. Select a model in Settings first.');
         var aRes = await aClient.messages.create({
           model: aModel,
           max_tokens: 20,
@@ -1662,8 +1659,8 @@ class ArticleRewriter {
 
       } else if (provider === 'openrouter') {
         var orClient = this._openRouterClient(apiKey);
-        // Use user's selected model if provided, else fall back to a known-stable free model
-        var orModel = modelOverride || this._cfg.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
+        var orModel = modelOverride || this._cfg.openrouterModel;
+        if (!orModel) throw new Error('OpenRouter model not configured. Select a model in Settings first.');
         var orRes = await orClient.chat.completions.create({
           model: orModel,
           max_tokens: 20,
@@ -1678,7 +1675,8 @@ class ArticleRewriter {
       } else {
         var OpenAI = require('openai');
         var oaiClient = new OpenAI({ apiKey: apiKey.trim() });
-        var oaiModel = modelOverride || 'gpt-4o-mini';
+        var oaiModel = modelOverride || this._cfg.openaiModel;
+        if (!oaiModel) throw new Error('OpenAI model not configured. Select a model in Settings first.');
         var oaiRes = await oaiClient.chat.completions.create({
           model: oaiModel,
           max_tokens: 20,
@@ -1721,11 +1719,17 @@ class ArticleRewriter {
       var result;
       try {
         if (provider === 'anthropic') {
-          result = await this._callAnthropicStructured(apiKey, modelOverride || 'claude-haiku-4-5-20251001', testPrompt);
+          var vModel = modelOverride || this._cfg.anthropicModel;
+          if (!vModel) throw new Error('Anthropic model not configured. Select a model in Settings first.');
+          result = await this._callAnthropicStructured(apiKey, vModel, testPrompt);
         } else if (provider === 'openai') {
-          result = await this._callOpenAIStructured(apiKey, modelOverride || 'gpt-4o-mini', testPrompt);
+          var vModel = modelOverride || this._cfg.openaiModel;
+          if (!vModel) throw new Error('OpenAI model not configured. Select a model in Settings first.');
+          result = await this._callOpenAIStructured(apiKey, vModel, testPrompt);
         } else if (provider === 'openrouter') {
-          result = await this._callOpenRouterStructured(apiKey, modelOverride || 'meta-llama/llama-3.3-70b-instruct:free', testPrompt);
+          var vModel = modelOverride || this._cfg.openrouterModel;
+          if (!vModel) throw new Error('OpenRouter model not configured. Select a model in Settings first.');
+          result = await this._callOpenRouterStructured(apiKey, vModel, testPrompt);
         } else {
           throw new Error('Unknown provider: ' + provider);
         }

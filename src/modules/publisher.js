@@ -378,7 +378,7 @@ class WordPressPublisher {
         self.logger.info('publisher', 'WP API Method 2: header auth with alternate URL');
         try {
           var authHeader2 = 'Basic ' + Buffer.from(self.config.WP_USERNAME + ':' + self.config.WP_APP_PASSWORD).toString('base64');
-          var url2 = self.config.WP_URL.replace(/\/+$/, '') + '/?rest_route=' + encodeURIComponent(restPath);
+          var url2 = (self.config.WP_SITE_URL || self.config.WP_URL || '').replace(/\/+$/, '') + '/?rest_route=' + encodeURIComponent(restPath);
           var headers2 = Object.assign({ 'Content-Type': 'application/json', 'Authorization': authHeader2 }, extraHeaders || {});
 
           var res2 = await axios({ method: method, url: url2, data: data, headers: headers2, timeout: _wpTimeoutMs() });
@@ -730,7 +730,7 @@ class WordPressPublisher {
       var freshConfig = getConfig();
       this.config = freshConfig;
 
-      if (!this.config.WP_URL || !this.config.WP_USERNAME || !this.config.WP_APP_PASSWORD) {
+      if (!(this.config.WP_SITE_URL || this.config.WP_URL) || !this.config.WP_USERNAME || !this.config.WP_APP_PASSWORD) {
         this.enabled = false;
         this.ready = false;
         this.status = 'disabled';
@@ -743,7 +743,7 @@ class WordPressPublisher {
       this.authHeader = 'Basic ' + Buffer.from(
         this.config.WP_USERNAME + ':' + this.config.WP_APP_PASSWORD
       ).toString('base64');
-      this.wpBaseUrl = (this.config.WP_URL || '').replace(/\/+$/, '');
+      this.wpBaseUrl = (this.config.WP_SITE_URL || this.config.WP_URL || '').replace(/\/+$/, '');
       this.enabled = true;
       this.ready = true;
       this.status = 'connected';

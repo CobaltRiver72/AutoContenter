@@ -17,9 +17,12 @@ var REQUIRED_VARS = [
 ];
 
 var DEFAULTS = {
-  AI_PROVIDER: 'anthropic',
-  AI_PRIMARY_MODEL: 'claude-haiku-4-5-20251001',
-  AI_FALLBACK_MODEL: 'gpt-4o-mini',
+  // AI_PROVIDER, AI_PRIMARY_MODEL, AI_FALLBACK_MODEL intentionally have NO
+  // hardcoded defaults. Admin must choose their own provider/model in Settings.
+  // If unset, rewrites will fail with a clear "not configured" error.
+  AI_PROVIDER: '',
+  AI_PRIMARY_MODEL: '',
+  AI_FALLBACK_MODEL: '',
   ENABLE_FALLBACK: 'true',
   MAX_TOKENS: '4096',
   TEMPERATURE: '0.7',
