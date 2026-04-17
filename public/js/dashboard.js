@@ -10501,6 +10501,18 @@
       runNowBtn.onclick = runAutopilotNow;
     }
 
+    var publishRateSaveBtn = $('publishRateSaveBtn');
+    if (publishRateSaveBtn && !publishRateSaveBtn.__wired) {
+      publishRateSaveBtn.__wired = true;
+      publishRateSaveBtn.onclick = savePublishRate;
+    }
+    var publishRateRefreshBtn = $('publishRateRefreshBtn');
+    if (publishRateRefreshBtn && !publishRateRefreshBtn.__wired) {
+      publishRateRefreshBtn.__wired = true;
+      publishRateRefreshBtn.onclick = loadPublishRate;
+    }
+    loadPublishRate();
+
     var logsClearBtn = $('autopilotLogsClearBtn');
     if (logsClearBtn && !logsClearBtn.__wired) {
       logsClearBtn.__wired = true;
@@ -10522,6 +10534,70 @@
 
   var _autopilotLogsLastId = 0;
 
+  function _fmtPublishRateState(state) {
+    if (!state) return 'rate: unknown';
+    var ready = state.ready
+      ? 'ready now'
+      : 'next publish in ' + _fmtDurationMs(state.nextInMs);
+    return state.count + ' per ' + state.unit +
+      ' (gap ~' + _fmtDurationMs(state.gapMs) + ', recent ' + state.recentCount + ', ' + ready + ') — source: ' + state.source;
+  }
+
+  function _fmtDurationMs(ms) {
+    if (!ms || ms <= 0) return '0s';
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60);
+    var rs = s % 60;
+    if (m < 60) return m + 'm ' + rs + 's';
+    var h = Math.floor(m / 60);
+    var rm = m % 60;
+    return h + 'h ' + rm + 'm';
+  }
+
+  function loadPublishRate() {
+    var statusEl = $('publishRateStatus');
+    var countEl = $('publishRateCount');
+    var unitEl = $('publishRateUnit');
+    if (statusEl) statusEl.textContent = 'Loading current rate…';
+    fetchApi('/api/autopilot/publish-rate')
+      .then(function (res) {
+        var c = res && res.config ? res.config : {};
+        var s = res && res.state ? res.state : null;
+        if (countEl) countEl.value = (c.count !== '' && c.count != null) ? c.count : (s ? s.count : '');
+        if (unitEl) unitEl.value = c.unit || (s ? s.unit : 'hour');
+        if (statusEl) statusEl.textContent = _fmtPublishRateState(s);
+      })
+      .catch(function (err) {
+        if (statusEl) statusEl.textContent = 'Failed to load: ' + err.message;
+      });
+  }
+
+  function savePublishRate() {
+    var countEl = $('publishRateCount');
+    var unitEl = $('publishRateUnit');
+    var count = parseInt(countEl && countEl.value, 10);
+    var unit = unitEl && unitEl.value;
+    if (isNaN(count) || count <= 0) { showToast('Count must be a positive integer', 'error'); return; }
+    if (['second', 'minute', 'hour', 'day'].indexOf(unit) === -1) { showToast('Pick a valid unit', 'error'); return; }
+    var btn = $('publishRateSaveBtn');
+    if (btn) { btn.disabled = true; var prev = btn.textContent; btn.textContent = 'Saving…'; btn.__prev = prev; }
+    fetchApi('/api/autopilot/publish-rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count: count, unit: unit }),
+    })
+      .then(function (res) {
+        showToast('Publish rate saved: ' + count + '/' + unit, 'success');
+        var statusEl = $('publishRateStatus');
+        if (statusEl) statusEl.textContent = _fmtPublishRateState(res && res.state);
+      })
+      .catch(function (err) { showToast('Save failed: ' + err.message, 'error'); })
+      .finally(function () {
+        if (btn) { btn.disabled = false; if (btn.__prev) btn.textContent = btn.__prev; }
+      });
+  }
+
   function runAutopilotNow() {
     var btn = $('autopilotRunNowBtn');
     if (btn) { btn.disabled = true; var prev = btn.innerHTML; btn.innerHTML = 'Running...'; btn.__prev = prev; }
@@ -10538,6 +10614,19 @@
                       ', publish ' + (gates.publishEnabled ? 'ON' : 'OFF') + ')';
         var level = (res && res.errors && res.errors.length) ? 'error' : 'success';
         showToast('Run Now: ' + summary, level);
+
+        // Publish rate limit: always surface the next-publish ETA when it's
+        // nonzero so zero-publish ticks don't look like a bug.
+        var rate = res && res.rateLimit ? res.rateLimit : null;
+        if (rate && !rate.ready && rate.nextInMs > 0) {
+          showToast(
+            'Publish rate: ' + rate.count + '/' + rate.unit + ' — next in ' + _fmtDurationMs(rate.nextInMs),
+            'info'
+          );
+          // Also refresh the Publish Rate card status line
+          var statusEl = $('publishRateStatus');
+          if (statusEl) statusEl.textContent = _fmtPublishRateState(rate);
+        }
 
         // If the scheduler was already mid-cycle, the loops were skipped. Tell
         // the user that explicitly so a zero delta doesn't look like a bug.

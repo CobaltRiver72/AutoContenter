@@ -1539,6 +1539,34 @@
           </div>
         </div>
 
+        <!-- Publish Rate Card -->
+        <div class="card" style="margin-bottom:16px;">
+          <h3 class="card-title">Publish Rate</h3>
+          <small style="color:var(--text-tertiary);display:block;margin:-4px 0 12px 0;font-size:11px;">How fast the publisher drains the "ready" queue. Example: 10 articles per hour spaces them ~6 minutes apart automatically. The publish loop pumps articles from the drafts table whenever one is ready and the rate cap allows.</small>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
+            <div class="form-field">
+              <label class="form-label">Articles</label>
+              <input type="number" min="1" id="publishRateCount" class="settings-input" style="width:100%;" placeholder="10" />
+            </div>
+            <div class="form-field">
+              <label class="form-label">Per</label>
+              <select id="publishRateUnit" class="settings-input" style="width:100%;">
+                <option value="second">Second</option>
+                <option value="minute">Minute</option>
+                <option value="hour" selected>Hour</option>
+                <option value="day">Day</option>
+              </select>
+            </div>
+          </div>
+          <div id="publishRateStatus" style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Loading current rate…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" id="publishRateSaveBtn">Save Rate</button>
+            <button class="btn btn-sm btn-ghost" id="publishRateRefreshBtn">
+              <svg data-lucide="refresh-cw" class="icon"></svg> Refresh
+            </button>
+          </div>
+        </div>
+
         <!-- Settings Grid -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
 

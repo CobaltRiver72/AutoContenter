@@ -1835,6 +1835,17 @@ function createApiRouter(deps) {
         logger.info('api', 'InfraNodus re-initialized after settings change');
       }
 
+      // Re-initialize firehose if FIREHOSE_TOKEN changed
+      var hasFirehoseChange = validEntries.some(function (e) { return e[0] === 'FIREHOSE_TOKEN'; });
+      if (hasFirehoseChange && firehose) {
+        var freshConfig = getConfig();
+        firehose.stop();
+        firehose._stopped = false;
+        firehose.updateConfig(freshConfig);
+        if (freshConfig.FIREHOSE_TOKEN) firehose.connect();
+        logger.info('api', 'Firehose re-initialized after token change');
+      }
+
       logger.info('api', 'Settings updated', { keys: validEntries.map(function (e) { return e[0]; }) });
       res.json({ success: true, updated: validEntries.length });
     } catch (err) {
@@ -5905,14 +5916,69 @@ function createApiRouter(deps) {
     };
     logger.info('autopilot', 'Run-Now finished (delta ' + JSON.stringify(delta) + ')');
 
+    var rateLimit = null;
+    try {
+      if (typeof pipeline.getPublishRateState === 'function') {
+        rateLimit = pipeline.getPublishRateState();
+      }
+    } catch (e) { /* best effort */ }
+
     res.json({
       ok: errors.length === 0,
       gates: { rewriteEnabled: String(autoRw) === 'true', publishEnabled: String(autoPub) === 'true' },
       skipped: { rewrite: rewriteSkipped, publish: publishSkipped },
       delta: delta,
       diagnostic: diagnostic,
+      rateLimit: rateLimit,
       errors: errors,
     });
+  });
+
+  // GET /api/autopilot/publish-rate — current unified rate + live state.
+  router.get('/autopilot/publish-rate', function (req, res) {
+    try {
+      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
+      var state = (pipeline && typeof pipeline.getPublishRateState === 'function')
+        ? pipeline.getPublishRateState() : null;
+      var config = {
+        count: cfgGet('PUBLISH_RATE_COUNT') || '',
+        unit: cfgGet('PUBLISH_RATE_UNIT') || '',
+        legacy: {
+          maxPerHour: cfgGet('MAX_PUBLISH_PER_HOUR'),
+          cooldownMinutes: cfgGet('PUBLISH_COOLDOWN_MINUTES'),
+        },
+      };
+      res.json({ ok: true, config: config, state: state });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/autopilot/publish-rate — update PUBLISH_RATE_COUNT + PUBLISH_RATE_UNIT.
+  // Body: { count: <int>, unit: 'second'|'minute'|'hour'|'day' }
+  router.post('/autopilot/publish-rate', function (req, res) {
+    try {
+      var body = req.body || {};
+      var count = parseInt(body.count, 10);
+      var unit = String(body.unit || '').trim().toLowerCase();
+      if (isNaN(count) || count <= 0) {
+        return res.status(400).json({ ok: false, error: 'count must be a positive integer' });
+      }
+      if (['second', 'minute', 'hour', 'day'].indexOf(unit) === -1) {
+        return res.status(400).json({ ok: false, error: "unit must be one of: second, minute, hour, day" });
+      }
+      var { set: cfgSet } = require('../utils/config');
+      cfgSet('PUBLISH_RATE_COUNT', String(count), req.app.locals.db);
+      cfgSet('PUBLISH_RATE_UNIT', unit, req.app.locals.db);
+      logger.info('autopilot', 'Publish rate updated: ' + count + ' per ' + unit);
+
+      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
+      var state = (pipeline && typeof pipeline.getPublishRateState === 'function')
+        ? pipeline.getPublishRateState() : null;
+      res.json({ ok: true, config: { count: count, unit: unit }, state: state });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 
   // GET /api/autopilot/logs — recent log rows from modules relevant to the
