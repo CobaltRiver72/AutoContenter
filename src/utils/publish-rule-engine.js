@@ -1,16 +1,19 @@
 'use strict';
 
+var siteConfig = require('./site-config');
+
 /**
  * Look up a WP author's numeric ID from their slug/username via the
  * wp_taxonomy_cache. Returns null on any miss/error so the caller can fall
  * through to the next layer of the resolution chain.
  */
-function _resolveAuthorUsernameToId(db, username) {
+function _resolveAuthorUsernameToId(db, username, siteId) {
   if (!username) return null;
+  siteId = siteId || 1;
   try {
     var row = db.prepare(
-      "SELECT wp_id FROM wp_taxonomy_cache WHERE tax_type = 'author' AND slug = ? LIMIT 1"
-    ).get(String(username).toLowerCase().trim());
+      "SELECT wp_id FROM wp_taxonomy_cache WHERE tax_type = 'author' AND slug = ? AND site_id = ? LIMIT 1"
+    ).get(String(username).toLowerCase().trim(), siteId);
     return row ? Number(row.wp_id) : null;
   } catch (e) { return null; }
 }
@@ -19,12 +22,13 @@ function _resolveAuthorUsernameToId(db, username) {
  * Look up a WP category's numeric ID from its slug via the wp_taxonomy_cache.
  * Returns null on any miss/error so the caller can fall through.
  */
-function _resolveCategorySlugToId(db, slug) {
+function _resolveCategorySlugToId(db, slug, siteId) {
   if (!slug) return null;
+  siteId = siteId || 1;
   try {
     var row = db.prepare(
-      "SELECT wp_id FROM wp_taxonomy_cache WHERE tax_type = 'category' AND slug = ? LIMIT 1"
-    ).get(String(slug).toLowerCase().trim());
+      "SELECT wp_id FROM wp_taxonomy_cache WHERE tax_type = 'category' AND slug = ? AND site_id = ? LIMIT 1"
+    ).get(String(slug).toLowerCase().trim(), siteId);
     return row ? Number(row.wp_id) : null;
   } catch (e) { return null; }
 }
@@ -47,16 +51,23 @@ function _resolveCategorySlugToId(db, slug) {
  *
  * Returns: { categoryIds: number[], primaryCategoryId: number, tagIds: number[], authorId: number }
  */
-function resolveTaxonomy(draft, db, config) {
+function resolveTaxonomy(draft, db, config, siteId) {
+  siteId = siteId || 1;
+
   function parseIds(val) {
     if (!val) return [];
     try { var arr = JSON.parse(val); return Array.isArray(arr) ? arr.filter(Number.isFinite) : []; }
     catch (e) { return []; }
   }
 
-  var defaultCategoryId     = parseInt(config.WP_DEFAULT_CATEGORY, 10) || 1;
-  var alwaysAppendCategoryId = parseInt(config.WP_ALWAYS_APPEND_CATEGORY_ID, 10) || 0;
-  var defaultAuthorId       = parseInt(config.WP_AUTHOR_ID, 10) || 1;
+  // Per-site config reads: use getSiteConfig for siteId > 1, global config otherwise
+  function _cfg(key) {
+    return siteId > 1 ? siteConfig.getSiteConfig(siteId, key) : config[key];
+  }
+
+  var defaultCategoryId     = parseInt(_cfg('WP_DEFAULT_CATEGORY'), 10) || 1;
+  var alwaysAppendCategoryId = parseInt(_cfg('WP_ALWAYS_APPEND_CATEGORY_ID'), 10) || 0;
+  var defaultAuthorId       = parseInt(_cfg('WP_AUTHOR_ID'), 10) || 1;
 
   // Slug-based global defaults — resolve via wp_taxonomy_cache. These sit
   // BETWEEN the matching rule and the numeric config fallback so that admins
@@ -65,8 +76,8 @@ function resolveTaxonomy(draft, db, config) {
   // time. If either lookup misses (empty, not in cache, or table error), the
   // chain falls through to the numeric fallback — preserving existing
   // behavior for every case where the new keys are unset or unresolvable.
-  var slugAuthorId    = _resolveAuthorUsernameToId(db, config.DEFAULT_AUTHOR_USERNAME);
-  var slugCategoryId  = _resolveCategorySlugToId(db, config.DEFAULT_CATEGORY_SLUG);
+  var slugAuthorId    = _resolveAuthorUsernameToId(db, _cfg('DEFAULT_AUTHOR_USERNAME'), siteId);
+  var slugCategoryId  = _resolveCategorySlugToId(db, _cfg('DEFAULT_CATEGORY_SLUG'), siteId);
 
   // --- Draft-level overrides (highest priority) ---
   var draftCategoryIds = parseIds(draft.wp_category_ids);
@@ -78,8 +89,8 @@ function resolveTaxonomy(draft, db, config) {
   var matchedRule = null;
   try {
     var rules = db.prepare(
-      'SELECT * FROM publish_rules WHERE is_active = 1 ORDER BY priority DESC, id ASC'
-    ).all();
+      'SELECT * FROM publish_rules WHERE is_active = 1 AND site_id = ? ORDER BY priority DESC, id ASC'
+    ).all(siteId);
 
     var title = (draft.rewritten_title || draft.extracted_title || draft.source_title || '').toLowerCase();
 

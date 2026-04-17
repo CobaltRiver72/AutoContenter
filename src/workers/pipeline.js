@@ -3,6 +3,7 @@
 var { extractDraftContent } = require('../utils/draft-helpers');
 var _cfg = require('../utils/config');
 var { resolveTaxonomy } = require('../utils/publish-rule-engine');
+var siteConfig = require('../utils/site-config');
 
 var MODULE = 'pipeline';
 
@@ -67,7 +68,7 @@ function _blockedKeywords()       {
  * All run in the same Node.js process. SQLite drafts table is the queue.
  */
 class Pipeline {
-  constructor(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot, classifier) {
+  constructor(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot, classifier, publisherPool) {
     this.config = config;
     this.db = db;
     this.rewriter = rewriter;
@@ -77,6 +78,7 @@ class Pipeline {
     this.infranodus = infranodus || null;
     this.autopilot = autopilot || null;
     this.classifier = classifier || null;
+    this.publisherPool = publisherPool || null;
 
     // Worker config is read fresh from config on each cycle via helper functions
     // above (_leaseMins, _rewriteConcurrency, etc.) for hot-reload support.
@@ -87,8 +89,9 @@ class Pipeline {
     this._publishRunning = false;
     this._stopped = false;
 
-    // Publish rate limiting (in-memory, same as old scheduler)
-    this.publishHistory = [];
+    // Publish rate limiting — per-site Map for multi-site fan-out.
+    // Each key is a siteId, each value is an array of timestamps.
+    this.publishHistory = new Map();
 
     // Interval handles
     this._extractionTimer = null;
@@ -452,6 +455,15 @@ class Pipeline {
       return;
     }
 
+    // Per-site rewrite config — read prompt and language overrides from site_config
+    var draftSiteId = primaryDraft.site_id || 1;
+    var sitePrompt = null;
+    var siteLang = null;
+    try {
+      sitePrompt = siteConfig.getSiteConfig(draftSiteId, 'SITE_REWRITE_PROMPT') || null;
+      siteLang = siteConfig.getSiteConfig(draftSiteId, 'REWRITE_LANGUAGE') || null;
+    } catch (_e) { /* site-config not initialised yet — use global defaults */ }
+
     // Atomic CAS lock of the primary draft. If another worker (auto loop,
     // manual trigger, or batch rewrite) already grabbed this draft between
     // the caller's SELECT and our UPDATE, changes === 0 and we bail out.
@@ -556,10 +568,17 @@ class Pipeline {
         }
       }
 
-      var rewritten = await this.rewriter.rewrite(primaryArticle, clusterForRewrite, {
+      var rewriteOpts = {
         infraData: infraData,
         signal: rewriteController.signal,
-      });
+      };
+      // Per-site prompt/language overrides (set earlier from site_config)
+      if (sitePrompt || siteLang) {
+        rewriteOpts.siteOverrides = {};
+        if (sitePrompt) rewriteOpts.siteOverrides.SITE_REWRITE_PROMPT = sitePrompt;
+        if (siteLang) rewriteOpts.siteOverrides.REWRITE_LANGUAGE = siteLang;
+      }
+      var rewritten = await this.rewriter.rewrite(primaryArticle, clusterForRewrite, rewriteOpts);
       this._activeControllers.delete(rewriteController);
 
       // Save rewritten content
@@ -897,7 +916,12 @@ class Pipeline {
       if (!readyPrimary) return;
 
       // ─── Autopilot gate ────────────────────────────────────────────────────
-      if (this.autopilot && this.autopilot.isActive()) {
+      // Use per-site autopilot when the draft has a site_id, falling back to
+      // the global autopilot instance for backward compat.
+      var _apSiteId = readyPrimary.site_id || 1;
+      var AutopilotEngine = require('../modules/autopilot');
+      var _siteAutopilot = new AutopilotEngine(require('../utils/config'), this.db, this.logger, _apSiteId);
+      if (_siteAutopilot.isActive()) {
         // Build minimal cluster/draft objects for the decision engine.
         // Use correct column names from the drafts table:
         //   source_language (not language), rewritten_word_count (not word_count)
@@ -923,8 +947,8 @@ class Pipeline {
           domain: readyPrimary.source_domain || '',
           page_category: readyPrimary.source_category || '',
         };
-        var decision = this.autopilot.shouldPublish(clusterForAutopilot, draftForAutopilot);
-        this.autopilot.logDecision(
+        var decision = _siteAutopilot.shouldPublish(clusterForAutopilot, draftForAutopilot);
+        _siteAutopilot.logDecision(
           readyPrimary.cluster_id,
           draftForAutopilot.title,
           decision.approved,
@@ -939,7 +963,15 @@ class Pipeline {
       }
       // ─── End autopilot gate ────────────────────────────────────────────────
 
+      var publishSiteId = readyPrimary.site_id || 1;
       var clusterId = readyPrimary.cluster_id;
+
+      // Select the correct publisher for this draft's site
+      var sitePublisher = (this.publisherPool && this.publisherPool.get(publishSiteId)) || this.publisher;
+      if (!sitePublisher) {
+        this.logger.warn(MODULE, 'No publisher for site ' + publishSiteId + ', skipping cluster #' + clusterId);
+        return;
+      }
 
       // Atomic CAS lock (lease window must match _leaseMins()).
       // The WHERE clause guarantees only one worker wins the race — if another
@@ -1018,11 +1050,11 @@ class Pipeline {
       };
 
       try {
-        var pubResult = await this.publisher.publish(rewrittenArticle, clusterForPublish, this.db, publishController.signal);
+        var pubResult = await sitePublisher.publish(rewrittenArticle, clusterForPublish, this.db, publishController.signal);
         this._activeControllers.delete(publishController);
 
-        // Record publish for rate limiting
-        this.publishHistory.push(Date.now());
+        // Record publish for per-site rate limiting
+        this._getSitePublishHistory(publishSiteId).push(Date.now());
 
         // Update ALL drafts in cluster to published
         this.db.prepare(
@@ -1091,6 +1123,21 @@ class Pipeline {
     }
   }
 
+  // ─── Per-site publish history helpers ─────────────────────────────────
+  _getSitePublishHistory(siteId) {
+    if (!this.publishHistory.has(siteId)) this.publishHistory.set(siteId, []);
+    return this.publishHistory.get(siteId);
+  }
+
+  // Flatten all per-site histories into a single array (for global views).
+  _getAllPublishHistory() {
+    var all = [];
+    this.publishHistory.forEach(function (arr) {
+      for (var i = 0; i < arr.length; i++) all.push(arr[i]);
+    });
+    return all;
+  }
+
   // ─── RATE LIMIT ───────────────────────────────────────────────────────
   //
   // Reads the unified PUBLISH_RATE_COUNT + PUBLISH_RATE_UNIT settings when
@@ -1119,11 +1166,12 @@ class Pipeline {
     return { count: count, unit: unit, windowMs: windowMs, gapMs: gapMs, source: source };
   }
 
-  getPublishRateState() {
+  getPublishRateState(siteId) {
     var r = this._resolvedPublishRate();
     var now = Date.now();
     var cutoff = now - r.windowMs;
-    var recent = (this.publishHistory || []).filter(function (ts) { return ts > cutoff; });
+    var historyArr = siteId ? this._getSitePublishHistory(siteId) : this._getAllPublishHistory();
+    var recent = historyArr.filter(function (ts) { return ts > cutoff; });
     var recentCount = recent.length;
     var nextAtMs = now;
     var reason = 'ready';
@@ -1161,9 +1209,13 @@ class Pipeline {
     try {
       var state = this.getPublishRateState();
       // Prune any history older than the largest window we care about so the
-      // array doesn't grow unbounded between windows.
+      // Map doesn't grow unbounded between windows.
       var cutoff = Date.now() - Math.max(state.windowMs, 60 * 60 * 1000);
-      this.publishHistory = this.publishHistory.filter(function (ts) { return ts > cutoff; });
+      this.publishHistory.forEach(function (arr, key, map) {
+        var pruned = arr.filter(function (ts) { return ts > cutoff; });
+        if (pruned.length === 0) map.delete(key);
+        else map.set(key, pruned);
+      });
       return state.ready;
     } catch (err) {
       this.logger.error(MODULE, 'canPublishNow error (allowing): ' + err.message);
@@ -1319,8 +1371,9 @@ class Pipeline {
       var maxPerHour = parseInt(this.config.MAX_PUBLISH_PER_HOUR, 10) || 4;
       var cooldownMs = (parseInt(this.config.PUBLISH_COOLDOWN_MINUTES, 10) || 10) * 60 * 1000;
 
-      this.publishHistory = this.publishHistory.filter(function (ts) { return ts > oneHourAgo; });
-      var publishedThisHour = this.publishHistory.length;
+      var allHistory = this._getAllPublishHistory();
+      var recentHistory = allHistory.filter(function (ts) { return ts > oneHourAgo; });
+      var publishedThisHour = recentHistory.length;
 
       var counts = this.db.prepare(
         "SELECT status, COUNT(*) as count FROM drafts WHERE mode = 'auto' GROUP BY status"
@@ -1335,8 +1388,8 @@ class Pipeline {
         (statusCounts.rewriting || 0) + (statusCounts.ready || 0);
 
       var nextPublishIn = 0;
-      if (this.publishHistory.length > 0) {
-        var lastPublish = Math.max.apply(null, this.publishHistory);
+      if (recentHistory.length > 0) {
+        var lastPublish = Math.max.apply(null, recentHistory);
         var cooldownRemaining = (lastPublish + cooldownMs) - now;
         nextPublishIn = Math.max(0, Math.ceil(cooldownRemaining / 1000));
       }
@@ -1369,47 +1422,84 @@ class Pipeline {
 
   enqueue(cluster) {
     // The old scheduler.enqueue() created drafts. Keep that behavior.
+    // Multi-site: fan-out — create drafts for EACH active site whose
+    // PUBLISH_LANGUAGE filter matches the cluster's primary language.
     try {
       if (!cluster || !cluster.id) return;
-
-      var existing = this.db.prepare(
-        'SELECT COUNT(*) as count FROM drafts WHERE cluster_id = ?'
-      ).get(cluster.id);
-      if (existing && existing.count > 0) return;
 
       var articles = this.db.prepare(
         'SELECT * FROM articles WHERE cluster_id = ? ORDER BY authority_tier ASC, received_at ASC'
       ).all(cluster.id);
       if (articles.length === 0) return;
 
+      // Detect primary article language for site matching
+      var primaryArt = articles[0];
+      var primaryLang = primaryArt.language ||
+        (/[\u0900-\u097F]{3,}/.test((primaryArt.title || '') + ' ' + (primaryArt.content_markdown || '').slice(0, 300)) ? 'hi' : 'en');
+
+      // Get all active sites; fall back to synthetic site 1 if no sites table yet
+      var sites;
+      try {
+        sites = siteConfig.getAllActiveSites();
+      } catch (_e) {
+        sites = [{ id: 1 }];
+      }
+      if (!sites || sites.length === 0) sites = [{ id: 1 }];
+
       var insertDraft = this.db.prepare(
         "INSERT OR IGNORE INTO drafts (" +
         "  source_article_id, source_url, source_domain, source_title," +
         "  source_content_markdown, source_language, target_platform, status, mode," +
-        "  cluster_id, cluster_role, extraction_status" +
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "  cluster_id, cluster_role, extraction_status, site_id" +
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+
+      var existingCheck = this.db.prepare(
+        'SELECT COUNT(*) as count FROM drafts WHERE cluster_id = ? AND site_id = ?'
       );
 
       var self = this;
+      var totalDrafts = 0;
+      var matchedSites = 0;
+
       var createDrafts = this.db.transaction(function () {
-        for (var i = 0; i < articles.length; i++) {
-          var a = articles[i];
-          // Prefer language already stored in the articles table (set by firehose buffer);
-          // fall back to regex detection if it's missing.
-          var artLang = a.language || (/[\u0900-\u097F]{3,}/.test((a.title || '') + ' ' + (a.content_markdown || '').slice(0, 300)) ? 'hi' : 'en');
-          insertDraft.run(
-            a.id, a.url, a.domain, a.title,
-            a.content_markdown || '', artLang, 'wordpress',
-            'fetching', 'auto',
-            cluster.id, i === 0 ? 'primary' : 'source', 'pending'
-          );
+        for (var si = 0; si < sites.length; si++) {
+          var site = sites[si];
+          var siteId = site.id;
+
+          // Skip if drafts already exist for this cluster + site
+          var existing = existingCheck.get(cluster.id, siteId);
+          if (existing && existing.count > 0) continue;
+
+          // Language filter: check per-site PUBLISH_LANGUAGE
+          var siteLangPref;
+          try {
+            siteLangPref = (siteConfig.getSiteConfig(siteId, 'PUBLISH_LANGUAGE') || 'en').toLowerCase().trim();
+          } catch (_e) {
+            siteLangPref = 'en';
+          }
+          if (siteLangPref !== 'both' && siteLangPref !== primaryLang) continue;
+
+          matchedSites++;
+
+          for (var i = 0; i < articles.length; i++) {
+            var a = articles[i];
+            var artLang = a.language || (/[\u0900-\u097F]{3,}/.test((a.title || '') + ' ' + (a.content_markdown || '').slice(0, 300)) ? 'hi' : 'en');
+            insertDraft.run(
+              a.id, a.url, a.domain, a.title,
+              a.content_markdown || '', artLang, 'wordpress',
+              'fetching', 'auto',
+              cluster.id, i === 0 ? 'primary' : 'source', 'pending',
+              siteId
+            );
+            totalDrafts++;
+          }
         }
         self.db.prepare("UPDATE clusters SET status = 'queued' WHERE id = ?").run(cluster.id);
       });
 
       createDrafts();
-      this.logger.info(MODULE, 'Enqueued cluster ' + cluster.id + ' -> ' + articles.length + ' drafts');
-      // No need for immediate trigger — extraction loop picks up in 2 seconds
+      this.logger.info(MODULE, 'Enqueued cluster ' + cluster.id + ' -> ' + totalDrafts + ' drafts across ' + matchedSites + ' site(s)');
 
     } catch (err) {
       this.logger.error(MODULE, 'Enqueue failed: ' + err.message);
