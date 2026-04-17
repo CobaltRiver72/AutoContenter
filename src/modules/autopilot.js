@@ -9,15 +9,20 @@ var MODULE = 'autopilot';
  * Wire into pipeline.js _publishLoop() to gate every publish decision.
  */
 class AutopilotEngine {
-  constructor(config, db, logger) {
+  constructor(config, db, logger, siteId) {
     this.config = config;
     this.db = db;
     this.logger = logger;
+    this.siteId = siteId || null;  // null = use global config (backward compat)
   }
 
   // ─── Config helpers ──────────────────────────────────────────────────────
 
   _get(key) {
+    if (this.siteId) {
+      var siteConfig = require('../utils/site-config');
+      return siteConfig.getSiteConfig(this.siteId, key);
+    }
     return this.config.get ? this.config.get(key) : this.config[key];
   }
 
@@ -64,9 +69,16 @@ class AutopilotEngine {
 
   getPublishedToday() {
     try {
-      var row = this.db.prepare(
-        "SELECT COUNT(*) AS cnt FROM published WHERE created_at >= date('now') AND created_at < date('now', '+1 day')"
-      ).get();
+      var row;
+      if (this.siteId) {
+        row = this.db.prepare(
+          "SELECT COUNT(*) AS cnt FROM published WHERE created_at >= date('now') AND created_at < date('now', '+1 day') AND site_id = ?"
+        ).get(this.siteId);
+      } else {
+        row = this.db.prepare(
+          "SELECT COUNT(*) AS cnt FROM published WHERE created_at >= date('now') AND created_at < date('now', '+1 day')"
+        ).get();
+      }
       return (row && row.cnt) ? row.cnt : 0;
     } catch (e) {
       return 0;

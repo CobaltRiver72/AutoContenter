@@ -12,10 +12,12 @@ class WPPublisher {
    * @param {import('better-sqlite3').Database} db
    * @param {object} logger
    */
-  constructor(config, db, logger) {
+  constructor(config, db, logger, siteId, siteCredentials) {
     this.config = config;
     this.db = db;
     this.logger = logger;
+    this.siteId = siteId || 1;
+    this._siteCredentials = siteCredentials || null;
     this.siteUrl = null;
     this.username = null;
     this.appPassword = null;
@@ -43,9 +45,10 @@ class WPPublisher {
       };
 
       // WP_SITE_URL (dashboard key) and WP_URL (env key) are aliases
-      this.siteUrl = getVal('WP_SITE_URL', 'WP_URL');
-      this.username = getVal('WP_USERNAME');
-      this.appPassword = getVal('WP_APP_PASSWORD');
+      var creds = this._siteCredentials || {};
+      this.siteUrl = creds.wp_url || getVal('WP_SITE_URL', 'WP_URL');
+      this.username = creds.wp_username || getVal('WP_USERNAME');
+      this.appPassword = creds.wp_app_password || getVal('WP_APP_PASSWORD');
 
       if (!this.siteUrl || !this.username || !this.appPassword) {
         this.logger.warn(MODULE, 'Missing WP credentials (WP_SITE_URL, WP_USERNAME, or WP_APP_PASSWORD). Publisher disabled.');

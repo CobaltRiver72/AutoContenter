@@ -25,6 +25,8 @@ config = getConfig();
 
 // ─── 5. Create module instances ─────────────────────────────────────────────
 var { FirehoseListener } = require('./modules/firehose');
+var FirehosePool = require('./modules/firehose-pool');
+var PublisherPool = require('./modules/publisher-pool');
 var { TrendsPoller } = require('./modules/trends');
 var { ArticleBuffer } = require('./modules/buffer');
 var { SimilarityEngine } = require('./modules/similarity');
@@ -45,7 +47,17 @@ var { LotteryPostCreator } = require('./modules/lottery-posts');
 var { setupSession, checkAuth, verifyCsrf } = require('./routes/auth');
 var createApiRouter = require('./routes/api');
 var createDashboardRouter = require('./routes/dashboard');
+var siteConfigMod = require('./utils/site-config');
 
+// ─── Initialise site-config module (must happen after DB + loadRuntimeOverrides) ──
+siteConfigMod.init(db);
+
+// ─── Multi-site pools ──────────────────────────────────────────────────────
+var firehosePool = new FirehosePool(config, db, logger);
+var publisherPool = new PublisherPool(config, db, logger);
+
+// Legacy single-instance references kept for backward compat with modules
+// that don't yet use pools (fuel/metals/lottery post creators, trends, etc.)
 var firehose = new FirehoseListener(config, db, logger);
 var trends = new TrendsPoller(config, db, logger);
 var buffer = new ArticleBuffer(config, db, logger);
@@ -77,6 +89,34 @@ async function boot() {
   // EventEmitter drops events that have no listeners. Firehose.init() opens
   // SSE and replays articles immediately — listeners MUST exist first.
 
+  // Wire firehose pool events — all site firehoses route through one handler
+  firehosePool.on('article', async function(article) {
+    try {
+      var articleId = buffer.addArticle(article);
+      if (!articleId) return;
+      var trendsMatch = null;
+      if (trends.enabled && trends.ready) {
+        trendsMatch = trends.matchArticle(article);
+      }
+      if (_clusteringQueue.length >= _clusterQueueMax()) {
+        logger.warn('index', 'Clustering queue full, dropping article', { url: article.url });
+        return;
+      }
+      _clusteringQueue.push({ article: article, trendsMatch: trendsMatch });
+      if (!_clusteringFirstEventAt) _clusteringFirstEventAt = Date.now();
+      if (_clusteringTimer) clearTimeout(_clusteringTimer);
+      var waitedMs = Date.now() - _clusteringFirstEventAt;
+      if (waitedMs >= _clusteringMaxWaitMs()) {
+        processSimilarityBatch();
+      } else {
+        _clusteringTimer = setTimeout(processSimilarityBatch, _clusteringDebounceMs());
+      }
+    } catch (err) {
+      logger.error('index', 'Error buffering firehose article: ' + err.message);
+    }
+  });
+
+  // Legacy single-site firehose listener (kept for backward compat during transition)
   firehose.on('article', async function(article) {
     try {
       var articleId = buffer.addArticle(article);
@@ -222,9 +262,14 @@ async function boot() {
   metals.setPostCreator(metalsPosts);
   lottery.setPostCreator(lotteryPosts);
 
+  // ─── Init multi-site pools ─────────────────────────────────────────────
+  await publisherPool.init();
+  await publisherPool.initAll();
+
   logger.info('index', 'All downstream modules ready. Starting firehose...');
   // Firehose opens SSE — replay articles flow into listeners above
   await firehose.init();
+  await firehosePool.init();
   await trends.init();
   logger.info('index', 'All modules initialized');
 
@@ -234,7 +279,9 @@ async function boot() {
 
   // Expose modules for performance monitoring endpoint
   app.locals.modules = {
-    firehose: firehose, trends: trends, buffer: buffer, similarity: similarity,
+    firehose: firehose, firehosePool: firehosePool,
+    publisherPool: publisherPool,
+    trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
     scheduler: scheduler, infranodus: infranodus, autopilot: autopilot, classifier: classifier,
     fuel: fuel, metals: metals, lottery: lottery,
@@ -428,7 +475,7 @@ async function boot() {
     clearInterval(memoryWatchdog);
 
     // Shutdown modules
-    var shutdownList = [firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
+    var shutdownList = [firehosePool, firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
     for (var i = 0; i < shutdownList.length; i++) {
       try {
         if (shutdownList[i].shutdown) shutdownList[i].shutdown();

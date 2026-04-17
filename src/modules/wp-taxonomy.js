@@ -50,7 +50,8 @@ async function _wpFetchAll(wpBaseUrl, authHeader, restPath, extraParams) {
  * Fetch categories, tags, and authors from WordPress and upsert into wp_taxonomy_cache.
  * Returns { categories, tags, authors, errors[] }
  */
-async function syncTaxonomyFromWP(db, config) {
+async function syncTaxonomyFromWP(db, config, siteId) {
+  siteId = siteId || 1;
   var wpUrl = (config.WP_SITE_URL || config.WP_URL || '').replace(/\/+$/, '');
   var username = config.WP_USERNAME || '';
   var password = config.WP_APP_PASSWORD || '';
@@ -77,21 +78,29 @@ async function syncTaxonomyFromWP(db, config) {
     authors = await _wpFetchAll(wpUrl, authHeader, '/wp/v2/users', { context: 'edit' });
   } catch (e) { errors.push('authors: ' + e.message); }
 
-  // Upsert into DB using a transaction
-  var upsertStmt = db.prepare(
-    'INSERT OR REPLACE INTO wp_taxonomy_cache (tax_type, wp_id, name, slug, parent_id, synced_at) ' +
-    'VALUES (?, ?, ?, ?, ?, datetime(\'now\'))'
+  // Delete old cache rows for this site, then insert fresh ones.
+  // This avoids UNIQUE(tax_type, wp_id) conflicts when multiple sites
+  // share the same WP taxonomy IDs.
+  var deleteStmt = db.prepare(
+    'DELETE FROM wp_taxonomy_cache WHERE site_id = ? AND tax_type = ?'
+  );
+  var insertStmt = db.prepare(
+    'INSERT INTO wp_taxonomy_cache (site_id, tax_type, wp_id, name, slug, parent_id, synced_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, datetime(\'now\'))'
   );
 
   var upsertAll = db.transaction(function () {
+    deleteStmt.run(siteId, 'category');
     categories.forEach(function (c) {
-      upsertStmt.run('category', c.id, _decodeHtml(c.name), c.slug || '', c.parent || 0);
+      insertStmt.run(siteId, 'category', c.id, _decodeHtml(c.name), c.slug || '', c.parent || 0);
     });
+    deleteStmt.run(siteId, 'tag');
     tags.forEach(function (t) {
-      upsertStmt.run('tag', t.id, _decodeHtml(t.name), t.slug || '', 0);
+      insertStmt.run(siteId, 'tag', t.id, _decodeHtml(t.name), t.slug || '', 0);
     });
+    deleteStmt.run(siteId, 'author');
     authors.forEach(function (a) {
-      upsertStmt.run('author', a.id, _decodeHtml(a.name || a.username), a.slug || '', 0);
+      insertStmt.run(siteId, 'author', a.id, _decodeHtml(a.name || a.username), a.slug || '', 0);
     });
   });
   upsertAll();
@@ -107,17 +116,19 @@ async function syncTaxonomyFromWP(db, config) {
 /**
  * Get all cached taxonomy entries for a given type ('category', 'tag', 'author').
  */
-function getCachedTaxonomy(db, taxType) {
+function getCachedTaxonomy(db, taxType, siteId) {
+  siteId = siteId || 1;
   return db.prepare(
-    'SELECT wp_id, name, slug, parent_id, synced_at FROM wp_taxonomy_cache WHERE tax_type = ? ORDER BY name ASC'
-  ).all(taxType);
+    'SELECT wp_id, name, slug, parent_id, synced_at FROM wp_taxonomy_cache WHERE tax_type = ? AND site_id = ? ORDER BY name ASC'
+  ).all(taxType, siteId);
 }
 
 /**
  * Get the most recent sync timestamp across all taxonomy types.
  */
-function getLastSyncedAt(db) {
-  var row = db.prepare('SELECT MAX(synced_at) as ts FROM wp_taxonomy_cache').get();
+function getLastSyncedAt(db, siteId) {
+  siteId = siteId || 1;
+  var row = db.prepare('SELECT MAX(synced_at) as ts FROM wp_taxonomy_cache WHERE site_id = ?').get(siteId);
   return (row && row.ts) || null;
 }
 
@@ -142,7 +153,8 @@ function _normalizeTagKey(name) {
  * @param {object}   [opts]  — { logger, maxCreatePerCall: 12 }
  * @returns {Promise<number[]>}
  */
-async function resolveTagNames(db, config, tagNames, opts) {
+async function resolveTagNames(db, config, tagNames, opts, siteId) {
+  siteId = siteId || 1;
   opts = opts || {};
   var logger = opts.logger || null;
   var maxCreate = opts.maxCreatePerCall || 12;
@@ -166,8 +178,8 @@ async function resolveTagNames(db, config, tagNames, opts) {
   var cacheByKey = {};
   try {
     var rows = db.prepare(
-      "SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'tag'"
-    ).all();
+      "SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'tag' AND site_id = ?"
+    ).all(siteId);
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r];
       if (row.name) cacheByKey[_normalizeTagKey(row.name)] = row.wp_id;
@@ -211,8 +223,8 @@ async function resolveTagNames(db, config, tagNames, opts) {
   var upsertStmt = null;
   try {
     upsertStmt = db.prepare(
-      'INSERT OR REPLACE INTO wp_taxonomy_cache (tax_type, wp_id, name, slug, parent_id, synced_at) ' +
-      'VALUES (?, ?, ?, ?, 0, datetime(\'now\'))'
+      'INSERT OR REPLACE INTO wp_taxonomy_cache (site_id, tax_type, wp_id, name, slug, parent_id, synced_at) ' +
+      'VALUES (?, ?, ?, ?, ?, 0, datetime(\'now\'))'
     );
   } catch (e) {
     if (logger) logger.warn('[wp-taxonomy] resolveTagNames: prepare failed: ' + e.message);
@@ -238,7 +250,7 @@ async function resolveTagNames(db, config, tagNames, opts) {
         if (Number.isFinite(existingId)) {
           ids.push(existingId);
           if (upsertStmt) {
-            try { upsertStmt.run('tag', existingId, tag.raw, '', ); } catch (e) {}
+            try { upsertStmt.run(siteId, 'tag', existingId, tag.raw, ''); } catch (e) {}
           }
         }
         continue;
@@ -248,7 +260,7 @@ async function resolveTagNames(db, config, tagNames, opts) {
         var newId = Number(created.id);
         ids.push(newId);
         if (upsertStmt) {
-          try { upsertStmt.run('tag', newId, _decodeHtml(created.name || tag.raw), created.slug || ''); } catch (e) {}
+          try { upsertStmt.run(siteId, 'tag', newId, _decodeHtml(created.name || tag.raw), created.slug || ''); } catch (e) {}
         }
       }
     } catch (err) {
@@ -274,7 +286,8 @@ async function resolveTagNames(db, config, tagNames, opts) {
  * @param {object}   [opts]  — { logger, maxCreatePerCall: 12 }
  * @returns {Promise<number[]>}
  */
-async function resolveCategorySlugs(db, config, slugs, opts) {
+async function resolveCategorySlugs(db, config, slugs, opts, siteId) {
+  siteId = siteId || 1;
   opts = opts || {};
   var logger = opts.logger || null;
   var maxCreate = opts.maxCreatePerCall || 12;
@@ -298,8 +311,8 @@ async function resolveCategorySlugs(db, config, slugs, opts) {
   var cacheBySlug = {};
   try {
     var rows = db.prepare(
-      "SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'category'"
-    ).all();
+      "SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'category' AND site_id = ?"
+    ).all(siteId);
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r];
       if (row.slug) cacheBySlug[String(row.slug).trim().toLowerCase()] = row.wp_id;
@@ -342,8 +355,8 @@ async function resolveCategorySlugs(db, config, slugs, opts) {
   var upsertStmt = null;
   try {
     upsertStmt = db.prepare(
-      'INSERT OR REPLACE INTO wp_taxonomy_cache (tax_type, wp_id, name, slug, parent_id, synced_at) ' +
-      'VALUES (?, ?, ?, ?, 0, datetime(\'now\'))'
+      'INSERT OR REPLACE INTO wp_taxonomy_cache (site_id, tax_type, wp_id, name, slug, parent_id, synced_at) ' +
+      'VALUES (?, ?, ?, ?, ?, 0, datetime(\'now\'))'
     );
   } catch (e) {
     if (logger) logger.warn('[wp-taxonomy] resolveCategorySlugs: prepare failed: ' + e.message);
@@ -369,7 +382,7 @@ async function resolveCategorySlugs(db, config, slugs, opts) {
         if (Number.isFinite(existingId)) {
           ids.push(existingId);
           if (upsertStmt) {
-            try { upsertStmt.run('category', existingId, cat.raw, cat.raw); } catch (e) {}
+            try { upsertStmt.run(siteId, 'category', existingId, cat.raw, cat.raw); } catch (e) {}
           }
         }
         continue;
@@ -379,7 +392,7 @@ async function resolveCategorySlugs(db, config, slugs, opts) {
         var newId = Number(created.id);
         ids.push(newId);
         if (upsertStmt) {
-          try { upsertStmt.run('category', newId, _decodeHtml(created.name || cat.raw), created.slug || cat.raw); } catch (e) {}
+          try { upsertStmt.run(siteId, 'category', newId, _decodeHtml(created.name || cat.raw), created.slug || cat.raw); } catch (e) {}
         }
       }
     } catch (err) {

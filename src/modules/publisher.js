@@ -310,9 +310,11 @@ function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName, schemaTypes, t
 }
 
 class WordPressPublisher {
-  constructor(config, logger) {
+  constructor(config, logger, siteId, siteCredentials) {
     this.config = config;
     this.logger = logger;
+    this.siteId = siteId || 1;
+    this._siteCredentials = siteCredentials || null;
 
     this.authHeader = '';
     this.wpBaseUrl = '';
@@ -536,8 +538,8 @@ class WordPressPublisher {
         'INSERT INTO published (' +
         '  cluster_id, wp_post_id, wp_post_url, wp_image_id,' +
         '  title, slug, excerpt, meta_description,' +
-        '  word_count, target_keyword, ai_model, tokens_used, published_at' +
-        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        '  word_count, target_keyword, ai_model, tokens_used, published_at, site_id' +
+        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       insertStmt.run(
         cluster.id || 0,
@@ -552,7 +554,8 @@ class WordPressPublisher {
         rewrittenArticle.targetKeyword || '',
         rewrittenArticle.aiModel,
         rewrittenArticle.tokensUsed,
-        new Date().toISOString()
+        new Date().toISOString(),
+        this.siteId
       );
     } catch (dbErr) {
       this.logger.error('publisher', 'Failed to record published article: ' + dbErr.message);
@@ -730,7 +733,12 @@ class WordPressPublisher {
       var freshConfig = getConfig();
       this.config = freshConfig;
 
-      if (!(this.config.WP_SITE_URL || this.config.WP_URL) || !this.config.WP_USERNAME || !this.config.WP_APP_PASSWORD) {
+      var creds = this._siteCredentials || {};
+      var wpUrl = creds.wp_url || this.config.WP_SITE_URL || this.config.WP_URL;
+      var wpUser = creds.wp_username || this.config.WP_USERNAME;
+      var wpPass = creds.wp_app_password || this.config.WP_APP_PASSWORD;
+
+      if (!wpUrl || !wpUser || !wpPass) {
         this.enabled = false;
         this.ready = false;
         this.status = 'disabled';
@@ -741,9 +749,9 @@ class WordPressPublisher {
       }
 
       this.authHeader = 'Basic ' + Buffer.from(
-        this.config.WP_USERNAME + ':' + this.config.WP_APP_PASSWORD
+        wpUser + ':' + wpPass
       ).toString('base64');
-      this.wpBaseUrl = (this.config.WP_SITE_URL || this.config.WP_URL || '').replace(/\/+$/, '');
+      this.wpBaseUrl = (wpUrl || '').replace(/\/+$/, '');
       this.enabled = true;
       this.ready = true;
       this.status = 'connected';

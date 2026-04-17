@@ -6650,6 +6650,169 @@ function createApiRouter(deps) {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Sites CRUD API — Multi-Site Support (Phase 2)
+  // ═══════════════════════════════════════════════════════════════════════════
+  var siteConfigMod = require('../utils/site-config');
+
+  // GET /api/sites — list all sites
+  router.get('/sites', function (req, res) {
+    try {
+      var sites = siteConfigMod.getAllSites();
+      // Mask credentials in response
+      var safe = sites.map(function (s) {
+        return {
+          id: s.id, name: s.name, slug: s.slug, color: s.color,
+          is_active: s.is_active,
+          has_firehose: !!s.firehose_token,
+          has_wp: !!(s.wp_url && s.wp_username && s.wp_app_password),
+          wp_url: s.wp_url || '',
+          created_at: s.created_at, updated_at: s.updated_at
+        };
+      });
+      res.json({ ok: true, sites: safe });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/sites — create a new site
+  router.post('/sites', function (req, res) {
+    try {
+      var body = req.body || {};
+      if (!body.name || !body.slug) {
+        return res.status(400).json({ ok: false, error: 'name and slug are required' });
+      }
+      // Validate slug format
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(body.slug)) {
+        return res.status(400).json({ ok: false, error: 'slug must be lowercase alphanumeric with hyphens' });
+      }
+      var site = siteConfigMod.createSite({
+        name: body.name,
+        slug: body.slug,
+        color: body.color,
+        firehose_token: body.firehose_token,
+        wp_url: body.wp_url,
+        wp_username: body.wp_username,
+        wp_app_password: body.wp_app_password
+      });
+      res.json({ ok: true, site: site });
+    } catch (err) {
+      if (err.message && err.message.indexOf('UNIQUE constraint') !== -1) {
+        return res.status(409).json({ ok: false, error: 'A site with that slug already exists' });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/sites/:id — get site details + config
+  router.get('/sites/:id', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var site = siteConfigMod.getSite(siteId);
+      if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
+      var siteConf = siteConfigMod.getAllSiteConfig(siteId);
+      // Mask sensitive fields
+      var safeSite = {
+        id: site.id, name: site.name, slug: site.slug, color: site.color,
+        is_active: site.is_active,
+        has_firehose: !!site.firehose_token,
+        has_wp: !!(site.wp_url && site.wp_username && site.wp_app_password),
+        wp_url: site.wp_url || '',
+        created_at: site.created_at, updated_at: site.updated_at
+      };
+      res.json({ ok: true, site: safeSite, config: siteConf });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // PUT /api/sites/:id — update site
+  router.put('/sites/:id', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var existing = siteConfigMod.getSite(siteId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Site not found' });
+      var body = req.body || {};
+      // Don't overwrite credentials with empty/masked values
+      var updates = {};
+      if (body.name !== undefined) updates.name = body.name;
+      if (body.slug !== undefined) updates.slug = body.slug;
+      if (body.color !== undefined) updates.color = body.color;
+      if (body.is_active !== undefined) updates.is_active = body.is_active ? 1 : 0;
+      if (body.firehose_token && body.firehose_token.indexOf('••') === -1) updates.firehose_token = body.firehose_token;
+      if (body.wp_url !== undefined) updates.wp_url = body.wp_url;
+      if (body.wp_username && body.wp_username.indexOf('••') === -1) updates.wp_username = body.wp_username;
+      if (body.wp_app_password && body.wp_app_password.indexOf('••') === -1) updates.wp_app_password = body.wp_app_password;
+      var site = siteConfigMod.updateSite(siteId, updates);
+      res.json({ ok: true, site: site });
+    } catch (err) {
+      if (err.message && err.message.indexOf('UNIQUE constraint') !== -1) {
+        return res.status(409).json({ ok: false, error: 'A site with that slug already exists' });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/sites/:id — soft-delete (deactivate)
+  router.delete('/sites/:id', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      if (siteId === 1) return res.status(400).json({ ok: false, error: 'Cannot delete the default site' });
+      var existing = siteConfigMod.getSite(siteId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Site not found' });
+      siteConfigMod.deactivateSite(siteId);
+      res.json({ ok: true, message: 'Site deactivated' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/sites/switch — switch active site in session
+  router.post('/sites/switch', function (req, res) {
+    try {
+      var siteId = parseInt((req.body || {}).site_id, 10);
+      if (isNaN(siteId) || siteId < 0) return res.status(400).json({ ok: false, error: 'Invalid site_id' });
+      if (req.session) req.session.activeSiteId = siteId;
+      var site = siteId === 0 ? { id: 0, name: 'All Sites' } : siteConfigMod.getSite(siteId);
+      res.json({ ok: true, activeSiteId: siteId, site: site || null });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/sites/:id/config — get all site-specific config
+  router.get('/sites/:id/config', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var site = siteConfigMod.getSite(siteId);
+      if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
+      var conf = siteConfigMod.getAllSiteConfig(siteId);
+      res.json({ ok: true, siteId: siteId, config: conf });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // PUT /api/sites/:id/config — bulk update site-specific config
+  router.put('/sites/:id/config', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var site = siteConfigMod.getSite(siteId);
+      if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
+      var body = req.body || {};
+      if (!body.config || typeof body.config !== 'object') {
+        return res.status(400).json({ ok: false, error: 'config object required' });
+      }
+      siteConfigMod.bulkSetSiteConfig(siteId, body.config);
+      res.json({ ok: true, message: 'Site config updated', siteId: siteId });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+
   return router;
 }
 
