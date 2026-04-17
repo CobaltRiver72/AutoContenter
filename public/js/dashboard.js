@@ -2766,7 +2766,7 @@
     fetchApi('/api/drafts' + _publishedQs())
       .then(function (data) {
         var drafts = data.data || [];
-        renderDraftsView(container, drafts);
+        renderDraftsView(container, drafts, data.counts);
         // Pagination footer
         var total = data.total || drafts.length;
         var totalPages = Math.max(1, Math.ceil(total / _publishedPerPage));
@@ -2787,7 +2787,7 @@
       });
   }
 
-  function renderDraftsView(container, drafts) {
+  function renderDraftsView(container, drafts, dbCounts) {
     if (!container) return;
 
     if (drafts.length === 0) {
@@ -2820,11 +2820,25 @@
     }
     var clusterIds = Object.keys(clusterMap).sort(function (a, b) { return Number(b) - Number(a); });
 
-    // Count statuses
-    var counts = { all: drafts.length, fetching: 0, draft: 0, rewriting: 0, ready: 0, published: 0, failed: 0 };
-    for (var c = 0; c < drafts.length; c++) {
-      var st = drafts[c].status;
-      if (counts[st] !== undefined) counts[st]++;
+    // Use DB-side counts from the API (full table, not limited to current page).
+    // Fall back to counting from the current page slice only if counts weren't returned.
+    var counts;
+    if (dbCounts) {
+      counts = {
+        all:       dbCounts.all,
+        fetching:  dbCounts.fetching,
+        draft:     dbCounts.draft,
+        rewriting: dbCounts.rewriting,
+        ready:     dbCounts.ready,
+        published: dbCounts.published,
+        failed:    dbCounts.failed,
+      };
+    } else {
+      counts = { all: drafts.length, fetching: 0, draft: 0, rewriting: 0, ready: 0, published: 0, failed: 0 };
+      for (var c = 0; c < drafts.length; c++) {
+        var st = drafts[c].status;
+        if (counts[st] !== undefined) counts[st]++;
+      }
     }
 
     // ─── Count stats for buttons and progress bar ────────────────
@@ -2863,9 +2877,9 @@
         // ─── Row 1: Filter buttons ───────────────────────────────
         '<div class="status-filters">' +
           '<button class="filter-btn active" data-filter="all">All (' + counts.all + ')</button>' +
-          '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + clusterIds.length + ')</button>' +
-          '<button class="filter-btn" data-filter="manual">&#128100; Manual (' + manualDrafts.length + ')</button>' +
-          '<button class="filter-btn" data-filter="imported">&#128229; Imported (' + importedDrafts.length + ')</button>' +
+          '<button class="filter-btn" data-filter="cluster">&#128218; Clusters (' + (dbCounts ? dbCounts.cluster : clusterIds.length) + ')</button>' +
+          '<button class="filter-btn" data-filter="manual">&#128100; Manual (' + (dbCounts ? dbCounts.manual : manualDrafts.length) + ')</button>' +
+          '<button class="filter-btn" data-filter="imported">&#128229; Imported (' + (dbCounts ? dbCounts.imported : importedDrafts.length) + ')</button>' +
           '<span class="filter-divider"></span>' +
           '<button class="filter-btn" data-filter="fetching">Fetching (' + counts.fetching + ')</button>' +
           '<button class="filter-btn" data-filter="draft">Extracted (' + counts.draft + ')</button>' +
@@ -3823,7 +3837,7 @@
           return fetchApi('/api/drafts' + _publishedQs(), { cacheMs: 0 }).then(function (data) {
             var drafts = data.data || [];
             var pollContainer = $('publishedList');
-            renderDraftsView(pollContainer, drafts);
+            renderDraftsView(pollContainer, drafts, data.counts);
             // Keep pagination in sync if total changed (new drafts arrived, etc.)
             var total = data.total || drafts.length;
             var totalPages = Math.max(1, Math.ceil(total / _publishedPerPage));

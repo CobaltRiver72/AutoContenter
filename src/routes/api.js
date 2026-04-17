@@ -2943,12 +2943,41 @@ function createApiRouter(deps) {
         var totalRow = countStmt.get.apply(countStmt, params);
         var total = (totalRow && totalRow.total) || 0;
 
+        // Full-table counts for tab badges — always reflects DB reality,
+        // independent of current page size or page number.
+        var countsRow = db.prepare(
+          "SELECT" +
+          "  COUNT(*) AS all_count," +
+          "  SUM(CASE WHEN status='fetching'  THEN 1 ELSE 0 END) AS fetching," +
+          "  SUM(CASE WHEN status='draft'     THEN 1 ELSE 0 END) AS draft," +
+          "  SUM(CASE WHEN status='rewriting' THEN 1 ELSE 0 END) AS rewriting," +
+          "  SUM(CASE WHEN status='ready'     THEN 1 ELSE 0 END) AS ready," +
+          "  SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS published," +
+          "  SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END) AS failed," +
+          "  SUM(CASE WHEN cluster_id IS NOT NULL THEN 1 ELSE 0 END) AS cluster," +
+          "  SUM(CASE WHEN mode='manual_import' THEN 1 ELSE 0 END) AS imported," +
+          "  SUM(CASE WHEN cluster_id IS NULL AND (mode IS NULL OR mode!='manual_import') THEN 1 ELSE 0 END) AS manual" +
+          " FROM drafts"
+        ).get();
+
         return res.json({
           success: true,
           data: drafts,
           total: total,
           page: pp.page,
-          perPage: pp.perPage
+          perPage: pp.perPage,
+          counts: {
+            all:       countsRow.all_count  || 0,
+            fetching:  countsRow.fetching   || 0,
+            draft:     countsRow.draft      || 0,
+            rewriting: countsRow.rewriting  || 0,
+            ready:     countsRow.ready      || 0,
+            published: countsRow.published  || 0,
+            failed:    countsRow.failed     || 0,
+            cluster:   countsRow.cluster    || 0,
+            imported:  countsRow.imported   || 0,
+            manual:    countsRow.manual     || 0,
+          }
         });
       }
 
