@@ -3146,21 +3146,22 @@ function createApiRouter(deps) {
   router.post('/drafts/retry-all-failed', function (req, res) {
     try {
       // Drafts with rewritten content → ready; without → back to draft
+      var retryAllSiteId = req.siteId || 1;
       var withContent = db.prepare(
         "UPDATE drafts SET status = 'ready', error_message = NULL, retry_count = 0, " +
         "failed_permanent = 0, last_error_at = NULL, next_run_at = NULL, " +
         "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
         "updated_at = datetime('now') " +
-        "WHERE status = 'failed' AND rewritten_html IS NOT NULL AND LENGTH(rewritten_html) > 100"
-      ).run();
+        "WHERE status = 'failed' AND rewritten_html IS NOT NULL AND LENGTH(rewritten_html) > 100 AND site_id = ?"
+      ).run(retryAllSiteId);
 
       var withoutContent = db.prepare(
         "UPDATE drafts SET status = 'draft', error_message = NULL, retry_count = 0, " +
         "failed_permanent = 0, last_error_at = NULL, next_run_at = NULL, " +
         "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
         "updated_at = datetime('now') " +
-        "WHERE status = 'failed' AND (rewritten_html IS NULL OR LENGTH(rewritten_html) <= 100)"
-      ).run();
+        "WHERE status = 'failed' AND (rewritten_html IS NULL OR LENGTH(rewritten_html) <= 100) AND site_id = ?"
+      ).run(retryAllSiteId);
 
       // Reset any cluster that no longer has failed drafts
       db.prepare(
@@ -3195,10 +3196,11 @@ function createApiRouter(deps) {
         return res.status(400).json({ success: false, error: 'WordPress publisher not configured. Set WP credentials in Settings.' });
       }
 
+      var publishAllSiteId = req.siteId || 1;
       var readyDrafts = db.prepare(
         "SELECT id FROM drafts WHERE status = 'ready' AND cluster_role = 'primary' " +
-        "AND rewritten_html IS NOT NULL AND LENGTH(rewritten_html) > 100"
-      ).all();
+        "AND rewritten_html IS NOT NULL AND LENGTH(rewritten_html) > 100 AND site_id = ?"
+      ).all(publishAllSiteId);
 
       if (readyDrafts.length === 0) {
         aiGuard.release('publish-all-ready');
@@ -3315,7 +3317,7 @@ function createApiRouter(deps) {
     try {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
-      var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
+      var draft = db.prepare('SELECT * FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
       if (!draft) {
         return res.status(404).json({ success: false, error: 'Draft not found' });
       }
@@ -3350,8 +3352,9 @@ function createApiRouter(deps) {
 
       updates.push("updated_at = datetime('now')");
       params.push(id);
+      params.push(req.siteId || 1);
 
-      var stmt = db.prepare('UPDATE drafts SET ' + updates.join(', ') + ' WHERE id = ?');
+      var stmt = db.prepare('UPDATE drafts SET ' + updates.join(', ') + ' WHERE id = ? AND site_id = ?');
       stmt.run.apply(stmt, params);
 
       logger.info('api', 'Draft ' + id + ' updated');
@@ -3367,8 +3370,8 @@ function createApiRouter(deps) {
   router.get('/drafts/:id/infranodus', (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: 'Invalid draft id' });
-    const draft = db.prepare('SELECT id, infranodus_data, ai_model_used FROM drafts WHERE id = ?')
-      .get(id);
+    const draft = db.prepare('SELECT id, infranodus_data, ai_model_used FROM drafts WHERE id = ? AND site_id = ?')
+      .get(id, req.siteId || 1);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
     let infraData = null;
@@ -3426,8 +3429,8 @@ function createApiRouter(deps) {
     var id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: 'Invalid draft id' });
 
-    var draft = db.prepare('SELECT id, extracted_content, rewritten_html, target_keyword FROM drafts WHERE id = ?')
-      .get(id);
+    var draft = db.prepare('SELECT id, extracted_content, rewritten_html, target_keyword FROM drafts WHERE id = ? AND site_id = ?')
+      .get(id, req.siteId || 1);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
     var text = draft.extracted_content || draft.rewritten_html || '';
@@ -3472,7 +3475,7 @@ function createApiRouter(deps) {
       return res.status(400).json({ error: 'entityData object required' });
     }
 
-    var draft = db.prepare('SELECT id, infranodus_data FROM drafts WHERE id = ?').get(id);
+    var draft = db.prepare('SELECT id, infranodus_data FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
     // Parse existing stored analysis (may be null / empty)
@@ -3549,7 +3552,7 @@ function createApiRouter(deps) {
     }
 
     // Load InfraNodus data for context
-    var draft = db.prepare('SELECT infranodus_data FROM drafts WHERE id = ?').get(id);
+    var draft = db.prepare('SELECT infranodus_data FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
     var infraData = {};
     if (draft && draft.infranodus_data) {
       try { infraData = JSON.parse(draft.infranodus_data) || {}; } catch (e) {}
@@ -3582,7 +3585,7 @@ function createApiRouter(deps) {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
 
-      var draft = db.prepare('SELECT id, cluster_id, featured_image FROM drafts WHERE id = ?').get(id);
+      var draft = db.prepare('SELECT id, cluster_id, featured_image FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
       if (!draft.cluster_id) return res.json({ success: true, groups: [], total: 0, message: 'Draft has no cluster' });
 
@@ -3663,7 +3666,7 @@ function createApiRouter(deps) {
       return res.status(400).json({ error: 'imageUrl blocked: ' + e.message });
     }
 
-    var draft = db.prepare('SELECT id, wp_post_id, target_keyword, extracted_title, rewritten_title FROM drafts WHERE id = ?').get(id);
+    var draft = db.prepare('SELECT id, wp_post_id, target_keyword, extracted_title, rewritten_title FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
     var publisherMod = deps.publisher;
@@ -3950,12 +3953,13 @@ function createApiRouter(deps) {
       // Build parameterized placeholders: (?, ?, ?, ...)
       var placeholders = safeIds.map(function () { return '?'; }).join(', ');
 
-      // Safety: exclude published drafts
+      // Safety: exclude published drafts, scope to current site
+      var batchDelSiteId = req.siteId || 1;
       var deleteStmt = db.prepare(
-        'DELETE FROM drafts WHERE id IN (' + placeholders + ') AND status != \'published\''
+        'DELETE FROM drafts WHERE id IN (' + placeholders + ') AND status != \'published\' AND site_id = ?'
       );
 
-      var result = deleteStmt.run.apply(deleteStmt, safeIds);
+      var result = deleteStmt.run.apply(deleteStmt, safeIds.concat([batchDelSiteId]));
 
       logger.info('api', 'Batch delete: removed ' + result.changes + ' of ' + safeIds.length + ' requested drafts');
 
@@ -4024,7 +4028,7 @@ function createApiRouter(deps) {
     try {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
-      var result = db.prepare('DELETE FROM drafts WHERE id = ?').run(id);
+      var result = db.prepare('DELETE FROM drafts WHERE id = ? AND site_id = ?').run(id, req.siteId || 1);
       if (result.changes === 0) {
         return res.status(404).json({ success: false, error: 'Draft not found' });
       }
@@ -4229,7 +4233,7 @@ function createApiRouter(deps) {
       if (!id) {
         return res.status(400).json({ success: false, error: 'Invalid draft id' });
       }
-      var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
+      var draft = db.prepare('SELECT * FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
 
       if (!draft) {
         return res.status(404).json({ success: false, error: 'Draft not found' });
@@ -4280,7 +4284,7 @@ function createApiRouter(deps) {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
 
-      var draft = db.prepare('SELECT id, current_version FROM drafts WHERE id = ?').get(id);
+      var draft = db.prepare('SELECT id, current_version FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
 
       var versions = db.prepare(
@@ -4331,7 +4335,7 @@ function createApiRouter(deps) {
       var version = parseInt(req.params.version, 10);
       if (!version || version < 1) return res.status(400).json({ success: false, error: 'Invalid version' });
 
-      var draft = db.prepare('SELECT id FROM drafts WHERE id = ?').get(id);
+      var draft = db.prepare('SELECT id FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
 
       var snapshot = db.prepare(
@@ -4498,7 +4502,7 @@ function createApiRouter(deps) {
       var config = getConfig();
       var wpConfigured = !!(config.WP_URL && config.WP_USERNAME && config.WP_APP_PASSWORD);
       var platform = body.platform || (wpConfigured ? 'wordpress' : 'blogspot');
-      var draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(id);
+      var draft = db.prepare('SELECT * FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
       var taxonomy = resolveTaxonomy(draft, db, getConfig());
 
@@ -4696,7 +4700,7 @@ function createApiRouter(deps) {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid draft id' });
 
-      var draft = db.prepare('SELECT id, cluster_id, status, rewritten_html FROM drafts WHERE id = ?').get(id);
+      var draft = db.prepare('SELECT id, cluster_id, status, rewritten_html FROM drafts WHERE id = ? AND site_id = ?').get(id, req.siteId || 1);
       if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
       if (draft.status !== 'failed') {
         return res.status(400).json({ success: false, error: 'Draft is not in failed state (current: ' + draft.status + ')' });
@@ -6165,8 +6169,8 @@ function createApiRouter(deps) {
       if (!draftId) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
       var db = req.app.locals.db;
       var draft = db.prepare(
-        "SELECT id, status, rewritten_html, cluster_id, cluster_role FROM drafts WHERE id = ?"
-      ).get(draftId);
+        "SELECT id, status, rewritten_html, cluster_id, cluster_role FROM drafts WHERE id = ? AND site_id = ?"
+      ).get(draftId, req.siteId || 1);
       if (!draft) return res.status(404).json({ ok: false, error: 'Draft not found' });
       if (!draft.rewritten_html || draft.rewritten_html.length < 100) {
         return res.status(400).json({ ok: false, error: 'No rewritten content — run AI Rewrite first before queuing' });
