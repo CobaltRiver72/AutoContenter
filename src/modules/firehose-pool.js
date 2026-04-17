@@ -1,7 +1,7 @@
 'use strict';
 
 var { EventEmitter } = require('events');
-var FirehoseListener = require('./firehose');
+var { FirehoseListener } = require('./firehose');
 var siteConfig = require('../utils/site-config');
 
 var MODULE = 'firehose-pool';
