@@ -7065,10 +7065,10 @@
         }
         el = $('openai-key');
         if (el && data.openaiKey) el.placeholder = data.openaiKey;
-        el = $('openai-model'); if (el) el.value = data.openaiModel || 'gpt-4o-mini';
+        el = $('openai-model'); if (el) el.value = data.openaiModel || '';
         el = $('openrouter-key');
         if (el && data.openrouterKey) el.placeholder = data.openrouterKey;
-        window.__lastSavedOpenrouterModel = data.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
+        window.__lastSavedOpenrouterModel = data.openrouterModel || '';
         el = $('openrouter-model'); if (el) el.value = window.__lastSavedOpenrouterModel;
         el = $('ai-fallback'); if (el) el.checked = data.enableFallback !== false;
         el = $('ai-max-tokens'); if (el) el.value = data.maxTokens || 4096;
