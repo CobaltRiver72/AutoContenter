@@ -313,6 +313,46 @@ class Pipeline {
 
       if (readyClusters.length === 0) return;
 
+      // ─── Language gate ───────────────────────────────────────────────────────
+      // Filter clusters whose primary draft language doesn't match PUBLISH_LANGUAGE.
+      // Uses source_language stored on the draft; falls back to Devanagari regex
+      // detection on source_title for rows where source_language is still NULL.
+      var publishLangCfg = (_cfg.get('PUBLISH_LANGUAGE') || 'en').toLowerCase().trim();
+      if (publishLangCfg !== 'both' && readyClusters.length > 0) {
+        var wantLang = publishLangCfg === 'hi' ? 'hi' : 'en';
+        var langPlaceholders = readyClusters.map(function () { return '?'; }).join(',');
+        var langClusterIds = readyClusters.map(function (c) { return c.cluster_id; });
+        var primaryLangStmt = this.db.prepare(
+          "SELECT cluster_id, source_language, source_title FROM drafts " +
+          "WHERE cluster_id IN (" + langPlaceholders + ") AND cluster_role = 'primary'"
+        );
+        var primaryLangRows = primaryLangStmt.all.apply(primaryLangStmt, langClusterIds);
+        var langMap = {};
+        for (var lri = 0; lri < primaryLangRows.length; lri++) {
+          var lr = primaryLangRows[lri];
+          var detLang = lr.source_language;
+          if (!detLang) {
+            detLang = /[\u0900-\u097F]{3,}/.test(lr.source_title || '') ? 'hi' : 'en';
+          }
+          langMap[lr.cluster_id] = detLang;
+        }
+        var filteredClusters = [];
+        for (var lfi = 0; lfi < readyClusters.length; lfi++) {
+          var lfc = readyClusters[lfi];
+          var lfcLang = langMap[lfc.cluster_id] || 'en';
+          if (lfcLang === wantLang) {
+            filteredClusters.push(lfc);
+          } else {
+            this.logger.info(MODULE, 'Rewrite skip (lang): cluster #' + lfc.cluster_id +
+              ' "' + (lfc.topic || '').substring(0, 40) + '" lang=' + lfcLang + ' filter=' + wantLang);
+          }
+        }
+        readyClusters = filteredClusters;
+      }
+      // ─── End language gate ────────────────────────────────────────────────────
+
+      if (readyClusters.length === 0) return;
+
       this.logger.info(MODULE, 'Auto-rewrite: ' + readyClusters.length + ' clusters ready (daily:' + rewrittenToday + '/' + dailyLimit + ' hourly:' + rewrittenThisHour + '/' + hourlyLimit + ')');
 
       var self = this;
@@ -1354,8 +1394,9 @@ class Pipeline {
       var createDrafts = this.db.transaction(function () {
         for (var i = 0; i < articles.length; i++) {
           var a = articles[i];
-          var langSample = (a.title || '') + ' ' + (a.content_markdown || '').slice(0, 300);
-          var artLang = /[\u0900-\u097F]{3,}/.test(langSample) ? 'hi' : 'en';
+          // Prefer language already stored in the articles table (set by firehose buffer);
+          // fall back to regex detection if it's missing.
+          var artLang = a.language || (/[\u0900-\u097F]{3,}/.test((a.title || '') + ' ' + (a.content_markdown || '').slice(0, 300)) ? 'hi' : 'en');
           insertDraft.run(
             a.id, a.url, a.domain, a.title,
             a.content_markdown || '', artLang, 'wordpress',
