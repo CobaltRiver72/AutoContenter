@@ -153,7 +153,7 @@ function createApiRouter(deps) {
   });
   var { parseId, sanitizeForClient } = require('../utils/api-helpers');
   var { validateAndNormalizeUrl } = require('../utils/draft-helpers');
-  var { firehose, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
+  var { firehose, firehosePool, publisherPool, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
 
   // ─── Multi-site: extract req.siteId on every API request ─────────────────
   router.use(siteScope);
@@ -1575,9 +1575,22 @@ function createApiRouter(deps) {
   // ─── POST /api/wp/taxonomy/sync — pull fresh data from WP ────────────────
   router.post('/wp/taxonomy/sync', async function (req, res) {
     try {
-      var config = getConfig();
-      var result = await syncTaxonomyFromWP(db, config, req.siteId || 1);
-      logger.info('api', 'WP taxonomy synced: ' + result.categories + ' categories, ' + result.tags + ' tags, ' + result.authors + ' authors');
+      var syncSiteId = req.siteId || 1;
+      var baseConfig = getConfig();
+      // For non-default sites, override WP credentials with the site row's values
+      var syncConfig = baseConfig;
+      if (syncSiteId !== 1) {
+        var siteRow = db.prepare('SELECT wp_url, wp_username, wp_app_password FROM sites WHERE id = ?').get(syncSiteId);
+        if (siteRow && siteRow.wp_url) {
+          syncConfig = Object.assign({}, baseConfig, {
+            WP_SITE_URL: siteRow.wp_url,
+            WP_USERNAME: siteRow.wp_username || '',
+            WP_APP_PASSWORD: siteRow.wp_app_password || '',
+          });
+        }
+      }
+      var result = await syncTaxonomyFromWP(db, syncConfig, syncSiteId);
+      logger.info('api', 'WP taxonomy synced for site ' + syncSiteId + ': ' + result.categories + ' categories, ' + result.tags + ' tags, ' + result.authors + ' authors');
       return res.json({ success: true, ...result });
     } catch (err) {
       logger.error('api', 'WP taxonomy sync failed: ' + err.message);
@@ -2447,10 +2460,17 @@ function createApiRouter(deps) {
   });
 
   // ─── Firehose Rules Proxy ──────────────────────────────────────────────
+  // Helper: resolve firehose token for active site (falls back to global settings)
+  function _siteFirehoseToken(siteId) {
+    if (siteId && siteId !== 1) {
+      var row = db.prepare('SELECT firehose_token FROM sites WHERE id = ?').get(siteId);
+      if (row && row.firehose_token) return row.firehose_token;
+    }
+    return getConfig().FIREHOSE_TOKEN || null;
+  }
 
   router.get('/firehose/rules', function (req, res) {
-    var config = getConfig();
-    var token = config.FIREHOSE_TOKEN;
+    var token = _siteFirehoseToken(req.siteId);
     if (!token) {
       return res.status(400).json({ error: 'Firehose token not configured' });
     }
@@ -2470,8 +2490,7 @@ function createApiRouter(deps) {
   });
 
   router.post('/firehose/rules', function (req, res) {
-    var config = getConfig();
-    var token = config.FIREHOSE_TOKEN;
+    var token = _siteFirehoseToken(req.siteId);
     if (!token) {
       return res.status(400).json({ error: 'Firehose token not configured' });
     }
@@ -2500,8 +2519,7 @@ function createApiRouter(deps) {
   });
 
   router.put('/firehose/rules/:id', function (req, res) {
-    var config = getConfig();
-    var token = config.FIREHOSE_TOKEN;
+    var token = _siteFirehoseToken(req.siteId);
     if (!token) {
       return res.status(400).json({ error: 'Firehose token not configured' });
     }
@@ -2527,8 +2545,7 @@ function createApiRouter(deps) {
   });
 
   router.delete('/firehose/rules/:id', function (req, res) {
-    var config = getConfig();
-    var token = config.FIREHOSE_TOKEN;
+    var token = _siteFirehoseToken(req.siteId);
     if (!token) {
       return res.status(400).json({ error: 'Firehose token not configured' });
     }
@@ -2554,11 +2571,28 @@ function createApiRouter(deps) {
 
   router.get('/firehose/status', function (req, res) {
     try {
-      var status = firehose ? firehose.getStatus() : { connected: false, stopped: true };
-      var config = getConfig();
-      status.tokenConfigured = !!config.FIREHOSE_TOKEN;
-      status.tokenPreview = config.FIREHOSE_TOKEN ? '...' + config.FIREHOSE_TOKEN.slice(-4) : '';
-      res.json(status);
+      var statusSiteId = req.siteId;
+      // All-Sites mode: return aggregate pool health
+      if (!statusSiteId || statusSiteId === 0) {
+        var poolHealth = firehosePool ? firehosePool.getHealth() : [];
+        return res.json({ allSites: true, listeners: poolHealth });
+      }
+      // Single-site mode: return that site's listener status
+      var listener = firehosePool ? firehosePool.get(statusSiteId) : null;
+      if (listener) {
+        var status = listener.getStatus ? listener.getStatus() : listener.getHealth();
+        var siteRow = db.prepare('SELECT firehose_token FROM sites WHERE id = ?').get(statusSiteId) || {};
+        var token = siteRow.firehose_token || '';
+        status.tokenConfigured = !!token;
+        status.tokenPreview = token ? '...' + token.slice(-4) : '';
+        return res.json(status);
+      }
+      // Fallback to legacy single firehose for site 1
+      var legacyStatus = firehose ? firehose.getStatus() : { connected: false, stopped: true };
+      var globalConfig = getConfig();
+      legacyStatus.tokenConfigured = !!globalConfig.FIREHOSE_TOKEN;
+      legacyStatus.tokenPreview = globalConfig.FIREHOSE_TOKEN ? '...' + globalConfig.FIREHOSE_TOKEN.slice(-4) : '';
+      res.json(legacyStatus);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -2570,6 +2604,7 @@ function createApiRouter(deps) {
 
   router.post('/firehose/connect', function (req, res) {
     try {
+      var connectSiteId = req.siteId || 1;
       var token = req.body && req.body.token;
       if (!token) {
         return res.status(400).json({ error: 'Token is required' });
@@ -2604,7 +2639,7 @@ function createApiRouter(deps) {
             var tapToken = taps[0].token || taps[0].tap_token;
             var tapName = taps[0].name || taps[0].id || 'tap-1';
             logger.info('api', 'Found existing tap: ' + tapName + ', token: ...' + (tapToken ? tapToken.slice(-4) : ''));
-            saveTapTokenAndConnect(tapToken, res);
+            saveTapTokenAndConnect(tapToken, connectSiteId, res);
           } else {
             // No taps exist — create one
             logger.info('api', 'No taps found, creating new tap...');
@@ -2618,7 +2653,7 @@ function createApiRouter(deps) {
               var newTap = createRes.data;
               var tapToken = newTap.token || newTap.tap_token;
               logger.info('api', 'Created new tap: hdf-autopub, token: ...' + (tapToken ? tapToken.slice(-4) : ''));
-              saveTapTokenAndConnect(tapToken, res);
+              saveTapTokenAndConnect(tapToken, connectSiteId, res);
             })
             .catch(function (err) {
               var safe = sanitizeAxiosError(err);
@@ -2637,7 +2672,7 @@ function createApiRouter(deps) {
 
       } else {
         // Direct tap token (fh_ or other) — save and connect immediately
-        saveTapTokenAndConnect(token, res);
+        saveTapTokenAndConnect(token, connectSiteId, res);
       }
     } catch (err) {
       logger.error('api', 'Failed to save firehose token', err.message);
@@ -2645,31 +2680,45 @@ function createApiRouter(deps) {
     }
   });
 
-  function saveTapTokenAndConnect(tapToken, res) {
+  function saveTapTokenAndConnect(tapToken, siteId, res) {
     if (!tapToken) {
       return res.status(500).json({ error: 'No tap token received from API' });
     }
+    siteId = siteId || 1;
 
-    var upsertStmt = db.prepare(
-      "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
-      "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-    );
-    upsertStmt.run('FIREHOSE_TOKEN', tapToken);
+    if (siteId === 1) {
+      // Default site: save to global settings + restart legacy firehose
+      var upsertStmt = db.prepare(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+      );
+      upsertStmt.run('FIREHOSE_TOKEN', tapToken);
 
-    // Reload config
-    var { loadRuntimeOverrides } = require('../utils/config');
-    loadRuntimeOverrides(db);
-    var newConfig = getConfig();
+      var { loadRuntimeOverrides } = require('../utils/config');
+      loadRuntimeOverrides(db);
+      var newConfig = getConfig();
 
-    // Restart firehose with new token
-    if (firehose) {
-      firehose.stop();
-      firehose._stopped = false;
-      firehose.updateConfig(newConfig);
-      firehose.connect();
+      if (firehose) {
+        firehose.stop();
+        firehose._stopped = false;
+        firehose.updateConfig(newConfig);
+        firehose.connect();
+      }
+    } else {
+      // Non-default site: save to sites.firehose_token + hot-add to pool
+      db.prepare("UPDATE sites SET firehose_token = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(tapToken, siteId);
+
+      if (firehosePool) {
+        // Remove existing listener (if any) and re-add with new token
+        firehosePool.removeSite(siteId).catch(function () {});
+        firehosePool.addSite(siteId).catch(function (e) {
+          logger.warn('api', 'firehosePool.addSite failed: ' + e.message);
+        });
+      }
     }
 
-    logger.info('api', 'Tap token saved and connection initiated');
+    logger.info('api', 'Tap token saved for site ' + siteId + ' and connection initiated');
     res.json({
       success: true,
       message: 'Tap token saved. Connecting to Firehose...',
