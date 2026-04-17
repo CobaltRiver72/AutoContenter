@@ -359,6 +359,8 @@ async function boot() {
   // API routes — protected by checkAuth
   var apiRouter = createApiRouter({
     firehose: firehose,
+    firehosePool: firehosePool,
+    publisherPool: publisherPool,
     trends: trends,
     buffer: buffer,
     similarity: similarity,
