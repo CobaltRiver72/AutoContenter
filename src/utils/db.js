@@ -949,6 +949,141 @@ function runMigrations() {
     }
     // ─── End back-fill ────────────────────────────────────────────────────────
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Multi-Site Support — Phase 1 schema migration
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // ─── 1. Create `sites` table ─────────────────────────────────────────────
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sites (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        slug            TEXT NOT NULL,
+        color           TEXT DEFAULT '#3b82f6',
+        is_active       INTEGER DEFAULT 1,
+        firehose_token  TEXT DEFAULT NULL,
+        wp_url          TEXT DEFAULT NULL,
+        wp_username     TEXT DEFAULT NULL,
+        wp_app_password TEXT DEFAULT NULL,
+        created_at      TEXT DEFAULT (datetime('now')),
+        updated_at      TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_sites_slug ON sites(slug)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sites_active ON sites(is_active)');
+
+    // ─── 2. Create `site_config` table (per-site key-value settings) ─────────
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS site_config (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        site_id    INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+        key        TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(site_id, key)
+      )
+    `);
+    // UNIQUE(site_id, key) already creates an implicit index covering both
+    // (site_id) prefix and (site_id, key) lookups — no extra indexes needed.
+
+    // ─── 3. Add site_id column to 8 existing tables ─────────────────────────
+    var _siteIdTables = [
+      'drafts', 'draft_versions', 'published', 'publish_rules',
+      'wp_taxonomy_cache', 'classification_log', 'autopilot_decisions', 'wp_posts_log'
+    ];
+    for (var _ti = 0; _ti < _siteIdTables.length; _ti++) {
+      var _tbl = _siteIdTables[_ti];
+      try {
+        db.exec('ALTER TABLE ' + _tbl + ' ADD COLUMN site_id INTEGER DEFAULT 1');
+      } catch (_e) { /* column already exists — safe to ignore */ }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_' + _tbl + '_site ON ' + _tbl + '(site_id)');
+    }
+
+    // ─── 4. Fix drafts unique index: UNIQUE(source_url) → UNIQUE(source_url, site_id)
+    //        Same URL can exist as drafts for different sites in multi-site mode.
+    //        Drop both the old non-unique and UNIQUE indexes — the new composite
+    //        index covers source_url-only lookups via its leftmost prefix.
+    try {
+      db.exec('DROP INDEX IF EXISTS idx_drafts_url');
+      db.exec('DROP INDEX IF EXISTS idx_drafts_url_unique');
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_url_site_unique ON drafts(source_url, site_id)');
+    } catch (_ue) {
+      console.warn('[db] Could not update drafts unique index for multi-site: ' + _ue.message);
+    }
+
+    // ─── 5. Seed default site (id=1) from current settings ──────────────────
+    //        Only runs when the sites table is empty (first migration).
+    //        Pulls WP credentials and firehose token from the settings table.
+    (function _seedDefaultSite() {
+      var siteCount = db.prepare('SELECT COUNT(*) as c FROM sites').get().c;
+      if (siteCount > 0) return; // already seeded
+
+      // Read current credentials from settings table
+      function _getS(k) {
+        var row = db.prepare('SELECT value FROM settings WHERE key = ?').get(k);
+        return (row && row.value) ? row.value : null;
+      }
+
+      db.prepare(
+        'INSERT INTO sites (id, name, slug, color, is_active, firehose_token, wp_url, wp_username, wp_app_password) ' +
+        'VALUES (1, ?, ?, ?, 1, ?, ?, ?, ?)'
+      ).run(
+        'Default Site', 'default', '#3b82f6',
+        _getS('FIREHOSE_TOKEN'),
+        _getS('WP_SITE_URL') || _getS('WP_URL'),
+        _getS('WP_USERNAME'),
+        _getS('WP_APP_PASSWORD')
+      );
+
+      // Copy per-site settings from global settings → site_config for site 1
+      var _perSiteKeys = [
+        'AUTOPILOT_ENABLED', 'AUTOPILOT_DAILY_TARGET', 'AUTOPILOT_WEEKENDS',
+        'AUTOPILOT_MIN_SIMILARITY', 'AUTOPILOT_MIN_TIER', 'AUTOPILOT_MIN_WORDS',
+        'AUTOPILOT_BLOCKED_KEYWORDS', 'AUTOPILOT_BLOCKED_DOMAINS',
+        'AUTOPILOT_ALLOWED_DOMAINS', 'AUTOPILOT_BLOCKED_CATEGORIES',
+        'AUTOPILOT_AUTO_CATEGORIZE', 'AUTOPILOT_START_HOUR', 'AUTOPILOT_END_HOUR',
+        'PUBLISH_LANGUAGE', 'REWRITE_LANGUAGE',
+        'FIREHOSE_SINCE', 'FIREHOSE_TIMEOUT', 'FIREHOSE_RECONNECT_MIN',
+        'FIREHOSE_RECONNECT_MAX', 'FIREHOSE_ALLOWED_DOMAINS', 'FIREHOSE_BLOCKED_DOMAINS',
+        'FIREHOSE_ALLOWED_LANGS', 'FIREHOSE_CUSTOM_TEMPLATES',
+        'AUTO_REWRITE_ENABLED', 'AUTO_REWRITE_DAILY_LIMIT', 'AUTO_REWRITE_HOURLY_LIMIT',
+        'AUTO_REWRITE_MIN_SIMILARITY', 'AUTO_REWRITE_MIN_SOURCES',
+        'PUBLISH_RATE_COUNT', 'PUBLISH_RATE_UNIT',
+        'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES',
+        'WP_AUTHOR_ID', 'WP_DEFAULT_CATEGORY', 'WP_ALWAYS_APPEND_CATEGORY_ID',
+        'WP_POST_STATUS', 'WP_COMMENT_STATUS', 'WP_PING_STATUS',
+        'DEFAULT_AUTHOR_USERNAME', 'DEFAULT_CATEGORY_SLUG',
+        'AUTHOR_ASSIGNMENT_ENABLED', 'CLASSIFIER_CONFIDENCE_THRESHOLD',
+        'AUTO_CREATE_WP_TAGS', 'MAX_TAGS_PER_ARTICLE', 'BLOCKED_TAGS',
+        'WP_TIMEOUT_MS'
+      ];
+
+      var _insertSiteConfig = db.prepare(
+        'INSERT OR IGNORE INTO site_config (site_id, key, value) VALUES (1, ?, ?)'
+      );
+      var _copiedCount = 0;
+      for (var _ki = 0; _ki < _perSiteKeys.length; _ki++) {
+        var _val = _getS(_perSiteKeys[_ki]);
+        if (_val !== null) {
+          _insertSiteConfig.run(_perSiteKeys[_ki], _val);
+          _copiedCount++;
+        }
+      }
+
+      // Copy firehose_last_event_id if it exists
+      var _lastEvt = _getS('firehose_last_event_id');
+      if (_lastEvt) {
+        _insertSiteConfig.run('firehose_last_event_id', _lastEvt);
+        _copiedCount++;
+      }
+
+      console.log('[db] Multi-site: seeded default site (id=1), copied ' + _copiedCount + ' settings to site_config');
+    })();
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // End Multi-Site Phase 1 migration
+    // ═══════════════════════════════════════════════════════════════════════════
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);

@@ -9,6 +9,7 @@ const BASE_URL = 'https://api.firehose.com';
 
 // Reconnect bounds — read from config at reconnect time for hot-reload
 var _cfg = require('../utils/config');
+var siteConfig = require('../utils/site-config');
 function _minReconnectMs() { return parseInt(_cfg.get('FIREHOSE_RECONNECT_MIN'), 10) || 2000; }
 function _maxReconnectMs() { return parseInt(_cfg.get('FIREHOSE_RECONNECT_MAX'), 10) || 60000; }
 // Keep legacy constants for inline use in rate-limit throttle check (always 2 s minimum)
@@ -19,12 +20,16 @@ class FirehoseListener extends EventEmitter {
    * @param {object} config - Frozen config object
    * @param {import('better-sqlite3').Database} db
    * @param {object} logger - Logger with .info(), .warn(), .error(), .debug()
+   * @param {number} [siteId=1] - Site identifier for multi-site operation
+   * @param {string} [firehoseToken] - Per-site token override (falls back to config.FIREHOSE_TOKEN)
    */
-  constructor(config, db, logger) {
+  constructor(config, db, logger, siteId, firehoseToken) {
     super();
     this.config = config;
     this.db = db;
     this.logger = logger;
+    this.siteId = siteId || 1;
+    this.firehoseToken = firehoseToken || null;
 
     this._es = null;
     this._connected = false;
@@ -46,9 +51,7 @@ class FirehoseListener extends EventEmitter {
     this.status = 'disabled';
     this.error = null;
 
-    // Prepared statements (lazy)
-    this._stmtGetSetting = null;
-    this._stmtSetSetting = null;
+    // (last-event-id storage now uses site-config module)
   }
 
   /**
@@ -87,7 +90,7 @@ class FirehoseListener extends EventEmitter {
       // Load last event ID for resume
       const lastId = this.getLastEventId();
       const headers = {
-        Authorization: `Bearer ${this.config.FIREHOSE_TOKEN}`,
+        Authorization: `Bearer ${this.firehoseToken || this.config.FIREHOSE_TOKEN}`,
       };
       if (lastId) {
         // Reconnect: resume from exact position via Last-Event-ID
@@ -263,7 +266,7 @@ class FirehoseListener extends EventEmitter {
 
     // ─── Language Gate ─────────────────────────────────────────────────────
     // Re-read allowed langs from config each time for hot-reload.
-    var rawLangs = _cfg.get('ALLOWED_LANGUAGES') || 'en,hi';
+    var rawLangs = siteConfig.getSiteConfig(this.siteId, 'ALLOWED_LANGUAGES') || 'en,hi';
     var allowedLangs = String(rawLangs).split(',').map(function(l){ return l.trim().toLowerCase(); }).filter(Boolean);
     if (!allowedLangs.length) allowedLangs = ['en', 'hi'];
     this._allowedLangs = allowedLangs; // keep in sync for getStats()
@@ -293,8 +296,8 @@ class FirehoseListener extends EventEmitter {
     // ─── End Language Gate ─────────────────────────────────────────────────
 
     // ─── Domain Gate ───────────────────────────────────────────────────────
-    var blockedDomains = String(_cfg.get('FIREHOSE_BLOCKED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
-    var allowedDomains = String(_cfg.get('FIREHOSE_ALLOWED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
+    var blockedDomains = String(siteConfig.getSiteConfig(this.siteId, 'FIREHOSE_BLOCKED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
+    var allowedDomains = String(siteConfig.getSiteConfig(this.siteId, 'FIREHOSE_ALLOWED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
     if (blockedDomains.length && blockedDomains.indexOf(domain) !== -1) {
       this._articlesDroppedByDomain++;
       this.logger.debug(MODULE, '[domain-filter] Blocked domain: ' + domain);
@@ -315,6 +318,7 @@ class FirehoseListener extends EventEmitter {
       eventId: article.firehose_event_id,
     });
 
+    article.source_site_id = this.siteId;
     this.emit('article', article);
   }
 
@@ -325,13 +329,8 @@ class FirehoseListener extends EventEmitter {
    */
   getLastEventId() {
     try {
-      if (!this._stmtGetSetting) {
-        this._stmtGetSetting = this.db.prepare(
-          "SELECT value FROM settings WHERE key = ?"
-        );
-      }
-      const row = this._stmtGetSetting.get('firehose_last_event_id');
-      return row ? row.value : null;
+      var value = siteConfig.getSiteConfig(this.siteId, 'firehose_last_event_id');
+      return value || null;
     } catch (err) {
       this.logger.error(MODULE, 'Failed to get last event ID', err.message);
       return this._lastEventId;
@@ -345,13 +344,7 @@ class FirehoseListener extends EventEmitter {
    */
   saveLastEventId(id) {
     try {
-      if (!this._stmtSetSetting) {
-        this._stmtSetSetting = this.db.prepare(
-          "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
-          "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-        );
-      }
-      this._stmtSetSetting.run('firehose_last_event_id', id);
+      siteConfig.setSiteConfig(this.siteId, 'firehose_last_event_id', id);
     } catch (err) {
       this.logger.error(MODULE, 'Failed to save last event ID', err.message);
     }
@@ -362,7 +355,7 @@ class FirehoseListener extends EventEmitter {
    */
   async init() {
     try {
-      var token = this.config.FIREHOSE_TOKEN;
+      var token = this.firehoseToken || this.config.FIREHOSE_TOKEN;
       if (!token) {
         this.status = 'disabled';
         return;

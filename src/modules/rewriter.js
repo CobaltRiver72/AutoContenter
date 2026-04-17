@@ -1217,11 +1217,15 @@ class ArticleRewriter {
       || process.env.WP_URL
       || 'https://hdfnews.com';
 
+    // Per-site overrides (multi-site Phase 2)
+    var siteOverrides = opts.siteOverrides || {};
+
     // Build the SEO prompt from article + cluster + user settings
+    var promptLanguage = siteOverrides.REWRITE_LANGUAGE || opts.language || 'en+hi';
     var promptSettings = {
       targetKeyword: opts.targetKeyword || '',
       targetDomain: opts.targetDomain || '',
-      language: opts.language || 'en+hi',
+      language: promptLanguage,
       schemaTypes: opts.schemaTypes || 'NewsArticle,FAQPage,BreadcrumbList',
       customPrompt: opts.customPrompt || '',
       publicationName: publicationName,
@@ -1229,6 +1233,12 @@ class ArticleRewriter {
       infraData: opts.infraData || null,
     };
     var prompt = buildPrompt(article, cluster || { articles: [article] }, promptSettings);
+
+    // Prepend site-specific instructions when provided
+    if (siteOverrides.SITE_REWRITE_PROMPT) {
+      prompt = '## Site-Specific Instructions\n\n' + siteOverrides.SITE_REWRITE_PROMPT + '\n\n' + prompt;
+    }
+
     var self = this;
 
     var jobSignal = opts.signal || null;
