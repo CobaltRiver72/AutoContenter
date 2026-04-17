@@ -8840,15 +8840,18 @@
   }
 
   function saveWPPublishingSettings() {
-    var updates = {};
+    var siteId = state.activeSiteId || 1;
+    var siteUpdates = {};
+    var configUpdates = {};
+
     var siteUrl = $('wp-site-url');
     var username = $('wp-pub-username');
     var password = $('wp-pub-password');
-    if (siteUrl && siteUrl.value && siteUrl.value.indexOf('••') === -1) updates.WP_SITE_URL = siteUrl.value;
-    if (username && username.value && username.value.indexOf('••') === -1) updates.WP_USERNAME = username.value;
-    if (password && password.value && password.value.indexOf('••') === -1) updates.WP_APP_PASSWORD = password.value;
+    if (siteUrl && siteUrl.value && siteUrl.value.indexOf('••') === -1) siteUpdates.wp_url = siteUrl.value;
+    if (username && username.value && username.value.indexOf('••') === -1) siteUpdates.wp_username = username.value;
+    if (password && password.value && password.value.indexOf('••') === -1) siteUpdates.wp_app_password = password.value;
 
-    // Post defaults — read every time (they're already visible as real values)
+    // Post defaults → per-site config
     var postStatus = $('wp-post-status');
     var authorId = $('wp-author-id');
     var defCat = $('wp-default-category');
@@ -8856,33 +8859,45 @@
     var defAuthorUser = $('wp-default-author-username');
     var commentStatus = $('wp-comment-status');
     var pingStatus = $('wp-ping-status');
-    if (postStatus) updates.WP_POST_STATUS = postStatus.value;
-    if (authorId && authorId.value) updates.WP_AUTHOR_ID = authorId.value;
-    if (defCat && defCat.value) updates.WP_DEFAULT_CATEGORY = defCat.value;
-    // Send empty string to clear, numeric ID otherwise — backend treats "" as disabled
-    if (appendCat) updates.WP_ALWAYS_APPEND_CATEGORY_ID = appendCat.value || '';
-    if (defAuthorUser) updates.DEFAULT_AUTHOR_USERNAME = defAuthorUser.value;
-    if (commentStatus) updates.WP_COMMENT_STATUS = commentStatus.value;
-    if (pingStatus) updates.WP_PING_STATUS = pingStatus.value;
+    if (postStatus) configUpdates.WP_POST_STATUS = postStatus.value;
+    if (authorId && authorId.value) configUpdates.WP_AUTHOR_ID = authorId.value;
+    if (defCat && defCat.value) configUpdates.WP_DEFAULT_CATEGORY = defCat.value;
+    if (appendCat) configUpdates.WP_ALWAYS_APPEND_CATEGORY_ID = appendCat.value || '';
+    if (defAuthorUser) configUpdates.DEFAULT_AUTHOR_USERNAME = defAuthorUser.value;
+    if (commentStatus) configUpdates.WP_COMMENT_STATUS = commentStatus.value;
+    if (pingStatus) configUpdates.WP_PING_STATUS = pingStatus.value;
 
-    if (!Object.keys(updates).length) { showToast('No changes to save', 'info'); return; }
-    fetchApi('/api/settings', { method: 'PUT', body: updates })
-      .then(function() { showToast('WordPress settings saved', 'success'); })
-      .catch(function(err) { showToast('Save failed: ' + err.message, 'error'); });
+    var promises = [];
+    if (Object.keys(siteUpdates).length) {
+      promises.push(fetchApi('/api/sites/' + siteId, { method: 'PUT', body: siteUpdates }));
+    }
+    if (Object.keys(configUpdates).length) {
+      promises.push(fetchApi('/api/sites/' + siteId + '/config', { method: 'PUT', body: { config: configUpdates } }));
+    }
+    if (!promises.length) { showToast('No changes to save', 'info'); return; }
+    Promise.all(promises)
+      .then(function () { showToast('WordPress settings saved', 'success'); })
+      .catch(function (err) { showToast('Save failed: ' + err.message, 'error'); });
   }
 
   function loadWPPublishingSettings() {
-    fetchApi('/api/settings').then(function(data) {
-      var s = data.settings || {};
+    var siteId = state.activeSiteId || 1;
+    // Credentials from site row
+    fetchApi('/api/sites/' + siteId, { bypassCache: true }).then(function (data) {
+      var site = data.site || {};
       var el;
       el = $('wp-site-url');
-      if (el) el.value = s.WP_SITE_URL || s.WP_URL || '';
+      if (el) el.value = site.wp_url || '';
       el = $('wp-pub-username');
-      if (el) el.placeholder = s.WP_USERNAME ? '(saved — enter new to change)' : 'WordPress username';
+      if (el) el.placeholder = site.has_wp ? '(saved — enter new to change)' : 'WordPress username';
       el = $('wp-pub-password');
-      if (el) el.placeholder = s.WP_APP_PASSWORD ? '(saved — enter new to change)' : 'App password';
+      if (el) el.placeholder = site.has_wp ? '(saved — enter new to change)' : 'App password';
+    }).catch(function () {});
 
-      // Post defaults — all safe to show as plain values
+    // Post defaults from per-site config
+    fetchApi('/api/sites/' + siteId + '/config', { bypassCache: true }).then(function (data) {
+      var s = data.config || {};
+      var el;
       el = $('wp-post-status');
       if (el) el.value = s.WP_POST_STATUS || 'draft';
       el = $('wp-author-id');
@@ -8891,9 +8906,6 @@
       if (el) el.value = s.WP_DEFAULT_CATEGORY || '';
       el = $('wp-always-append-category');
       if (el) {
-        // Stash the saved ID as a data-attribute so _populateTaxonomySelects()
-        // can restore the selection even if it runs AFTER loadWPPublishingSettings
-        // (taxonomy load is async and may rebuild the <option>s later).
         el.dataset.savedValue = s.WP_ALWAYS_APPEND_CATEGORY_ID || '';
         var savedVal = String(s.WP_ALWAYS_APPEND_CATEGORY_ID || '');
         if (savedVal && Array.from(el.options).some(function (o) { return o.value === savedVal; })) {
@@ -8906,7 +8918,7 @@
       if (el) el.value = s.WP_COMMENT_STATUS || '';
       el = $('wp-ping-status');
       if (el) el.value = s.WP_PING_STATUS || '';
-    }).catch(function() {});
+    }).catch(function () {});
   }
 
   // ─── Bulk Config Import ──────────────────────────────────────────────────
@@ -11140,17 +11152,19 @@
   ];
 
   function loadAutopilotSettings() {
-    fetchApi('/api/settings')
+    var siteId = state.activeSiteId || 1;
+    fetchApi('/api/sites/' + siteId + '/config', { bypassCache: true })
       .then(function (data) {
-        var settings = data.settings || {};
+        var cfg = data.config || {};
         _apSettingKeys.forEach(function (key) {
           var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
-          if (el && settings[key] !== undefined) el.value = settings[key];
+          if (el && cfg[key] !== undefined) el.value = cfg[key];
         });
       });
   }
 
   function saveAutopilotSettings() {
+    var siteId = state.activeSiteId || 1;
     var btn = $('autopilotSettingsSaveBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
     var body = {};
@@ -11158,7 +11172,7 @@
       var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
       if (el) body[key] = el.value;
     });
-    fetchApi('/api/settings', { method: 'PUT', body: body })
+    fetchApi('/api/sites/' + siteId + '/config', { method: 'PUT', body: { config: body } })
       .then(function () { showToast('Autopilot settings saved', 'success'); })
       .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
       .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save Autopilot Settings'; } });
@@ -11169,17 +11183,19 @@
   ];
 
   function loadAutoRewriteSettings() {
-    fetchApi('/api/settings')
+    var siteId = state.activeSiteId || 1;
+    fetchApi('/api/sites/' + siteId + '/config', { bypassCache: true })
       .then(function (data) {
-        var settings = data.settings || {};
+        var cfg = data.config || {};
         _arSettingKeys.forEach(function (key) {
           var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
-          if (el && settings[key] !== undefined) el.value = settings[key];
+          if (el && cfg[key] !== undefined) el.value = cfg[key];
         });
       });
   }
 
   function saveAutoRewriteSettings() {
+    var siteId = state.activeSiteId || 1;
     var btn = $('autoRewriteSaveBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
     var body = {};
@@ -11187,7 +11203,7 @@
       var el = document.querySelector('#page-autopilot [data-setting-key="' + key + '"]');
       if (el) body[key] = el.value;
     });
-    fetchApi('/api/settings', { method: 'PUT', body: body })
+    fetchApi('/api/sites/' + siteId + '/config', { method: 'PUT', body: { config: body } })
       .then(function () { showToast('Auto-Rewrite settings saved', 'success'); loadAutoRewriteStatus(); })
       .catch(function (e) { showToast('Save failed: ' + e.message, 'error'); })
       .finally(function () { if (btn) { btn.disabled = false; btn.textContent = 'Save'; } });
