@@ -1035,6 +1035,38 @@ class ArticleRewriter {
     if (!this._cfg.openrouterModel || typeof this._cfg.openrouterModel !== 'string') {
       this._cfg.openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free';
     }
+
+    // AI_PRIMARY_MODEL — cross-provider shortcut: overrides the active
+    // provider's model without needing to touch ANTHROPIC_MODEL / OPENAI_MODEL
+    // / OPENROUTER_MODEL individually. Detected by model ID prefix.
+    var primaryOverride = this._getSetting('AI_PRIMARY_MODEL') || process.env.AI_PRIMARY_MODEL || '';
+    if (primaryOverride) {
+      if (primaryOverride.startsWith('claude-')) {
+        this._cfg.anthropicModel = this._validateModelId('anthropic', primaryOverride, this._cfg.anthropicModel);
+        if (this._cfg.provider !== 'anthropic') this._cfg.provider = 'anthropic';
+      } else if (primaryOverride.startsWith('gpt-') || /^o[34]/.test(primaryOverride)) {
+        this._cfg.openaiModel = this._validateModelId('openai', primaryOverride, this._cfg.openaiModel);
+        if (this._cfg.provider !== 'openai') this._cfg.provider = 'openai';
+      } else if (primaryOverride.indexOf('/') !== -1) {
+        this._cfg.openrouterModel = primaryOverride;
+        if (this._cfg.provider !== 'openrouter') this._cfg.provider = 'openrouter';
+      }
+    }
+
+    // AI_FALLBACK_MODEL — overrides the first-fallback provider's model.
+    // E.g. if primary=anthropic and fallback=openai, setting AI_FALLBACK_MODEL
+    // to "gpt-4.1" uses that model on the openai fallback leg instead of
+    // whatever OPENAI_MODEL says.
+    var fallbackOverride = this._getSetting('AI_FALLBACK_MODEL') || process.env.AI_FALLBACK_MODEL || '';
+    if (fallbackOverride) {
+      if (fallbackOverride.startsWith('claude-')) {
+        this._cfg.anthropicModel = this._validateModelId('anthropic', fallbackOverride, this._cfg.anthropicModel);
+      } else if (fallbackOverride.startsWith('gpt-') || /^o[34]/.test(fallbackOverride)) {
+        this._cfg.openaiModel = this._validateModelId('openai', fallbackOverride, this._cfg.openaiModel);
+      } else if (fallbackOverride.indexOf('/') !== -1) {
+        this._cfg.openrouterModel = fallbackOverride;
+      }
+    }
   }
 
   _validateModelId(provider, currentId, defaultId) {
@@ -1446,14 +1478,21 @@ class ArticleRewriter {
       var client = new Anthropic({ apiKey: apiKey.trim() });
 
       var requestOpts = signal ? { signal: signal } : {};
+      // Pre-fill the assistant turn with '{' to force JSON-mode output.
+      // Anthropic continues generation from this prefix, guaranteeing the
+      // response starts with '{' — equivalent to json_object mode on OpenAI.
       var response = await client.messages.create({
         model: model,
         max_tokens: maxTokens,
         temperature: temperature,
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'user', content: prompt },
+          { role: 'assistant', content: '{' },
+        ],
       }, requestOpts);
 
-      var rawText = response.content && response.content[0] ? response.content[0].text : '';
+      // Re-attach the prefilled '{' since Anthropic returns only the continuation
+      var rawText = response.content && response.content[0] ? '{' + response.content[0].text : '';
       if (!rawText || rawText.length < 50) {
         throw new Error('Anthropic returned empty or too-short response');
       }
@@ -1487,7 +1526,7 @@ class ArticleRewriter {
           model: model,
           max_completion_tokens: maxTokens,
           messages: [
-            { role: 'developer', content: 'You are a professional news journalist. Always respond in valid JSON.' },
+            { role: 'system', content: 'You are a professional news journalist. Always respond in valid JSON.' },
             { role: 'user', content: prompt },
           ],
         }, requestOpts);
