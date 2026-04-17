@@ -565,7 +565,7 @@
         overview: 'Overview', feed: 'Live Feed', rules: 'Firehose Rules',
         trends: 'Trends', clusters: 'Clusters', failed: 'Failed Drafts',
         published: 'Published', settings: 'Settings',
-        'wp-settings': 'WordPress Settings', logs: 'Logs',
+        'wp-settings': 'WordPress Settings', sites: 'Sites', logs: 'Logs',
         sources: 'Sources', fuel: 'Fuel Prices', metals: 'Metals',
         lottery: 'Lottery', autopilot: 'Autopilot'
       };
@@ -602,6 +602,7 @@
         break;
       case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadPipelineEngineSettings(); break;
       case 'wp-settings': loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); initBulkImport(); loadActiveConfigViewer(); break;
+      case 'sites': loadSitesPage(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
@@ -8269,6 +8270,180 @@
     // Pre-fetch OpenRouter models so the editor's model picker works even
     // before the user visits the Settings page. Cached server-side for 1h.
     __loadOpenRouterModels();
+  }
+
+  // ─── Sites Management Page ──────────────────────────────────────────────
+
+  var _sitesEditingId = null;
+
+  function loadSitesPage() {
+    var section = document.getElementById('page-sites');
+    if (!section) return;
+    section.innerHTML = [
+      '<div class="content-area">',
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-6)">',
+      '<h2 style="font-size:var(--text-xl);font-weight:var(--weight-semibold)">Sites</h2>',
+      '<button class="btn btn-primary" id="sites-add-btn">+ Add Site</button>',
+      '</div>',
+      '<div id="sites-list"></div>',
+      '<div id="sites-form-wrap"></div>',
+      '</div>'
+    ].join('');
+    _sitesEditingId = null;
+    document.getElementById('sites-add-btn').addEventListener('click', function () {
+      _sitesShowForm(null);
+    });
+    _sitesLoadList();
+  }
+
+  function _sitesLoadList() {
+    fetchApi('/api/sites', { bypassCache: true }).then(function (data) {
+      var sites = (data && data.sites) || [];
+      var el = document.getElementById('sites-list');
+      if (!el) return;
+      if (sites.length === 0) {
+        el.innerHTML = '<p style="color:var(--text-tertiary)">No sites yet.</p>';
+        return;
+      }
+      var rows = sites.map(function (s) {
+        var wpBadge = s.has_wp
+          ? '<span style="background:var(--success-soft);color:var(--success);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">WP ✓</span>'
+          : '<span style="background:var(--bg-surface-2);color:var(--text-tertiary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">WP –</span>';
+        var fhBadge = s.has_firehose
+          ? '<span style="background:var(--success-soft);color:var(--success);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Firehose ✓</span>'
+          : '<span style="background:var(--bg-surface-2);color:var(--text-tertiary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Firehose –</span>';
+        var inactiveBadge = s.is_active ? '' : ' <span style="background:var(--danger-soft);color:var(--danger);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Inactive</span>';
+        var canDelete = s.id !== 1;
+        return '<tr>' +
+          '<td style="width:16px;padding-right:0"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + escapeHtml(s.color || '#3b82f6') + '"></span></td>' +
+          '<td><strong>' + escapeHtml(s.name) + '</strong>' + inactiveBadge + '<br><span style="color:var(--text-tertiary);font-size:var(--text-xs)">' + escapeHtml(s.slug) + '</span></td>' +
+          '<td>' + wpBadge + ' ' + fhBadge + '</td>' +
+          '<td style="color:var(--text-tertiary);font-size:var(--text-xs);max-width:180px;overflow:hidden;text-overflow:ellipsis">' + (s.wp_url ? escapeHtml(s.wp_url) : '—') + '</td>' +
+          '<td style="text-align:right;white-space:nowrap">' +
+            '<button class="btn btn-sm" onclick="_sitesShowForm(' + s.id + ')">Edit</button>' +
+            (canDelete ? ' <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="_sitesDelete(' + s.id + ',\'' + escapeHtml(s.name).replace(/'/g, "\\'") + '\')">Deactivate</button>' : '') +
+          '</td>' +
+          '</tr>';
+      }).join('');
+      el.innerHTML = '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--border-subtle)">' +
+        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)"></th>' +
+        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">NAME</th>' +
+        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">CONNECTIONS</th>' +
+        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">WP URL</th>' +
+        '<th></th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }).catch(function (err) {
+      var el = document.getElementById('sites-list');
+      if (el) el.innerHTML = '<p style="color:var(--danger)">' + escapeHtml(err.message) + '</p>';
+    });
+  }
+
+  function _sitesShowForm(siteId) {
+    _sitesEditingId = siteId;
+    if (!siteId) {
+      _sitesRenderForm({ name: '', slug: '', color: '#3b82f6', wp_url: '', has_wp: false, has_firehose: false });
+      return;
+    }
+    fetchApi('/api/sites/' + siteId, { bypassCache: true }).then(function (data) {
+      if (!data || !data.ok) return;
+      _sitesRenderForm(data.site);
+    });
+  }
+
+  function _sitesRenderForm(site) {
+    var wrap = document.getElementById('sites-form-wrap');
+    if (!wrap) return;
+    var isEdit = !!_sitesEditingId;
+    var keepHint = isEdit ? 'Leave blank to keep current' : '';
+    wrap.innerHTML = [
+      '<div class="settings-section" style="margin-top:var(--space-6);padding:var(--space-6);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg)">',
+      '<h3 style="font-size:var(--text-md);font-weight:var(--weight-semibold);margin-bottom:var(--space-5)">' + (isEdit ? 'Edit Site' : 'Add New Site') + '</h3>',
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)">',
+        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">Name *</label>',
+        '<input class="settings-input" id="sf-name" type="text" value="' + escapeHtml(site.name || '') + '" placeholder="My News Site"></div>',
+        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">Slug *</label>',
+        '<input class="settings-input" id="sf-slug" type="text" value="' + escapeHtml(site.slug || '') + '" placeholder="my-news-site"></div>',
+        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">Brand Color</label>',
+        '<input class="settings-input" id="sf-color" type="color" value="' + escapeHtml(site.color || '#3b82f6') + '" style="height:36px;padding:2px 6px;cursor:pointer"></div>',
+        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">WordPress URL</label>',
+        '<input class="settings-input" id="sf-wp-url" type="url" value="' + escapeHtml(site.wp_url || '') + '" placeholder="https://yoursite.com"></div>',
+        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">WP Username</label>',
+        '<input class="settings-input" id="sf-wp-user" type="text" placeholder="' + (isEdit && site.has_wp ? keepHint : 'admin') + '"></div>',
+        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">WP App Password</label>',
+        '<input class="settings-input" id="sf-wp-pass" type="password" placeholder="' + (isEdit && site.has_wp ? keepHint : 'xxxx xxxx xxxx xxxx') + '"></div>',
+        '<div style="grid-column:1/-1"><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">Firehose Token</label>',
+        '<input class="settings-input" id="sf-fh-token" type="text" placeholder="' + (isEdit && site.has_firehose ? keepHint : 'fh_...') + '"></div>',
+      '</div>',
+      '<div id="sf-error" style="color:var(--danger);font-size:var(--text-sm);margin-top:var(--space-3);display:none"></div>',
+      '<div style="display:flex;gap:var(--space-3);margin-top:var(--space-5)">',
+        '<button class="btn btn-primary" id="sf-save-btn">Save Site</button>',
+        '<button class="btn" onclick="_sitesHideForm()">Cancel</button>',
+      '</div>',
+      '</div>'
+    ].join('');
+
+    document.getElementById('sf-save-btn').addEventListener('click', _sitesSave);
+    // Auto-generate slug from name on new sites only
+    if (!isEdit) {
+      document.getElementById('sf-name').addEventListener('input', function () {
+        var slug = this.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        document.getElementById('sf-slug').value = slug;
+      });
+    }
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function _sitesHideForm() {
+    var wrap = document.getElementById('sites-form-wrap');
+    if (wrap) wrap.innerHTML = '';
+    _sitesEditingId = null;
+  }
+
+  function _sitesSave() {
+    var name    = (document.getElementById('sf-name').value || '').trim();
+    var slug    = (document.getElementById('sf-slug').value || '').trim();
+    var color   = document.getElementById('sf-color').value || '#3b82f6';
+    var wpUrl   = (document.getElementById('sf-wp-url').value || '').trim();
+    var wpUser  = (document.getElementById('sf-wp-user').value || '').trim();
+    var wpPass  = (document.getElementById('sf-wp-pass').value || '').trim();
+    var fhToken = (document.getElementById('sf-fh-token').value || '').trim();
+    var errEl   = document.getElementById('sf-error');
+
+    if (!name) { errEl.textContent = 'Name is required.'; errEl.style.display = 'block'; return; }
+    if (!slug) { errEl.textContent = 'Slug is required.'; errEl.style.display = 'block'; return; }
+    errEl.style.display = 'none';
+
+    var body = { name: name, slug: slug, color: color, wp_url: wpUrl };
+    if (wpUser)  body.wp_username     = wpUser;
+    if (wpPass)  body.wp_app_password = wpPass;
+    if (fhToken) body.firehose_token  = fhToken;
+
+    var method = _sitesEditingId ? 'PUT' : 'POST';
+    var url    = _sitesEditingId ? '/api/sites/' + _sitesEditingId : '/api/sites';
+
+    var btn = document.getElementById('sf-save-btn');
+    if (btn) btn.disabled = true;
+
+    fetchApi(url, { method: method, body: body }).then(function (data) {
+      if (!data || !data.ok) throw new Error((data && data.error) || 'Save failed');
+      _sitesHideForm();
+      _sitesLoadList();
+      loadSites(); // refresh topbar dropdown
+    }).catch(function (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  function _sitesDelete(siteId, siteName) {
+    if (!confirm('Deactivate "' + siteName + '"?\n\nThe site and its data will remain in the database but it will stop receiving articles.')) return;
+    fetchApi('/api/sites/' + siteId, { method: 'DELETE' }).then(function () {
+      _sitesLoadList();
+      loadSites();
+    }).catch(function (err) {
+      alert('Failed: ' + err.message);
+    });
   }
 
   // ─── Fuel Page ──────────────────────────────────────────────────────────
