@@ -14,6 +14,7 @@ var AI_MODELS = {
     { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', tier: 'Latest Best', type: 'standard' },
   ],
   openai: [
+    { id: 'gpt-4o', name: 'GPT-4o', tier: 'Balanced', type: 'standard' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', tier: 'Fast & Cheap', type: 'standard' },
     { id: 'gpt-4.1', name: 'GPT-4.1', tier: 'Latest', type: 'standard' },
     { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', tier: 'Latest Fast', type: 'standard' },
@@ -1036,16 +1037,20 @@ class ArticleRewriter {
       this._cfg.openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free';
     }
 
-    // AI_PRIMARY_MODEL — cross-provider shortcut: overrides the active
-    // provider's model without needing to touch ANTHROPIC_MODEL / OPENAI_MODEL
-    // / OPENROUTER_MODEL individually. Detected by model ID prefix.
+    // AI_PRIMARY_MODEL / AI_FALLBACK_MODEL — cross-provider shortcuts.
+    // These override per-provider model keys WITHOUT touching the DB
+    // (_validateModelId would destructively reset OPENAI_MODEL etc. if
+    // the model ID isn't in our hardcoded list, causing WARN spam and
+    // overwriting user settings with our defaults — wrong behaviour).
+    // We assign directly; OpenAI/Anthropic API will return a clear 404
+    // if the model ID is genuinely invalid.
     var primaryOverride = this._getSetting('AI_PRIMARY_MODEL') || process.env.AI_PRIMARY_MODEL || '';
     if (primaryOverride) {
       if (primaryOverride.startsWith('claude-')) {
-        this._cfg.anthropicModel = this._validateModelId('anthropic', primaryOverride, this._cfg.anthropicModel);
+        this._cfg.anthropicModel = primaryOverride;
         if (this._cfg.provider !== 'anthropic') this._cfg.provider = 'anthropic';
       } else if (primaryOverride.startsWith('gpt-') || /^o[34]/.test(primaryOverride)) {
-        this._cfg.openaiModel = this._validateModelId('openai', primaryOverride, this._cfg.openaiModel);
+        this._cfg.openaiModel = primaryOverride;
         if (this._cfg.provider !== 'openai') this._cfg.provider = 'openai';
       } else if (primaryOverride.indexOf('/') !== -1) {
         this._cfg.openrouterModel = primaryOverride;
@@ -1053,16 +1058,12 @@ class ArticleRewriter {
       }
     }
 
-    // AI_FALLBACK_MODEL — overrides the first-fallback provider's model.
-    // E.g. if primary=anthropic and fallback=openai, setting AI_FALLBACK_MODEL
-    // to "gpt-4.1" uses that model on the openai fallback leg instead of
-    // whatever OPENAI_MODEL says.
     var fallbackOverride = this._getSetting('AI_FALLBACK_MODEL') || process.env.AI_FALLBACK_MODEL || '';
     if (fallbackOverride) {
       if (fallbackOverride.startsWith('claude-')) {
-        this._cfg.anthropicModel = this._validateModelId('anthropic', fallbackOverride, this._cfg.anthropicModel);
+        this._cfg.anthropicModel = fallbackOverride;
       } else if (fallbackOverride.startsWith('gpt-') || /^o[34]/.test(fallbackOverride)) {
-        this._cfg.openaiModel = this._validateModelId('openai', fallbackOverride, this._cfg.openaiModel);
+        this._cfg.openaiModel = fallbackOverride;
       } else if (fallbackOverride.indexOf('/') !== -1) {
         this._cfg.openrouterModel = fallbackOverride;
       }
@@ -1478,21 +1479,14 @@ class ArticleRewriter {
       var client = new Anthropic({ apiKey: apiKey.trim() });
 
       var requestOpts = signal ? { signal: signal } : {};
-      // Pre-fill the assistant turn with '{' to force JSON-mode output.
-      // Anthropic continues generation from this prefix, guaranteeing the
-      // response starts with '{' — equivalent to json_object mode on OpenAI.
       var response = await client.messages.create({
         model: model,
         max_tokens: maxTokens,
         temperature: temperature,
-        messages: [
-          { role: 'user', content: prompt },
-          { role: 'assistant', content: '{' },
-        ],
+        messages: [{ role: 'user', content: prompt }],
       }, requestOpts);
 
-      // Re-attach the prefilled '{' since Anthropic returns only the continuation
-      var rawText = response.content && response.content[0] ? '{' + response.content[0].text : '';
+      var rawText = response.content && response.content[0] ? response.content[0].text : '';
       if (!rawText || rawText.length < 50) {
         throw new Error('Anthropic returned empty or too-short response');
       }
