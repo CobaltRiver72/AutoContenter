@@ -2740,7 +2740,12 @@
   })();
 
   function _publishedQs() {
-    return '?page=' + _publishedPage + '&perPage=' + _publishedPerPage;
+    var STATUS_FILTERS = { fetching: 1, draft: 1, rewriting: 1, ready: 1, published: 1, failed: 1 };
+    var qs = '?page=' + _publishedPage + '&perPage=' + _publishedPerPage;
+    if (_publishedFilter && STATUS_FILTERS[_publishedFilter]) {
+      qs += '&status=' + _publishedFilter;
+    }
+    return qs;
   }
 
   function loadPublished() {
@@ -3052,13 +3057,18 @@
       }
     }
 
-    // Attach filter listeners
+    // Attach filter listeners — status tabs reload from server so you see
+    // the full result set for that status, not just the current page slice.
+    // Type tabs (cluster/manual/imported) reload too (clears any previous
+    // status filter) and then applyPublishedFilter does client-side grouping.
     var filterBtns = container.querySelectorAll('.filter-btn');
     for (var f = 0; f < filterBtns.length; f++) {
       filterBtns[f].addEventListener('click', function () {
         var filter = this.getAttribute('data-filter');
         _publishedFilter = filter;
-        applyPublishedFilter(filter);
+        _publishedPage = 1;
+        forceApiRefresh('/api/drafts');
+        loadPublished();
       });
     }
 
