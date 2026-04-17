@@ -13,7 +13,6 @@ var REQUIRED_VARS = [
   'WP_URL',
   'WP_USERNAME',
   'WP_APP_PASSWORD',
-  'DASHBOARD_PASSWORD',
   'PORT',
 ];
 
@@ -31,6 +30,10 @@ var DEFAULTS = {
   BUFFER_HOURS: '2.5',
   MAX_PUBLISH_PER_HOUR: '4',
   PUBLISH_COOLDOWN_MINUTES: '10',
+  // Unified publish rate — overrides the two legacy settings above when both
+  // are set. Admin-configurable via the Autopilot page.
+  PUBLISH_RATE_COUNT: '',
+  PUBLISH_RATE_UNIT: '',
   TRENDS_GEO: 'IN',
   TRENDS_POLL_MINUTES: '15',
   WP_AUTHOR_ID: '1',

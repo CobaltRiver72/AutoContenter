@@ -15,6 +15,27 @@ function _publishPollMs()     { return parseInt(_cfg.get('PUBLISH_POLL_MS'), 10)
 function _maxPublishPerHour() { return parseInt(_cfg.get('MAX_PUBLISH_PER_HOUR'), 10) || 4; }
 function _publishCooldownMs() { return (parseInt(_cfg.get('PUBLISH_COOLDOWN_MINUTES'), 10) || 10) * 60000; }
 
+// Unified publish rate: PUBLISH_RATE_COUNT articles per PUBLISH_RATE_UNIT.
+// If either is unset, falls back to legacy MAX_PUBLISH_PER_HOUR +
+// PUBLISH_COOLDOWN_MINUTES so existing installs keep working unchanged.
+function _publishRateUnit() {
+  var u = String(_cfg.get('PUBLISH_RATE_UNIT') || '').trim().toLowerCase();
+  if (u === 'second' || u === 'minute' || u === 'hour' || u === 'day') return u;
+  return '';
+}
+function _publishRateCount() {
+  var raw = _cfg.get('PUBLISH_RATE_COUNT');
+  if (raw === undefined || raw === null || raw === '') return 0;
+  var n = parseInt(raw, 10);
+  return (isNaN(n) || n < 0) ? 0 : n;
+}
+function _publishWindowMs(unit) {
+  if (unit === 'second') return 1000;
+  if (unit === 'minute') return 60000;
+  if (unit === 'day')    return 86400000;
+  return 3600000; // hour default
+}
+
 function _autoRewriteEnabled() {
   var v = _cfg.get('AUTO_REWRITE_ENABLED');
   return v === true || v === 1 || String(v).toLowerCase() === 'true' || v === '1';
@@ -811,7 +832,11 @@ class Pipeline {
     this._publishRunning = true;
 
     try {
-      if (!this.canPublishNow()) return;
+      var rateState = this.getPublishRateState();
+      if (!rateState.ready) {
+        this._logPublishSkip(rateState);
+        return;
+      }
 
       // Find a cluster with primary draft in 'ready' status.
       // c.article_count and c.avg_similarity MUST be in the SELECT — the
@@ -1017,32 +1042,101 @@ class Pipeline {
     }
   }
 
-  // ─── RATE LIMIT (same logic as old scheduler) ───────────────────────
+  // ─── RATE LIMIT ───────────────────────────────────────────────────────
+  //
+  // Reads the unified PUBLISH_RATE_COUNT + PUBLISH_RATE_UNIT settings when
+  // both are set; otherwise falls back to the legacy MAX_PUBLISH_PER_HOUR +
+  // PUBLISH_COOLDOWN_MINUTES pair. The gap between consecutive publishes is
+  // derived as windowMs / count, so setting "10 per hour" gives a 6-minute
+  // cadence automatically — no need to keep cooldown in sync manually.
+
+  _resolvedPublishRate() {
+    var unit = _publishRateUnit();
+    var count = _publishRateCount();
+    var windowMs, gapMs, source;
+
+    if (unit && count > 0) {
+      windowMs = _publishWindowMs(unit);
+      gapMs = Math.floor(windowMs / count);
+      source = 'unified';
+    } else {
+      // Legacy path
+      unit = 'hour';
+      count = _maxPublishPerHour();
+      windowMs = 60 * 60 * 1000;
+      gapMs = _publishCooldownMs();
+      source = 'legacy';
+    }
+    return { count: count, unit: unit, windowMs: windowMs, gapMs: gapMs, source: source };
+  }
+
+  getPublishRateState() {
+    var r = this._resolvedPublishRate();
+    var now = Date.now();
+    var cutoff = now - r.windowMs;
+    var recent = (this.publishHistory || []).filter(function (ts) { return ts > cutoff; });
+    var recentCount = recent.length;
+    var nextAtMs = now;
+    var reason = 'ready';
+
+    if (recentCount >= r.count) {
+      // Window cap hit — next publish is when the oldest in-window event rolls off.
+      var oldest = Math.min.apply(null, recent);
+      nextAtMs = oldest + r.windowMs;
+      reason = 'window_cap_' + r.count + '_per_' + r.unit;
+    } else if (recentCount > 0 && r.gapMs > 0) {
+      var last = Math.max.apply(null, recent);
+      var ready = last + r.gapMs;
+      if (ready > now) {
+        nextAtMs = ready;
+        reason = 'cooldown_gap_' + Math.round(r.gapMs / 1000) + 's';
+      }
+    }
+
+    var nextInMs = Math.max(0, nextAtMs - now);
+    return {
+      count: r.count,
+      unit: r.unit,
+      gapMs: r.gapMs,
+      windowMs: r.windowMs,
+      source: r.source,
+      recentCount: recentCount,
+      nextInMs: nextInMs,
+      nextAtIso: new Date(nextAtMs).toISOString(),
+      reason: reason,
+      ready: nextInMs === 0,
+    };
+  }
 
   canPublishNow() {
     try {
-      var now = Date.now();
-      var oneHourAgo = now - 60 * 60 * 1000;
-
-      var maxPerHour = _maxPublishPerHour();
-      var cooldownMs = _publishCooldownMs();
-
-      this.publishHistory = this.publishHistory.filter(function (ts) { return ts > oneHourAgo; });
-
-      if (this.publishHistory.length >= maxPerHour) {
-        return false;
-      }
-
-      if (this.publishHistory.length > 0 && cooldownMs > 0) {
-        var lastPublish = Math.max.apply(null, this.publishHistory);
-        if ((now - lastPublish) < cooldownMs) return false;
-      }
-
-      return true;
+      var state = this.getPublishRateState();
+      // Prune any history older than the largest window we care about so the
+      // array doesn't grow unbounded between windows.
+      var cutoff = Date.now() - Math.max(state.windowMs, 60 * 60 * 1000);
+      this.publishHistory = this.publishHistory.filter(function (ts) { return ts > cutoff; });
+      return state.ready;
     } catch (err) {
       this.logger.error(MODULE, 'canPublishNow error (allowing): ' + err.message);
       return true;
     }
+  }
+
+  // Throttled log when _publishLoop skips on rate limit. Logs at most once per
+  // 120s per reason so the log panel stays legible during a long cooldown.
+  _logPublishSkip(state) {
+    var now = Date.now();
+    if (!this._lastRateLimitLogAt) this._lastRateLimitLogAt = 0;
+    if (!this._lastRateLimitLogReason) this._lastRateLimitLogReason = '';
+    if (now - this._lastRateLimitLogAt < 120000 && state.reason === this._lastRateLimitLogReason) return;
+    this._lastRateLimitLogAt = now;
+    this._lastRateLimitLogReason = state.reason;
+    var secs = Math.ceil(state.nextInMs / 1000);
+    this.logger.info(
+      MODULE,
+      'Publish rate limit: ' + state.count + '/' + state.unit + ' (recent=' + state.recentCount +
+      ', source=' + state.source + ') — next in ' + secs + 's at ' + state.nextAtIso
+    );
   }
 
   // ─── LIFECYCLE ──────────────────────────────────────────────────────
