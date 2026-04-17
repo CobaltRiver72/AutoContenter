@@ -144,6 +144,7 @@ function createApiRouter(deps) {
   var { resolveTaxonomy } = require('../utils/publish-rule-engine');
   var { AiCostGuard } = require('../utils/ai-cost-guard');
   var configUtils = require('../utils/config');
+  var siteScope = require('../middleware/site-scope');
   var aiGuard = new AiCostGuard({
     getLimit: function () {
       var v = parseInt(configUtils.get('MAX_AI_REWRITES_PER_HOUR'), 10);
@@ -153,6 +154,17 @@ function createApiRouter(deps) {
   var { parseId, sanitizeForClient } = require('../utils/api-helpers');
   var { validateAndNormalizeUrl } = require('../utils/draft-helpers');
   var { firehose, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
+
+  // ─── Multi-site: extract req.siteId on every API request ─────────────────
+  router.use(siteScope);
+
+  // Helper: build site_id SQL clause. Returns { clause, params } where
+  // clause is " AND t.site_id = ?" or "" (for All Sites mode, siteId=0).
+  function _siteWhere(siteId, alias) {
+    if (!siteId || siteId === 0) return { clause: '', params: [] };
+    var col = alias ? alias + '.site_id' : 'site_id';
+    return { clause: ' AND ' + col + ' = ?', params: [siteId] };
+  }
 
   // ─── Simple in-memory cache for expensive API responses ────────────────────
   var _apiCache = {};
@@ -627,16 +639,17 @@ function createApiRouter(deps) {
         updateArticle.run(clusterId, id);
       }
 
+      const manualClusterSiteId = req.siteId || 1;
       const insertDraft = db.prepare(`
         INSERT INTO drafts (source_article_id, source_url, source_domain, source_title,
-                            cluster_id, cluster_role, mode, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'manual_import', 'fetching', datetime('now'), datetime('now'))
+                            cluster_id, cluster_role, mode, status, site_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'manual_import', 'fetching', ?, datetime('now'), datetime('now'))
       `);
 
       for (let i = 0; i < articles.length; i++) {
         const a = articles[i];
         const role = (a.id === primaryArticleId) ? 'primary' : 'secondary';
-        insertDraft.run(a.id, a.url, a.domain, a.title, clusterId, role);
+        insertDraft.run(a.id, a.url, a.domain, a.title, clusterId, role, manualClusterSiteId);
       }
 
       return clusterId;
@@ -777,8 +790,15 @@ function createApiRouter(deps) {
       var p = parsePageParam(req, 20);
       var statusFilter = req.query.status || null;
 
-      var whereClause = statusFilter ? 'WHERE status = @status' : '';
+      var clusterSiteSw = _siteWhere(req.siteId);
+      var clusterSiteClause = clusterSiteSw.params.length
+        ? ' AND EXISTS (SELECT 1 FROM drafts WHERE drafts.cluster_id = clusters.id AND drafts.site_id = @site_id)'
+        : '';
+      var whereClause = statusFilter
+        ? 'WHERE status = @status' + clusterSiteClause
+        : (clusterSiteClause ? 'WHERE 1=1' + clusterSiteClause : '');
       var params = statusFilter ? { status: statusFilter } : {};
+      if (clusterSiteSw.params.length) params.site_id = req.siteId;
 
       var countStmt = db.prepare('SELECT COUNT(*) as total FROM clusters ' + whereClause);
       var dataStmt = db.prepare(
@@ -822,11 +842,14 @@ function createApiRouter(deps) {
   router.get('/published', function (req, res) {
     try {
       var p = parsePageParam(req, 20);
-      var countStmt = db.prepare('SELECT COUNT(*) as total FROM published');
+      var pubSw = _siteWhere(req.siteId);
+      var pubWhere = pubSw.params.length ? ' WHERE site_id = @site_id' : '';
+      var pubParams = pubSw.params.length ? { site_id: req.siteId } : null;
+      var countStmt = db.prepare('SELECT COUNT(*) as total FROM published' + pubWhere);
       var dataStmt = db.prepare(
-        'SELECT * FROM published ORDER BY published_at DESC LIMIT @limit OFFSET @offset'
+        'SELECT * FROM published' + pubWhere + ' ORDER BY published_at DESC LIMIT @limit OFFSET @offset'
       );
-      var result = paginate(dataStmt, countStmt, null, p.page, p.perPage);
+      var result = paginate(dataStmt, countStmt, pubParams, p.page, p.perPage);
       res.json(result);
     } catch (err) {
       logger.error('api', 'Failed to fetch published', err.message);
@@ -1536,12 +1559,13 @@ function createApiRouter(deps) {
   // ─── GET /api/wp/taxonomy — return cached taxonomy ────────────────────────
   router.get('/wp/taxonomy', function (req, res) {
     try {
+      var taxSiteId = req.siteId || 1;
       return res.json({
         success: true,
-        categories: getCachedTaxonomy(db, 'category'),
-        tags:       getCachedTaxonomy(db, 'tag'),
-        authors:    getCachedTaxonomy(db, 'author'),
-        synced_at:  getLastSyncedAt(db),
+        categories: getCachedTaxonomy(db, 'category', taxSiteId),
+        tags:       getCachedTaxonomy(db, 'tag', taxSiteId),
+        authors:    getCachedTaxonomy(db, 'author', taxSiteId),
+        synced_at:  getLastSyncedAt(db, taxSiteId),
       });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
@@ -1552,7 +1576,7 @@ function createApiRouter(deps) {
   router.post('/wp/taxonomy/sync', async function (req, res) {
     try {
       var config = getConfig();
-      var result = await syncTaxonomyFromWP(db, config);
+      var result = await syncTaxonomyFromWP(db, config, req.siteId || 1);
       logger.info('api', 'WP taxonomy synced: ' + result.categories + ' categories, ' + result.tags + ' tags, ' + result.authors + ' authors');
       return res.json({ success: true, ...result });
     } catch (err) {
@@ -1564,7 +1588,9 @@ function createApiRouter(deps) {
   // ─── GET /api/publish-rules ───────────────────────────────────────────────
   router.get('/publish-rules', function (req, res) {
     try {
-      var rules = db.prepare('SELECT * FROM publish_rules ORDER BY priority DESC, id ASC').all();
+      var rulesSw = _siteWhere(req.siteId);
+      var rulesStmt = db.prepare('SELECT * FROM publish_rules' + (rulesSw.params.length ? ' WHERE site_id = ?' : '') + ' ORDER BY priority DESC, id ASC');
+      var rules = rulesSw.params.length ? rulesStmt.all(req.siteId) : rulesStmt.all();
       return res.json({ success: true, rules: rules });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
@@ -1584,8 +1610,8 @@ function createApiRouter(deps) {
       });
       var stmt = db.prepare(
         'INSERT INTO publish_rules (rule_name, priority, match_source_domain, match_source_category, ' +
-        'match_title_keyword, wp_category_ids, wp_primary_cat_id, wp_tag_ids, wp_author_id, is_active) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'match_title_keyword, wp_category_ids, wp_primary_cat_id, wp_tag_ids, wp_author_id, is_active, site_id) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       var result = stmt.run(
         String(b.rule_name).trim(), Number(b.priority) || 0,
@@ -1593,7 +1619,8 @@ function createApiRouter(deps) {
         b.match_title_keyword || null,
         b.wp_category_ids || null, b.wp_primary_cat_id ? Number(b.wp_primary_cat_id) : null,
         b.wp_tag_ids || null, b.wp_author_id ? Number(b.wp_author_id) : null,
-        b.is_active !== undefined ? (b.is_active ? 1 : 0) : 1
+        b.is_active !== undefined ? (b.is_active ? 1 : 0) : 1,
+        req.siteId || 1
       );
       return res.json({ success: true, id: result.lastInsertRowid });
     } catch (err) {
@@ -1607,12 +1634,13 @@ function createApiRouter(deps) {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid rule id' });
       var b = req.body || {};
-      var existing = db.prepare('SELECT id FROM publish_rules WHERE id = ?').get(id);
+      var putRuleSiteId = req.siteId || 1;
+      var existing = db.prepare('SELECT id FROM publish_rules WHERE id = ? AND site_id = ?').get(id, putRuleSiteId);
       if (!existing) return res.status(404).json({ success: false, error: 'Rule not found' });
       db.prepare(
         'UPDATE publish_rules SET rule_name=?, priority=?, match_source_domain=?, match_source_category=?, ' +
         'match_title_keyword=?, wp_category_ids=?, wp_primary_cat_id=?, wp_tag_ids=?, wp_author_id=?, ' +
-        'is_active=?, updated_at=datetime(\'now\') WHERE id=?'
+        'is_active=?, updated_at=datetime(\'now\') WHERE id=? AND site_id=?'
       ).run(
         String(b.rule_name || '').trim() || 'Rule ' + id, Number(b.priority) || 0,
         b.match_source_domain || null, b.match_source_category || null,
@@ -1620,7 +1648,7 @@ function createApiRouter(deps) {
         b.wp_category_ids || null, b.wp_primary_cat_id ? Number(b.wp_primary_cat_id) : null,
         b.wp_tag_ids || null, b.wp_author_id ? Number(b.wp_author_id) : null,
         b.is_active !== undefined ? (b.is_active ? 1 : 0) : 1,
-        id
+        id, putRuleSiteId
       );
       return res.json({ success: true });
     } catch (err) {
@@ -1633,7 +1661,8 @@ function createApiRouter(deps) {
     try {
       var id = parseId(req.params.id);
       if (!id) return res.status(400).json({ success: false, error: 'Invalid rule id' });
-      db.prepare('DELETE FROM publish_rules WHERE id = ?').run(id);
+      var delRuleSiteId = req.siteId || 1;
+      db.prepare('DELETE FROM publish_rules WHERE id = ? AND site_id = ?').run(id, delRuleSiteId);
       return res.json({ success: true });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
@@ -2002,13 +2031,14 @@ function createApiRouter(deps) {
       var primaryArticle = articles[0]; // Already sorted by authority_tier ASC
 
       // Create drafts in a transaction for atomicity
+      var clusterPublishSiteId = req.siteId || 1;
       var insertDraft = db.prepare(
         "INSERT OR IGNORE INTO drafts (" +
         "  source_article_id, source_url, source_domain, source_title," +
         "  source_content_markdown, source_language, source_category," +
         "  source_publish_time, target_platform, status, mode," +
-        "  cluster_id, cluster_role, extraction_status" +
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "  cluster_id, cluster_role, extraction_status, site_id" +
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
 
       var draftsCreated = 0;
@@ -2034,7 +2064,8 @@ function createApiRouter(deps) {
             'auto',
             clusterId,
             role,
-            'pending'
+            'pending',
+            clusterPublishSiteId
           );
 
           if (result.changes > 0) {
@@ -2724,8 +2755,9 @@ function createApiRouter(deps) {
         return res.status(400).json({ success: false, error: 'Invalid URL' });
       }
 
-      // Check for duplicate
-      var existing = db.prepare('SELECT id FROM drafts WHERE source_url = ?').get(v.url);
+      // Check for duplicate (scoped to current site)
+      var draftSiteId = req.siteId || 1;
+      var existing = db.prepare('SELECT id FROM drafts WHERE source_url = ? AND site_id = ?').get(v.url, draftSiteId);
       if (existing) {
         return res.json({ success: true, draft_id: existing.id, message: 'Draft already exists' });
       }
@@ -2734,8 +2766,8 @@ function createApiRouter(deps) {
       var draftPlatform = (draftConfig.WP_URL && draftConfig.WP_USERNAME && draftConfig.WP_APP_PASSWORD) ? 'wordpress' : 'blogspot';
 
       var result = db.prepare(
-        "INSERT INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual')"
+        "INSERT INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode, site_id) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual', ?)"
       ).run(
         body.article_id || null,
         v.url,
@@ -2745,7 +2777,8 @@ function createApiRouter(deps) {
         body.language || null,
         body.page_category || null,
         body.publish_time || null,
-        draftPlatform
+        draftPlatform,
+        draftSiteId
       );
 
       var draftId = result.lastInsertRowid;
@@ -2777,11 +2810,12 @@ function createApiRouter(deps) {
       var draftConfig = getConfig();
       var draftPlatform = (draftConfig.WP_URL && draftConfig.WP_USERNAME && draftConfig.WP_APP_PASSWORD) ? 'wordpress' : 'blogspot';
 
+      var bulkSiteId = req.siteId || 1;
       var insertStmt = db.prepare(
-        "INSERT OR IGNORE INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual')"
+        "INSERT OR IGNORE INTO drafts (source_article_id, source_url, source_domain, source_title, source_content_markdown, source_language, source_category, source_publish_time, target_platform, status, mode, site_id) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fetching', 'manual', ?)"
       );
-      var checkDup = db.prepare('SELECT id FROM drafts WHERE source_url = ?');
+      var checkDup = db.prepare('SELECT id FROM drafts WHERE source_url = ? AND site_id = ?');
 
       var created = 0;
       var skipped = 0;
@@ -2798,8 +2832,8 @@ function createApiRouter(deps) {
         var bv = validateAndNormalizeUrl(a.url);
         if (!bv) { invalid++; continue; }
 
-        // Skip known duplicates (fast path)
-        var existingDraft = checkDup.get(bv.url);
+        // Skip known duplicates (fast path, scoped to current site)
+        var existingDraft = checkDup.get(bv.url, bulkSiteId);
         if (existingDraft) {
           skipped++;
           urlMap[bv.url] = existingDraft.id;
@@ -2816,7 +2850,8 @@ function createApiRouter(deps) {
             a.language || null,
             a.page_category || null,
             a.publish_time || null,
-            draftPlatform
+            draftPlatform,
+            bulkSiteId
           );
           createdIds.push(result.lastInsertRowid);
           urlMap[bv.url] = result.lastInsertRowid;
@@ -2856,11 +2891,13 @@ function createApiRouter(deps) {
   // the full list when the digest hash actually changes.
   router.get('/drafts/status-digest', function (req, res) {
     try {
-      var rows = db.prepare(
+      var digestSw = _siteWhere(req.siteId);
+      var digestStmt = db.prepare(
         "SELECT id, status, updated_at FROM drafts " +
-        "WHERE cluster_role = 'primary' OR cluster_role IS NULL " +
-        "ORDER BY id DESC"
-      ).all();
+        "WHERE (cluster_role = 'primary' OR cluster_role IS NULL)" + digestSw.clause +
+        " ORDER BY id DESC"
+      );
+      var rows = digestSw.params.length ? digestStmt.all(req.siteId) : digestStmt.all();
       var hasActive = false;
       for (var i = 0; i < rows.length; i++) {
         var s = rows[i].status;
@@ -2923,6 +2960,7 @@ function createApiRouter(deps) {
       var conditions = [];
       var params = [];
 
+      if (req.siteId) { conditions.push('site_id = ?'); params.push(req.siteId); }
       if (status) { conditions.push('status = ?'); params.push(status); }
       if (mode) { conditions.push('mode = ?'); params.push(mode); }
       if (clusterId) { conditions.push('cluster_id = ?'); params.push(clusterId); }
@@ -2945,7 +2983,9 @@ function createApiRouter(deps) {
 
         // Full-table counts for tab badges — always reflects DB reality,
         // independent of current page size or page number.
-        var countsRow = db.prepare(
+        var cntSw = _siteWhere(req.siteId);
+        var cntWhere = cntSw.params.length ? ' WHERE site_id = ?' : '';
+        var cntStmt = db.prepare(
           "SELECT" +
           "  COUNT(*) AS all_count," +
           "  SUM(CASE WHEN status='fetching'  THEN 1 ELSE 0 END) AS fetching," +
@@ -2957,8 +2997,9 @@ function createApiRouter(deps) {
           "  SUM(CASE WHEN cluster_id IS NOT NULL THEN 1 ELSE 0 END) AS cluster," +
           "  SUM(CASE WHEN mode='manual_import' THEN 1 ELSE 0 END) AS imported," +
           "  SUM(CASE WHEN cluster_id IS NULL AND (mode IS NULL OR mode!='manual_import') THEN 1 ELSE 0 END) AS manual" +
-          " FROM drafts"
-        ).get();
+          " FROM drafts" + cntWhere
+        );
+        var countsRow = cntSw.params.length ? cntStmt.get(req.siteId) : cntStmt.get();
 
         return res.json({
           success: true,
@@ -2996,7 +3037,9 @@ function createApiRouter(deps) {
   //
   router.get('/drafts/stats', function (req, res) {
     try {
-      var stats = db.prepare(
+      var statsSw = _siteWhere(req.siteId);
+      var statsWhere = statsSw.params.length ? ' WHERE site_id = ?' : '';
+      var statsStmt = db.prepare(
         "SELECT " +
         "  COUNT(*) as total, " +
         "  SUM(CASE WHEN extraction_status = 'pending' THEN 1 ELSE 0 END) as pending, " +
@@ -3005,8 +3048,9 @@ function createApiRouter(deps) {
         "  SUM(CASE WHEN status = 'fetching' AND locked_by IS NOT NULL THEN 1 ELSE 0 END) as in_progress, " +
         "  SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) as published, " +
         "  SUM(CASE WHEN status = 'rewriting' THEN 1 ELSE 0 END) as rewriting " +
-        "FROM drafts"
-      ).get();
+        "FROM drafts" + statsWhere
+      );
+      var stats = statsSw.params.length ? statsStmt.get(req.siteId) : statsStmt.get();
 
       res.json({ success: true, stats: stats });
     } catch (err) {
@@ -3019,7 +3063,8 @@ function createApiRouter(deps) {
   router.get('/drafts/ready', function (req, res) {
     try {
       var pp = parsePageParam(req, 20);
-      var rows = db.prepare(
+      var readySw = _siteWhere(req.siteId, 'd');
+      var readyStmt = db.prepare(
         "SELECT d.id, d.source_url, d.source_domain, d.rewritten_title, d.rewritten_word_count, " +
         "  d.ai_model_used, d.target_keyword, d.updated_at, d.mode, d.cluster_id, " +
         "  c.topic, c.article_count, c.trends_boosted " +
@@ -3028,16 +3073,18 @@ function createApiRouter(deps) {
         "WHERE d.status = 'ready' " +
         "  AND d.cluster_role = 'primary' " +
         "  AND d.rewritten_html IS NOT NULL " +
-        "  AND LENGTH(d.rewritten_html) > 100 " +
-        "ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
+        "  AND LENGTH(d.rewritten_html) > 100" + readySw.clause +
+        " ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
         "LIMIT ? OFFSET ?"
-      ).all(pp.perPage, (pp.page - 1) * pp.perPage);
+      );
+      var rows = readyStmt.all.apply(readyStmt, readySw.params.concat([pp.perPage, (pp.page - 1) * pp.perPage]));
 
-      var total = db.prepare(
+      var readyCntStmt = db.prepare(
         "SELECT COUNT(*) as count FROM drafts d " +
         "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
-        "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100"
-      ).get().count || 0;
+        "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100" + readySw.clause
+      );
+      var total = readyCntStmt.get.apply(readyCntStmt, readySw.params).count || 0;
 
       res.json({ success: true, data: rows, total: total, page: pp.page, perPage: pp.perPage });
     } catch (err) {
@@ -3051,17 +3098,19 @@ function createApiRouter(deps) {
   router.get('/drafts/failed', function (req, res) {
     try {
       var pp = parsePageParam(req, 20);
-      var rows = db.prepare(
+      var failedSw = _siteWhere(req.siteId, 'd');
+      var failedStmt = db.prepare(
         "SELECT d.id, d.source_url, d.source_domain, d.rewritten_title, d.rewritten_word_count, " +
         "  d.ai_model_used, d.error_message, d.retry_count, d.updated_at, d.mode, d.cluster_id, " +
         "  d.rewritten_html, " +
         "  c.topic, c.article_count " +
         "FROM drafts d " +
         "LEFT JOIN clusters c ON d.cluster_id = c.id " +
-        "WHERE d.status = 'failed' " +
-        "ORDER BY d.updated_at DESC " +
+        "WHERE d.status = 'failed'" + failedSw.clause +
+        " ORDER BY d.updated_at DESC " +
         "LIMIT ? OFFSET ?"
-      ).all(pp.perPage, (pp.page - 1) * pp.perPage);
+      );
+      var rows = failedStmt.all.apply(failedStmt, failedSw.params.concat([pp.perPage, (pp.page - 1) * pp.perPage]));
 
       // Strip large html field — only need presence flag
       var mapped = rows.map(function (r) {
@@ -3083,7 +3132,8 @@ function createApiRouter(deps) {
         };
       });
 
-      var total = db.prepare("SELECT COUNT(*) as count FROM drafts WHERE status = 'failed'").get().count || 0;
+      var failedCntStmt = db.prepare("SELECT COUNT(*) as count FROM drafts WHERE status = 'failed'" + failedSw.clause);
+      var total = failedCntStmt.get.apply(failedCntStmt, failedSw.params).count || 0;
       res.json({ success: true, data: mapped, total: total, page: pp.page, perPage: pp.perPage });
     } catch (err) {
       logger.error('api', 'GET /api/drafts/failed: ' + err.message);
@@ -3820,11 +3870,12 @@ function createApiRouter(deps) {
         return res.status(400).json({ success: false, error: 'No valid URLs found', invalid: invalidUrls });
       }
 
-      // Insert drafts (skip duplicates — UNIQUE constraint on source_url will throw)
+      // Insert drafts (skip duplicates — UNIQUE constraint on source_url,site_id will throw)
+      var importSiteId = req.siteId || 1;
       var insertStmt = db.prepare(
         "INSERT INTO drafts (source_url, source_domain, source_title, source_content_markdown, " +
-        "mode, status, extraction_status, created_at, updated_at) " +
-        "VALUES (?, ?, ?, ?, 'manual_import', 'fetching', 'pending', datetime('now'), datetime('now'))"
+        "mode, status, extraction_status, site_id, created_at, updated_at) " +
+        "VALUES (?, ?, ?, ?, 'manual_import', 'fetching', 'pending', ?, datetime('now'), datetime('now'))"
       );
 
       var imported = [];
@@ -3834,7 +3885,7 @@ function createApiRouter(deps) {
         var v = validUrls[j];
         try {
           var placeholderTitle = 'Manual Import: ' + v.domain;
-          var info = insertStmt.run(v.url, v.domain, placeholderTitle, '');
+          var info = insertStmt.run(v.url, v.domain, placeholderTitle, '', importSiteId);
           imported.push({ id: info.lastInsertRowid, url: v.url, domain: v.domain });
         } catch (dbErr) {
           // Most likely UNIQUE constraint violation (URL already exists)
@@ -5629,7 +5680,7 @@ function createApiRouter(deps) {
       var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
       var limit = parseInt(req.query.limit, 10) || 100;
       if (!ap) return res.json({ ok: true, data: [] });
-      res.json({ ok: true, data: ap.getRecentDecisions(limit) });
+      res.json({ ok: true, data: ap.getRecentDecisions(limit, req.siteId) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -5641,10 +5692,12 @@ function createApiRouter(deps) {
       var db = req.app.locals.db;
       var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
 
-      // Queue depth snapshot
+      // Queue depth snapshot (scoped to current site)
+      var simSw = _siteWhere(req.siteId);
       var queueStats = {};
       ['ready','rewriting','draft','failed','published'].forEach(function (s) {
-        queueStats[s] = (db.prepare('SELECT COUNT(*) as n FROM drafts WHERE status = ?').get(s) || {}).n || 0;
+        var qStmt = db.prepare('SELECT COUNT(*) as n FROM drafts WHERE status = ?' + simSw.clause);
+        queueStats[s] = (qStmt.get.apply(qStmt, [s].concat(simSw.params)) || {}).n || 0;
       });
 
       if (!ap) {
@@ -5652,14 +5705,15 @@ function createApiRouter(deps) {
           message: 'Autopilot module not loaded' } });
       }
 
-      // Find next ready primary draft
-      var nextDraft = db.prepare(
+      // Find next ready primary draft (scoped to current site)
+      var nextDraftStmt = db.prepare(
         "SELECT d.*, c.avg_similarity, c.article_count FROM drafts d " +
         "JOIN clusters c ON c.id = d.cluster_id " +
         "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
-        "AND c.status NOT IN ('published','skipped') " +
-        "ORDER BY d.updated_at ASC LIMIT 1"
-      ).get();
+        "AND c.status NOT IN ('published','skipped')" + simSw.clause +
+        " ORDER BY d.updated_at ASC LIMIT 1"
+      );
+      var nextDraft = nextDraftStmt.get.apply(nextDraftStmt, simSw.params);
 
       if (!nextDraft) {
         return res.json({ ok: true, data: { queue: queueStats, result: null,
@@ -6039,18 +6093,21 @@ function createApiRouter(deps) {
     try {
       var db = req.app.locals.db;
       var pp = parsePageParam(req, 20);
-      var total = (db.prepare(
-        "SELECT COUNT(*) AS cnt FROM drafts WHERE status = 'ready' AND cluster_role = 'primary'"
-      ).get() || {}).cnt || 0;
-      var rows = db.prepare(
+      var queueSw = _siteWhere(req.siteId, 'd');
+      var totalStmt = db.prepare(
+        "SELECT COUNT(*) AS cnt FROM drafts d WHERE d.status = 'ready' AND d.cluster_role = 'primary'" + queueSw.clause
+      );
+      var total = (totalStmt.get.apply(totalStmt, queueSw.params) || {}).cnt || 0;
+      var queueStmt = db.prepare(
         "SELECT d.id, d.cluster_id, d.rewritten_title, d.source_domain, d.rewritten_word_count, " +
         "d.ai_model_used, d.source_language AS language, d.wp_category_ids, d.wp_primary_cat_id, d.wp_author_id_override, " +
         "d.updated_at, c.avg_similarity, c.article_count, c.trends_boosted " +
         "FROM drafts d LEFT JOIN clusters c ON d.cluster_id = c.id " +
-        "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
-        "ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
+        "WHERE d.status = 'ready' AND d.cluster_role = 'primary'" + queueSw.clause +
+        " ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
         "LIMIT ? OFFSET ?"
-      ).all(pp.perPage, (pp.page - 1) * pp.perPage);
+      );
+      var rows = queueStmt.all.apply(queueStmt, queueSw.params.concat([pp.perPage, (pp.page - 1) * pp.perPage]));
       // Runtime language detection when source_language is NULL (existing rows
       // back-filled by DB migration; this handles any that still slip through).
       var HINDI_RE = /[\u0900-\u097F]{3,}/;
@@ -6191,7 +6248,8 @@ function createApiRouter(deps) {
       var draft = db.prepare(
         'SELECT id, source_url, source_domain, source_title, source_category, source_language, ' +
         '  extracted_title, extracted_content, rewritten_title, rewritten_html, ' +
-        '  wp_category_ids, wp_primary_cat_id, wp_tag_ids, wp_author_id_override, wp_post_status_override ' +
+        '  wp_category_ids, wp_primary_cat_id, wp_tag_ids, wp_author_id_override, wp_post_status_override, ' +
+        '  site_id ' +
         'FROM drafts WHERE id = ?'
       ).get(draftId);
       if (!draft) return res.status(404).json({ ok: false, error: 'Draft not found' });
@@ -6230,16 +6288,17 @@ function createApiRouter(deps) {
       var authMap = classifier.getAuthorWpIdMap();
       var tagMap = classifier.getTagWpIdMap();
 
-      // Reverse maps so we can turn a WP ID back into a display name
+      // Reverse maps so we can turn a WP ID back into a display name (scoped to draft's site)
+      var recommendSiteId = draft.site_id || 1;
       var catById = {};
       var authById = {};
       var tagById = {};
       try {
-        var catRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'category'").all();
+        var catRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'category' AND site_id = ?").all(recommendSiteId);
         for (var ci = 0; ci < catRows.length; ci++) catById[catRows[ci].wp_id] = catRows[ci];
-        var authRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'author'").all();
+        var authRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'author' AND site_id = ?").all(recommendSiteId);
         for (var ai = 0; ai < authRows.length; ai++) authById[authRows[ai].wp_id] = authRows[ai];
-        var tagRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'tag'").all();
+        var tagRows = db.prepare("SELECT wp_id, name, slug FROM wp_taxonomy_cache WHERE tax_type = 'tag' AND site_id = ?").all(recommendSiteId);
         for (var ti = 0; ti < tagRows.length; ti++) tagById[tagRows[ti].wp_id] = tagRows[ti];
       } catch (e) { /* tolerate */ }
 
@@ -6609,7 +6668,7 @@ function createApiRouter(deps) {
       var classifier = req.app.locals.modules.classifier;
       if (!classifier) return res.json({ ok: false, error: 'Classifier not loaded' });
       var limit = Math.min(parseInt(req.query.limit) || 50, 200);
-      res.json({ ok: true, data: classifier.getRecentClassifications(limit) });
+      res.json({ ok: true, data: classifier.getRecentClassifications(limit, req.siteId) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

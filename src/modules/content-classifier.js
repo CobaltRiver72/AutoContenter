@@ -571,7 +571,12 @@ class ContentClassifier {
     }
   }
 
-  getRecentClassifications(limit) {
+  getRecentClassifications(limit, siteId) {
+    if (siteId && siteId !== 0) {
+      return this.db.prepare(
+        'SELECT * FROM classification_log WHERE site_id = ? ORDER BY created_at DESC LIMIT ?'
+      ).all(siteId, limit || 50);
+    }
     return this.db.prepare(
       'SELECT * FROM classification_log ORDER BY created_at DESC LIMIT ?'
     ).all(limit || 50);

@@ -288,9 +288,15 @@ class AutopilotEngine {
     }
   }
 
-  getRecentDecisions(limit) {
+  getRecentDecisions(limit, siteId) {
     var n = parseInt(limit, 10) || 100;
     try {
+      if (siteId && siteId !== 0) {
+        return this.db.prepare(
+          "SELECT id, cluster_id, draft_title, approved, reason, created_at FROM autopilot_decisions " +
+          "WHERE site_id = ? ORDER BY created_at DESC LIMIT ?"
+        ).all(siteId, n);
+      }
       return this.db.prepare(
         "SELECT id, cluster_id, draft_title, approved, reason, created_at FROM autopilot_decisions " +
         "ORDER BY created_at DESC LIMIT ?"

@@ -37,6 +37,8 @@
 
   var state = {
     currentPage: 'overview',
+    activeSiteId: 1,
+    sites: [],
     sseConnection: null,
     ssePaused: false,
     feedArticles: [],
@@ -471,6 +473,8 @@
     options = options || {};
     options.credentials = 'same-origin';
     if (!options.headers) options.headers = {};
+    // Inject active site scope so every API call is scoped server-side
+    options.headers['X-Site-Id'] = String(state.activeSiteId || 1);
 
     var method = (options.method || 'GET').toUpperCase();
     var isGet = method === 'GET';
@@ -8203,6 +8207,54 @@
     });
   }
 
+  // ─── Site Switcher ──────────────────────────────────────────────────────
+
+  function loadSites() {
+    fetchApi('/api/sites', { bypassCache: true }).then(function (data) {
+      var sites = (data && data.sites) || [];
+      state.sites = sites;
+      var sel = document.getElementById('site-selector');
+      if (!sel) return;
+      sel.innerHTML = '<option value="0">All Sites</option>';
+      for (var i = 0; i < sites.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = String(sites[i].id);
+        opt.textContent = sites[i].name;
+        if (sites[i].color) opt.setAttribute('data-color', sites[i].color);
+        sel.appendChild(opt);
+      }
+      sel.value = String(state.activeSiteId);
+      // If the saved value isn't in the list, default to first real site
+      if (!sel.value || sel.selectedIndex < 0) {
+        sel.value = sites.length ? String(sites[0].id) : '1';
+        state.activeSiteId = parseInt(sel.value, 10) || 1;
+      }
+    }).catch(function (err) {
+      console.warn('[sites] Failed to load sites:', err.message);
+    });
+  }
+
+  function switchSite(siteId) {
+    if (siteId === state.activeSiteId) return;
+    state.activeSiteId = siteId;
+    // Persist in session server-side (fire-and-forget)
+    fetchApi('/api/sites/switch', { method: 'POST', body: { site_id: siteId } }).catch(function () {});
+    // Flush all cached API responses — they were for the previous site
+    _apiCache.clear();
+    // Reload the current page with the new site scope
+    navigateTo(state.currentPage);
+  }
+
+  function initSiteSwitcher() {
+    loadSites();
+    var sel = document.getElementById('site-selector');
+    if (!sel) return;
+    sel.addEventListener('change', function () {
+      var siteId = parseInt(this.value, 10) || 0;
+      switchSite(siteId);
+    });
+  }
+
   function init() {
     bindDelegatedEvents();
     initSidebar();
@@ -8212,6 +8264,7 @@
     initInfraDebugPanel();
     initManualImport();
     initThemeToggle();
+    initSiteSwitcher();
     _refreshIcons();
     // Pre-fetch OpenRouter models so the editor's model picker works even
     // before the user visits the Settings page. Cached server-side for 1h.
