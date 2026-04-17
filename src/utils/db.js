@@ -930,6 +930,25 @@ function runMigrations() {
       }
     })();
 
+    // ─── Back-fill source_language in drafts from articles table ─────────────
+    // Firehose buffer stores language in articles.language but enqueue() was
+    // not copying it to drafts.source_language. This one-time UPDATE repairs
+    // all existing rows. Safe to run on every boot — WHERE source_language IS
+    // NULL means already-filled rows are never touched again.
+    try {
+      var backfillResult = db.prepare(
+        "UPDATE drafts " +
+        "SET source_language = (SELECT a.language FROM articles a WHERE a.id = drafts.source_article_id AND a.language IS NOT NULL) " +
+        "WHERE source_language IS NULL AND source_article_id IS NOT NULL"
+      ).run();
+      if (backfillResult.changes > 0) {
+        console.log('[db] Back-filled source_language for ' + backfillResult.changes + ' drafts from articles table');
+      }
+    } catch (bfErr) {
+      console.warn('[db] source_language back-fill skipped: ' + bfErr.message);
+    }
+    // ─── End back-fill ────────────────────────────────────────────────────────
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);

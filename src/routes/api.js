@@ -6051,6 +6051,15 @@ function createApiRouter(deps) {
         "ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
         "LIMIT ? OFFSET ?"
       ).all(pp.perPage, (pp.page - 1) * pp.perPage);
+      // Runtime language detection when source_language is NULL (existing rows
+      // back-filled by DB migration; this handles any that still slip through).
+      var HINDI_RE = /[\u0900-\u097F]{3,}/;
+      rows = rows.map(function (r) {
+        if (!r.language) {
+          r.language = HINDI_RE.test(r.rewritten_title || '') ? 'hi' : 'en';
+        }
+        return r;
+      });
       res.json({ ok: true, data: rows, total: total, page: pp.page, perPage: pp.perPage });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
