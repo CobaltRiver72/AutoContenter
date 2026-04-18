@@ -29,6 +29,9 @@
         <a href="#overview" class="nav-link active" data-page="overview">
           <svg data-lucide="layout-dashboard" class="icon"></svg> Overview
         </a>
+        <a href="#feeds" class="nav-link" data-page="feeds">
+          <svg data-lucide="list-plus" class="icon"></svg> Feeds
+        </a>
         <a href="#feed" class="nav-link" data-page="feed">
           <svg data-lucide="rss" class="icon"></svg> Live Feed
         </a>
@@ -37,9 +40,6 @@
         </a>
         <a href="#clusters" class="nav-link" data-page="clusters">
           <svg data-lucide="git-branch" class="icon"></svg> Clusters
-        </a>
-        <a href="#autopilot" class="nav-link" data-page="autopilot">
-          <svg data-lucide="rocket" class="icon"></svg> Autopilot
         </a>
       </div>
 
@@ -54,9 +54,6 @@
         </a>
         <a href="#sources" class="nav-link" data-page="sources">
           <svg data-lucide="radio" class="icon"></svg> Sources
-        </a>
-        <a href="#rules" class="nav-link" data-page="rules">
-          <svg data-lucide="filter" class="icon"></svg> Firehose Rules
         </a>
       </div>
 
@@ -86,6 +83,22 @@
         </a>
         <a href="#logs" class="nav-link" data-page="logs">
           <svg data-lucide="scroll-text" class="icon"></svg> Logs
+        </a>
+      </div>
+
+      <!--
+        Legacy nav section: Autopilot + Firehose Rules are superseded by the
+        Feeds page. Kept reachable during Phase 1 coexistence so admins still
+        see existing rules while they migrate. Scheduled for removal once all
+        sites are migrated to Feeds.
+      -->
+      <div class="nav-section">
+        <span class="nav-section-label" style="opacity:.7">Legacy (being phased out)</span>
+        <a href="#autopilot" class="nav-link" data-page="autopilot" style="opacity:.7" title="Superseded by Feeds">
+          <svg data-lucide="rocket" class="icon"></svg> Autopilot
+        </a>
+        <a href="#rules" class="nav-link" data-page="rules" style="opacity:.7" title="Superseded by Feeds">
+          <svg data-lucide="filter" class="icon"></svg> Firehose Rules
         </a>
       </div>
 
@@ -1727,6 +1740,9 @@
 
       <!-- Sites Management -->
       <section class="page hidden" id="page-sites"></section>
+
+      <!-- Feeds (list + detail — JS-rendered) -->
+      <section class="page hidden" id="page-feeds"></section>
 
     </main>
   </div>

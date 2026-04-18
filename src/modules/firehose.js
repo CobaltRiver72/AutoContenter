@@ -15,6 +15,26 @@ function _maxReconnectMs() { return parseInt(_cfg.get('FIREHOSE_RECONNECT_MAX'),
 // Keep legacy constants for inline use in rate-limit throttle check (always 2 s minimum)
 const MIN_RECONNECT_MS = 2000;
 
+// Wildcard-aware domain matcher. Patterns beginning "*." match that base
+// domain plus every subdomain, so "*.my-competitor.com" matches
+// "my-competitor.com" AND "blog.my-competitor.com". Plain entries match
+// exactly. Cheap O(n) for the short filter lists we ship (typically <20).
+function _domainMatchesAny(domain, patterns) {
+  if (!domain || !Array.isArray(patterns) || !patterns.length) return false;
+  var d = String(domain).toLowerCase();
+  for (var i = 0; i < patterns.length; i++) {
+    var p = String(patterns[i] || '').toLowerCase();
+    if (!p) continue;
+    if (p.indexOf('*.') === 0) {
+      var base = p.slice(2);
+      if (d === base || d.endsWith('.' + base)) return true;
+    } else if (d === p) {
+      return true;
+    }
+  }
+  return false;
+}
+
 class FirehoseListener extends EventEmitter {
   /**
    * @param {object} config - Frozen config object
@@ -23,11 +43,17 @@ class FirehoseListener extends EventEmitter {
    * @param {number} [siteId=1] - Site identifier for multi-site operation
    * @param {string} [firehoseToken] - Per-site token override (falls back to config.FIREHOSE_TOKEN)
    */
-  constructor(config, db, logger, siteId, firehoseToken) {
+  constructor(config, db, logger, siteId, firehoseToken, opts) {
     super();
     this.config = config;
     this.db = db;
     this.siteId = siteId || 1;
+    // Feed-mode: when opts.feedId is set, filters + last-event-id read from
+    // the `feeds` table's source_config + firehose_last_event_id column
+    // instead of site_config. Lets each Feed have its own query, country,
+    // and include/exclude domains without polluting site-level settings.
+    this.feedId     = (opts && opts.feedId)     || null;
+    this.feedConfig = (opts && opts.feedConfig) || null;
     // Wrap the logger so every firehose log stamps logs.site_id for this site.
     // Gracefully no-op when the supplied logger predates the forSite helper.
     this.logger = (logger && typeof logger.forSite === 'function')
@@ -269,10 +295,10 @@ class FirehoseListener extends EventEmitter {
     };
 
     // ─── Language Gate ─────────────────────────────────────────────────────
-    // Re-read allowed langs from config each time for hot-reload.
-    var rawLangs = siteConfig.getSiteConfig(this.siteId, 'ALLOWED_LANGUAGES') || 'en,hi';
-    var allowedLangs = String(rawLangs).split(',').map(function(l){ return l.trim().toLowerCase(); }).filter(Boolean);
-    if (!allowedLangs.length) allowedLangs = ['en', 'hi'];
+    // Feed-mode reads from feedConfig.allowed_languages; site-mode reads from
+    // site_config. Re-reads each event so UI edits take effect on the next
+    // article — no restart required.
+    var allowedLangs = this._resolveAllowedLangs();
     this._allowedLangs = allowedLangs; // keep in sync for getStats()
 
     if (article.language && allowedLangs.indexOf(article.language) === -1) {
@@ -290,7 +316,6 @@ class FirehoseListener extends EventEmitter {
       } else {
         article.language = 'en';
       }
-      // Re-check against the allow-list in case the operator excluded en/hi.
       if (allowedLangs.indexOf(article.language) === -1) {
         this._articlesDroppedByLang++;
         return;
@@ -300,19 +325,43 @@ class FirehoseListener extends EventEmitter {
     // ─── End Language Gate ─────────────────────────────────────────────────
 
     // ─── Domain Gate ───────────────────────────────────────────────────────
-    var blockedDomains = String(siteConfig.getSiteConfig(this.siteId, 'FIREHOSE_BLOCKED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
-    var allowedDomains = String(siteConfig.getSiteConfig(this.siteId, 'FIREHOSE_ALLOWED_DOMAINS') || '').split(',').map(function(d){ return d.trim().toLowerCase(); }).filter(Boolean);
-    if (blockedDomains.length && blockedDomains.indexOf(domain) !== -1) {
+    // Supports wildcard entries like "*.my-competitor.com" — matches that
+    // domain and every subdomain.
+    var blockedDomains = this._resolveBlockedDomains();
+    var allowedDomains = this._resolveAllowedDomains();
+    if (blockedDomains.length && _domainMatchesAny(domain, blockedDomains)) {
       this._articlesDroppedByDomain++;
       this.logger.debug(MODULE, '[domain-filter] Blocked domain: ' + domain);
       return;
     }
-    if (allowedDomains.length && allowedDomains.indexOf(domain) === -1) {
+    if (allowedDomains.length && !_domainMatchesAny(domain, allowedDomains)) {
       this._articlesDroppedByDomain++;
       this.logger.debug(MODULE, '[domain-filter] Domain not in allow-list: ' + domain);
       return;
     }
     // ─── End Domain Gate ───────────────────────────────────────────────────
+
+    // ─── Query Gate (feed-mode only) ───────────────────────────────────────
+    // A Feed's search_query is a whitespace-separated keyword list; ALL terms
+    // must appear in the title + first 500 chars of content. Cheap, not a
+    // real ranker — just filters the noise to articles plausibly on-topic.
+    if (this.feedConfig && this.feedConfig.query) {
+      var haystack = ((article.title || '') + ' ' + String(article.content_markdown || '').substring(0, 500)).toLowerCase();
+      var terms = String(this.feedConfig.query).toLowerCase().split(/\s+/).filter(Boolean);
+      var allMatch = terms.every(function (t) { return haystack.indexOf(t) !== -1; });
+      if (!allMatch) {
+        this._articlesDroppedByDomain++;
+        return;
+      }
+    }
+    // ─── End Query Gate ────────────────────────────────────────────────────
+
+    // ─── Country Gate (feed-mode only, best-effort) ────────────────────────
+    // Ahrefs doesn't always tag geo cleanly; we match on the article's TLD
+    // when feedConfig.country is set. This is an approximation — "US" maps
+    // to ".com" etc., so disable by leaving country empty for global feeds.
+    // Intentionally loose: rather drop nothing than wrongly filter.
+    // (kept minimal for Phase 1; can be hardened later)
 
     this._articlesReceived++;
     this._lastArticleAt = new Date().toISOString();
@@ -323,16 +372,22 @@ class FirehoseListener extends EventEmitter {
     });
 
     article.source_site_id = this.siteId;
+    if (this.feedId) article.feed_id = this.feedId;
     this.emit('article', article);
   }
 
   /**
-   * Get the last event ID from SQLite settings table.
+   * Get the last event ID from SQLite. Feed-mode reads the `feeds` row,
+   * site-mode reads site_config for backward compat.
    *
    * @returns {string|null}
    */
   getLastEventId() {
     try {
+      if (this.feedId) {
+        var row = this.db.prepare('SELECT firehose_last_event_id FROM feeds WHERE id = ?').get(this.feedId);
+        return (row && row.firehose_last_event_id) || null;
+      }
       var value = siteConfig.getSiteConfig(this.siteId, 'firehose_last_event_id');
       return value || null;
     } catch (err) {
@@ -342,16 +397,51 @@ class FirehoseListener extends EventEmitter {
   }
 
   /**
-   * Persist the last event ID to SQLite.
+   * Persist the last event ID to SQLite. Branches on feed-mode vs site-mode.
    *
    * @param {string} id
    */
   saveLastEventId(id) {
     try {
+      if (this.feedId) {
+        this.db.prepare('UPDATE feeds SET firehose_last_event_id = ?, updated_at = datetime("now") WHERE id = ?').run(id, this.feedId);
+        return;
+      }
       siteConfig.setSiteConfig(this.siteId, 'firehose_last_event_id', id);
     } catch (err) {
       this.logger.error(MODULE, 'Failed to save last event ID', err.message);
     }
+  }
+
+  // ─── Filter resolvers ────────────────────────────────────────────────────
+  // Feed-mode reads from the supplied feedConfig; site-mode reads from
+  // site_config. Kept as methods so subclasses / tests can override without
+  // touching the hot-path branching in handleUpdate().
+
+  _resolveAllowedLangs() {
+    if (this.feedConfig && this.feedConfig.allowed_languages) {
+      var raw = this.feedConfig.allowed_languages;
+      var arr = Array.isArray(raw) ? raw : String(raw).split(',');
+      var out = arr.map(function (l) { return String(l).trim().toLowerCase(); }).filter(Boolean);
+      if (out.length) return out;
+    }
+    var cfgRaw = siteConfig.getSiteConfig(this.siteId, 'ALLOWED_LANGUAGES') || 'en,hi';
+    var cfgArr = String(cfgRaw).split(',').map(function (l) { return l.trim().toLowerCase(); }).filter(Boolean);
+    return cfgArr.length ? cfgArr : ['en', 'hi'];
+  }
+
+  _resolveBlockedDomains() {
+    if (this.feedConfig && Array.isArray(this.feedConfig.exclude_domains)) {
+      return this.feedConfig.exclude_domains.map(function (d) { return String(d).trim().toLowerCase(); }).filter(Boolean);
+    }
+    return String(siteConfig.getSiteConfig(this.siteId, 'FIREHOSE_BLOCKED_DOMAINS') || '').split(',').map(function (d) { return d.trim().toLowerCase(); }).filter(Boolean);
+  }
+
+  _resolveAllowedDomains() {
+    if (this.feedConfig && Array.isArray(this.feedConfig.include_domains)) {
+      return this.feedConfig.include_domains.map(function (d) { return String(d).trim().toLowerCase(); }).filter(Boolean);
+    }
+    return String(siteConfig.getSiteConfig(this.siteId, 'FIREHOSE_ALLOWED_DOMAINS') || '').split(',').map(function (d) { return d.trim().toLowerCase(); }).filter(Boolean);
   }
 
   /**

@@ -26,6 +26,7 @@ config = getConfig();
 // ─── 5. Create module instances ─────────────────────────────────────────────
 var { FirehoseListener } = require('./modules/firehose');
 var FirehosePool = require('./modules/firehose-pool');
+var FeedsPool = require('./modules/feeds-pool');
 var PublisherPool = require('./modules/publisher-pool');
 var { TrendsPoller } = require('./modules/trends');
 var { ArticleBuffer } = require('./modules/buffer');
@@ -54,6 +55,9 @@ siteConfigMod.init(db);
 
 // ─── Multi-site pools ──────────────────────────────────────────────────────
 var firehosePool = new FirehosePool(config, db, logger);
+// Per-feed SSE pool: one FirehoseListener per active Feed, keyed by feed_id.
+// Runs alongside firehosePool (per-site) during Phase 1 coexistence.
+var feedsPool = new FeedsPool(config, db, logger);
 var publisherPool = new PublisherPool(config, db, logger);
 
 // Legacy single-instance references kept for backward compat with modules
@@ -89,8 +93,11 @@ async function boot() {
   // EventEmitter drops events that have no listeners. Firehose.init() opens
   // SSE and replays articles immediately — listeners MUST exist first.
 
-  // Wire firehose pool events — all site firehoses route through one handler
-  firehosePool.on('article', async function(article) {
+  // Shared handler for any pool/listener that emits 'article'. Used by both
+  // the per-site firehose pool (legacy) and the per-feed pool (new). Articles
+  // carry source_site_id and, when arriving via a Feed, feed_id — buffer
+  // persists both and the pipeline scopes clusters/drafts accordingly.
+  async function _ingestArticle(article) {
     try {
       var articleId = buffer.addArticle(article);
       if (!articleId) return;
@@ -114,7 +121,11 @@ async function boot() {
     } catch (err) {
       logger.error('index', 'Error buffering firehose article: ' + err.message);
     }
-  });
+  }
+
+  // Wire both pools through the same ingest path.
+  firehosePool.on('article', _ingestArticle);
+  feedsPool.on('article', _ingestArticle);
 
   // Legacy single-site firehose listener (kept for backward compat during transition)
   firehose.on('article', async function(article) {
@@ -183,12 +194,21 @@ async function boot() {
         var item = batch[i];
         var article = item.article;
 
+        // Feed-scoped clustering: an article tagged with feed_id only matches
+        // other articles from the SAME feed. Legacy (no feed_id) articles only
+        // match other legacy articles. This enforces the "per-feed clusters"
+        // decision (each Feed is its own independent rewrite pipeline).
+        var relevantBuffer = article.feed_id
+          ? bufferArticles.filter(function (b) { return b.feed_id === article.feed_id; })
+          : bufferArticles.filter(function (b) { return !b.feed_id; });
+
         try {
           logger.debug('index', 'Clustering: article #' + article.id +
             ' fp=' + (article.fingerprint ? article.fingerprint.length + ' chars' : 'NONE') +
-            ', buffer=' + bufferArticles.length + ' articles');
+            ', buffer=' + relevantBuffer.length + '/' + bufferArticles.length + ' articles' +
+            (article.feed_id ? ' (feed=' + article.feed_id + ')' : ''));
 
-          var matches = await similarity.findMatchesAsync(article, bufferArticles);
+          var matches = await similarity.findMatchesAsync(article, relevantBuffer);
 
           if (matches.length > 0) {
             logger.info('index', 'Similarity matches for "' +
@@ -270,6 +290,9 @@ async function boot() {
   // Firehose opens SSE — replay articles flow into listeners above
   await firehose.init();
   await firehosePool.init();
+  // Feed-level SSE pool: one listener per active Feed with a token.
+  // Non-fatal if a single feed token is bad; init() logs per-feed failures.
+  await feedsPool.init();
   await trends.init();
   logger.info('index', 'All modules initialized');
 
@@ -279,7 +302,7 @@ async function boot() {
 
   // Expose modules for performance monitoring endpoint
   app.locals.modules = {
-    firehose: firehose, firehosePool: firehosePool,
+    firehose: firehose, firehosePool: firehosePool, feedsPool: feedsPool,
     publisherPool: publisherPool,
     trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
@@ -360,6 +383,7 @@ async function boot() {
   var apiRouter = createApiRouter({
     firehose: firehose,
     firehosePool: firehosePool,
+    feedsPool: feedsPool,
     publisherPool: publisherPool,
     trends: trends,
     buffer: buffer,
@@ -477,7 +501,7 @@ async function boot() {
     clearInterval(memoryWatchdog);
 
     // Shutdown modules
-    var shutdownList = [firehosePool, firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
+    var shutdownList = [feedsPool, firehosePool, firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
     for (var i = 0; i < shutdownList.length; i++) {
       try {
         if (shutdownList[i].shutdown) shutdownList[i].shutdown();

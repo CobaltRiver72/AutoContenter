@@ -541,8 +541,8 @@ class WordPressPublisher {
         'INSERT INTO published (' +
         '  cluster_id, wp_post_id, wp_post_url, wp_image_id,' +
         '  title, slug, excerpt, meta_description,' +
-        '  word_count, target_keyword, ai_model, tokens_used, published_at, site_id' +
-        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        '  word_count, target_keyword, ai_model, tokens_used, published_at, site_id, feed_id' +
+        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       insertStmt.run(
         cluster.id || 0,
@@ -558,7 +558,8 @@ class WordPressPublisher {
         rewrittenArticle.aiModel,
         rewrittenArticle.tokensUsed,
         new Date().toISOString(),
-        this.siteId
+        this.siteId,
+        rewrittenArticle.feedId || null
       );
     } catch (dbErr) {
       this.logger.error('publisher', 'Failed to record published article: ' + dbErr.message);

@@ -447,6 +447,17 @@ class SimilarityEngine {
       ? Number(result.lastInsertRowid)
       : result.lastInsertRowid;
 
+    // Inherit feed scope from the primary article. Feed-mode: clusters are
+    // per-feed by construction (index.js filters matches by feed_id), so the
+    // primary's feed_id uniquely identifies the cluster's owner Feed.
+    if (newArticle.feed_id) {
+      try {
+        this.db.prepare('UPDATE clusters SET feed_id = ? WHERE id = ?').run(newArticle.feed_id, clusterId);
+      } catch (fdErr) {
+        this.logger.warn(MODULE, 'Failed to stamp feed_id on cluster ' + clusterId + ': ' + fdErr.message);
+      }
+    }
+
     // Assign all articles to this cluster
     this._assignArticlesToCluster(clusterId, [newArticle, ...matches.map((m) => m.article)]);
 
