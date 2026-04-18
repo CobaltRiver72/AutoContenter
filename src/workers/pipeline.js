@@ -241,7 +241,7 @@ class Pipeline {
 
   // ─── REWRITE WORKER LOOP ────────────────────────────────────────────
 
-  async _rewriteLoop() {
+  async _rewriteLoop(siteFilter) {
     if (this._rewriteRunning) return;
     this._rewriteRunning = true;
 
@@ -290,6 +290,15 @@ class Pipeline {
         kwParams.push('%' + blockedKw[kwi] + '%');
       }
 
+      // Optional per-site filter. Run-Now passes a siteFilter to restrict
+      // rewrites to drafts owned by the active site; the scheduler tick omits it.
+      var siteWhere = '';
+      var siteParams = [];
+      if (siteFilter && typeof siteFilter === 'number' && siteFilter > 0) {
+        siteWhere = ' AND d.site_id = ?';
+        siteParams = [siteFilter];
+      }
+
       // Find clusters where ALL drafts are extracted (status = 'draft')
       // and the primary draft is not locked, with quality pre-filters
       var readyClustersSql =
@@ -305,13 +314,13 @@ class Pipeline {
         "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
         "    AND d2.status = 'fetching' AND d2.mode IN ('auto', 'manual_import')" +
         "  )" +
-        kwWhere + " " +
+        kwWhere + siteWhere + " " +
         "GROUP BY d.cluster_id " +
         "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
         "LIMIT ?";
       var readyClustersStmt = this.db.prepare(readyClustersSql);
-      var readyClustersParams = [minSources, minSim].concat(kwParams).concat([slotsAvailable]);
+      var readyClustersParams = [minSources, minSim].concat(kwParams).concat(siteParams).concat([slotsAvailable]);
       var readyClusters = readyClustersStmt.all.apply(readyClustersStmt, readyClustersParams);
 
       if (readyClusters.length === 0) return;
@@ -886,15 +895,24 @@ class Pipeline {
 
   // ─── PUBLISH WORKER LOOP ────────────────────────────────────────────
 
-  async _publishLoop() {
+  async _publishLoop(siteFilter) {
     if (this._publishRunning) return;
     this._publishRunning = true;
 
     try {
-      var rateState = this.getPublishRateState();
+      var rateState = this.getPublishRateState(siteFilter && siteFilter > 0 ? siteFilter : undefined);
       if (!rateState.ready) {
         this._logPublishSkip(rateState);
         return;
+      }
+
+      // Optional per-site filter. Run-Now passes siteFilter to restrict
+      // publishes to the active site; the scheduler tick leaves it undefined.
+      var pubSiteWhere = '';
+      var pubSiteParams = [];
+      if (siteFilter && typeof siteFilter === 'number' && siteFilter > 0) {
+        pubSiteWhere = ' AND d.site_id = ?';
+        pubSiteParams = [siteFilter];
       }
 
       // Find a cluster with primary draft in 'ready' status.
@@ -902,16 +920,20 @@ class Pipeline {
       // autopilot gate below reads them from readyPrimary; if they're missing
       // they come back undefined, default to 1/0, and every article is
       // permanently rejected with "too few sources".
-      var readyPrimary = this.db.prepare(
+      var readyPrimarySql =
         "SELECT d.*, c.topic, c.trends_boosted, c.article_count, c.avg_similarity FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
         "WHERE d.mode IN ('auto', 'manual_import') AND d.status = 'ready' AND d.cluster_role = 'primary' " +
         "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100 " +
         "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
-        "  AND c.status = 'queued' " +
+        "  AND c.status = 'queued'" +
+        pubSiteWhere + " " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, d.created_at ASC " +
-        "LIMIT 1"
-      ).get();
+        "LIMIT 1";
+      var readyPrimaryStmt = this.db.prepare(readyPrimarySql);
+      var readyPrimary = pubSiteParams.length
+        ? readyPrimaryStmt.get.apply(readyPrimaryStmt, pubSiteParams)
+        : readyPrimaryStmt.get();
 
       if (!readyPrimary) return;
 
