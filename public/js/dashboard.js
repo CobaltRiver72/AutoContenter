@@ -8176,6 +8176,11 @@
         if (r && r.feed) { _feedsCurrentFeed = r.feed; _feedsOpenNewsForm(r.feed); }
       });
     },
+    'feedsInstallRule':        function (el) { _feedsInstallRule(Number(el.dataset.feedId)); },
+    'feedsStoriesToggleThreshold': function () {
+      _feedsStoriesShowAll = !_feedsStoriesShowAll;
+      if (_feedsCurrentFeed) _feedsRenderDetailTab(_feedsCurrentFeed, 'stories');
+    },
 
     // ─── Sites page (existing onclick handlers migrated to delegation) ────
     'sitesAdd':                function () { _sitesShowForm(null); },
@@ -8734,6 +8739,10 @@
 
   var _feedsViewState = { view: 'list', feedId: null, tab: 'stories' };
   var _feedsCurrentFeed = null;
+  // Stories tab: default-hide clusters whose article_count < feed's
+  // min_sources (those can never reach the rewrite pipeline anyway).
+  // Admin can flip via the "Show all" toggle; state is session-local.
+  var _feedsStoriesShowAll = false;
   // Capabilities come back with every /api/feeds list call. Cached so the
   // "Create Feed" form can decide whether the token field is optional
   // without a second round-trip. Refreshed on every list render.
@@ -8986,9 +8995,9 @@
         '<details style="margin-top:var(--space-3)">',
         '<summary style="cursor:pointer;color:var(--accent,var(--text-secondary));font-weight:var(--weight-semibold)">Advanced · Quality gates</summary>',
         '<div style="display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-4)">',
-          _feedsField('Minimum sources per cluster', '<input class="settings-input" id="ff-min-sources" type="number" value="' + escapeHtml(String(qc.min_sources || '')) + '" placeholder="2">', 'Feed waits for at least N different publishers before rewriting.'),
-          _feedsField('Daily publish limit', '<input class="settings-input" id="ff-daily" type="number" value="' + escapeHtml(String(qc.daily_limit || '')) + '" placeholder="50">', 'Cap on posts per 24h. Leave empty for unlimited.'),
-          _feedsField('Blocked keywords (comma-separated)', '<input class="settings-input" id="ff-blocked" type="text" value="' + escapeHtml((qc.blocked_keywords || []).join(',')) + '" placeholder="rumor, leak">', 'Clusters whose topic contains any of these are skipped.'),
+          _feedsField('Minimum sources per cluster', '<input class="settings-input" id="ff-min-sources" type="number" value="' + escapeHtml(String(qc.min_sources || '')) + '" placeholder="e.g. 2 (blank = use global)">', 'Feed waits for at least N different publishers before rewriting.'),
+          _feedsField('Daily publish limit', '<input class="settings-input" id="ff-daily" type="number" value="' + escapeHtml(String(qc.daily_limit || '')) + '" placeholder="e.g. 50 (blank = unlimited)">', 'Cap on posts per 24h.'),
+          _feedsField('Blocked keywords (comma-separated)', '<input class="settings-input" id="ff-blocked" type="text" value="' + escapeHtml((qc.blocked_keywords || []).join(',')) + '" placeholder="e.g. rumor, leak (blank = none)">', 'Clusters whose topic contains any of these are skipped.'),
         '</div>',
         '</details>',
 
@@ -9204,18 +9213,51 @@
       body.innerHTML = '<p style="color:var(--text-tertiary)">Loading stories…</p>';
       fetchApi('/api/clusters?feed_id=' + feed.id, { bypassCache: true }).then(function (r) {
         var clusters = (r && r.clusters) || r.data || [];
-        if (!clusters.length) {
-          body.innerHTML = '<div style="padding:var(--space-8);text-align:center;color:var(--text-tertiary)"><p>We\'re gathering news for you.</p><p style="font-size:var(--text-sm)">Come back in a few minutes.</p></div>';
+
+        // Below-threshold filter. Rewrite pipeline (B3) only acts on
+        // clusters where article_count >= feed.quality_config.min_sources
+        // (fallback: 2). Anything below that is still in the DB but will
+        // never reach an AI call, so it's noise on the Stories tab.
+        // Default-hide, with a toggle so admin can investigate.
+        var minSrc = (feed.quality_config && feed.quality_config.min_sources) || 2;
+        var showAll = _feedsStoriesShowAll === true;
+        var hiddenCount = 0;
+        var visibleClusters = clusters.filter(function (c) {
+          var ok = (c.article_count || 0) >= minSrc;
+          if (!ok) hiddenCount++;
+          return showAll ? true : ok;
+        });
+
+        var toggle = '<div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) 0;color:var(--text-tertiary);font-size:var(--text-sm)">' +
+          '<span>Showing ' + visibleClusters.length + ' of ' + clusters.length + ' clusters</span>' +
+          (hiddenCount > 0 ? ' · <span>' + hiddenCount + ' below the ' + minSrc + '-source threshold ' + (showAll ? '(shown)' : '(hidden)') + '</span>' : '') +
+          (clusters.length !== visibleClusters.length || showAll
+            ? ' <button class="btn btn-sm" data-click="feedsStoriesToggleThreshold">' + (showAll ? 'Hide below-threshold' : 'Show all') + '</button>'
+            : '') +
+          '</div>';
+
+        if (!visibleClusters.length) {
+          if (clusters.length && !showAll) {
+            body.innerHTML = toggle + '<div style="padding:var(--space-6);text-align:center;color:var(--text-tertiary)"><p>All ' + clusters.length + ' clusters are below the ' + minSrc + '-source threshold. Click <strong>Show all</strong> to see them.</p></div>';
+          } else {
+            body.innerHTML = toggle + '<div style="padding:var(--space-8);text-align:center;color:var(--text-tertiary)"><p>We\'re gathering news for you.</p><p style="font-size:var(--text-sm)">Come back in a few minutes.</p></div>';
+          }
           return;
         }
-        var rows = clusters.map(function (c) {
+
+        var rows = visibleClusters.map(function (c) {
+          var sourcesCell = (c.article_count || 0) + ' sources';
+          // Visual nudge for below-threshold rows when "Show all" is on.
+          if ((c.article_count || 0) < minSrc) {
+            sourcesCell = '<span style="color:var(--text-tertiary)">' + sourcesCell + ' · below threshold</span>';
+          }
           return '<tr style="border-top:1px solid var(--border-subtle)">' +
             '<td style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary);white-space:nowrap">' + escapeHtml(formatDateTime(c.detected_at)) + '</td>' +
             '<td style="padding:10px"><strong>' + escapeHtml(c.topic || '(no topic)') + '</strong></td>' +
-            '<td style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">' + (c.article_count || 0) + ' sources</td>' +
+            '<td style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">' + sourcesCell + '</td>' +
           '</tr>';
         }).join('');
-        body.innerHTML = '<table style="width:100%;border-collapse:collapse">' +
+        body.innerHTML = toggle + '<table style="width:100%;border-collapse:collapse">' +
           '<thead><tr style="border-bottom:1px solid var(--border-default)">' +
             '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">ADDED ON</th>' +
             '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">STORY</th>' +
@@ -9227,10 +9269,16 @@
     } else if (tab === 'configuration') {
       // Render the skeleton immediately. Live Firehose rule state is fetched
       // asynchronously from Ahrefs; we surface a skeleton while that loads.
+      // Both branches must set id="ff-rule-banner" so _feedsRenderLiveRule
+      // can update the banner once the async /feeds/:id/rule fetch returns
+      // — the earlier !rule_id branch was id-less, making the red "no rule
+      // installed" state stick even when the tap actually had rules.
       var stateBanner = feed.firehose_rule_id
         ? '<div id="ff-rule-banner" style="padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4);background:var(--bg-surface-2);color:var(--text-tertiary)">Checking live rule on Ahrefs…</div>'
-        : '<div style="background:var(--danger-soft);color:var(--danger);padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
-          '<strong>⚠ No Firehose rule installed.</strong> The SSE stream will return <em>"No rules configured"</em> until a rule is attached. Edit the feed to install one.' +
+        : '<div id="ff-rule-banner" style="background:var(--danger-soft);color:var(--danger);padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
+          '<strong>⚠ No Firehose rule installed.</strong> ' +
+          'Click <strong>Install rule now</strong> below, or edit the feed to attach one. Until then the SSE stream returns <em>"No rules configured"</em>.' +
+          ' <button class="btn btn-sm btn-primary" data-click="feedsInstallRule" data-feed-id="' + feed.id + '" style="margin-left:var(--space-3)">Install rule now</button>' +
           '</div>';
 
       body.innerHTML = [
@@ -9350,6 +9398,22 @@
     fetchApi('/api/feeds/' + feedId + '/test-firehose', { method: 'POST' })
       .then(function (r) { showToast(r.message || 'OK', r.ok ? 'success' : 'error'); })
       .catch(function (e) { showToast('Test failed: ' + e.message, 'error'); });
+  }
+  function _feedsInstallRule(feedId) {
+    showToast('Installing rule on Ahrefs…', 'info');
+    fetchApi('/api/feeds/' + feedId + '/install-rule', { method: 'POST' })
+      .then(function (r) {
+        var actionLabel = ({
+          installed: 'Rule installed',
+          updated: 'Rule already active — synced to current query',
+          auto_provisioned: 'Tap + rule auto-provisioned',
+        })[r.action] || 'Done';
+        showToast(actionLabel, 'success');
+        // Re-render the detail page so the banner flips to the success state
+        // and the live rule value renders from the fresh /feeds/:id/rule.
+        _feedsSwitch({ view: 'detail', feedId: feedId, tab: 'configuration' });
+      })
+      .catch(function (e) { showToast('Install failed: ' + e.message, 'error'); });
   }
   function _feedsDeactivate(feedId) {
     if (!confirm('Pause this feed? Its SSE connection will close. You can resume later.')) return;
