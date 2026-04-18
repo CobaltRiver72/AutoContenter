@@ -488,8 +488,12 @@
     options = options || {};
     options.credentials = 'same-origin';
     if (!options.headers) options.headers = {};
-    // Inject active site scope so every API call is scoped server-side
-    options.headers['X-Site-Id'] = String(state.activeSiteId || 1);
+    // Inject active site scope so every API call is scoped server-side.
+    // Skip when the caller already set X-Site-Id — e.g. logs page in "All sites"
+    // mode sends '0' explicitly to escape the active-site filter.
+    if (!options.headers['X-Site-Id'] && !options.headers['x-site-id']) {
+      options.headers['X-Site-Id'] = String(state.activeSiteId || 1);
+    }
 
     var method = (options.method || 'GET').toUpperCase();
     var isGet = method === 'GET';
@@ -7584,14 +7588,26 @@
     var pagination = $('logsPagination');
     var moduleFilter = $('logModuleFilter');
     var levelFilter = $('logLevelFilter');
+    var scopeFilter = $('logSiteScope');
 
     if (container) container.innerHTML = '<p class="placeholder-text">Loading...</p>';
 
     var params = 'page=' + state.logsPage;
     if (moduleFilter && moduleFilter.value) params += '&module=' + encodeURIComponent(moduleFilter.value);
     if (levelFilter && levelFilter.value) params += '&level=' + encodeURIComponent(levelFilter.value);
+    // Site scope toggle:
+    //   active → auto-scope by X-Site-Id (which fetchApi injects) = active site + NULL system
+    //   all    → explicitly ask for all sites (send X-Site-Id: 0)
+    //   system → only system-wide NULL-tagged logs
+    var scope = scopeFilter && scopeFilter.value ? scopeFilter.value : 'active';
+    var fetchOpts = {};
+    if (scope === 'all') {
+      fetchOpts.headers = { 'X-Site-Id': '0' };
+    } else if (scope === 'system') {
+      params += '&site=system';
+    }
 
-    fetchApi('/api/logs?' + params)
+    fetchApi('/api/logs?' + params, fetchOpts)
       .then(function (data) {
         renderLogs(container, data.data || []);
         renderPagination(pagination, data.total, data.page, data.perPage, function (page) {
@@ -7615,6 +7631,13 @@
     if (levelFilter && !levelFilter._logsHandlerSet) {
       levelFilter._logsHandlerSet = true;
       levelFilter.onchange = function () {
+        state.logsPage = 1;
+        loadLogs();
+      };
+    }
+    if (scopeFilter && !scopeFilter._logsHandlerSet) {
+      scopeFilter._logsHandlerSet = true;
+      scopeFilter.onchange = function () {
         state.logsPage = 1;
         loadLogs();
       };

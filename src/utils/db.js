@@ -1008,6 +1008,15 @@ function runMigrations() {
     } catch (_e) { /* column already exists — safe to ignore */ }
     db.exec('CREATE INDEX IF NOT EXISTS idx_articles_source_site ON articles(source_site_id)');
 
+    // ─── 3c. Tag logs with site_id so /api/logs can be scoped per site.
+    //         NULL = system-wide log (startup, scheduler tick, etc.).
+    //         Major modules with their own siteId (firehose, publisher, autopilot,
+    //         wp-publisher) write logs tagged via logger.forSite(siteId).
+    try {
+      db.exec('ALTER TABLE logs ADD COLUMN site_id INTEGER DEFAULT NULL');
+    } catch (_e) { /* column already exists — safe to ignore */ }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_logs_site ON logs(site_id)');
+
     // ─── 4. Fix drafts unique index: UNIQUE(source_url) → UNIQUE(source_url, site_id)
     //        Same URL can exist as drafts for different sites in multi-site mode.
     //        Drop both the old non-unique and UNIQUE indexes — the new composite

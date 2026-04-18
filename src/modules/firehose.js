@@ -27,8 +27,12 @@ class FirehoseListener extends EventEmitter {
     super();
     this.config = config;
     this.db = db;
-    this.logger = logger;
     this.siteId = siteId || 1;
+    // Wrap the logger so every firehose log stamps logs.site_id for this site.
+    // Gracefully no-op when the supplied logger predates the forSite helper.
+    this.logger = (logger && typeof logger.forSite === 'function')
+      ? logger.forSite(this.siteId)
+      : logger;
     this.firehoseToken = firehoseToken || null;
 
     this._es = null;

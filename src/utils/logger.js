@@ -122,13 +122,13 @@ function sanitizeDetailsForDb(details) {
   }
 }
 
-function writeToDb(level, mod, message, details) {
+function writeToDb(level, mod, message, details, siteId) {
   if (!_db) return;
 
   try {
     if (!_insertStmt) {
       _insertStmt = _db.prepare(
-        'INSERT INTO logs (level, module, message, details) VALUES (?, ?, ?, ?)'
+        'INSERT INTO logs (level, module, message, details, site_id) VALUES (?, ?, ?, ?, ?)'
       );
     }
 
@@ -136,12 +136,24 @@ function writeToDb(level, mod, message, details) {
       ? redactSensitive(message)
       : redactSensitive(String(message == null ? '' : message));
     const detailsStr = sanitizeDetailsForDb(details);
+    const siteCol = Number.isInteger(siteId) && siteId > 0 ? siteId : null;
 
-    _insertStmt.run(level, mod || null, safeMessage, detailsStr);
+    _insertStmt.run(level, mod || null, safeMessage, detailsStr, siteCol);
   } catch (err) {
     // Avoid infinite recursion — only console.error
     console.error('[logger] Failed to write log to DB:', err.message);
   }
+}
+
+// Extract a site_id tag from details when the caller passed it inline. This
+// lets existing call sites opt in just by including `{ site_id: N, ... }` in
+// details, without updating every logger method signature in the codebase.
+function _extractSiteId(details) {
+  if (details && typeof details === 'object' && !Array.isArray(details)) {
+    var sid = details.site_id || details.siteId;
+    if (Number.isInteger(sid) && sid > 0) return sid;
+  }
+  return null;
 }
 
 // ─── Exported log() Function ────────────────────────────────────────────────
@@ -152,9 +164,12 @@ function writeToDb(level, mod, message, details) {
  * @param {'error'|'warn'|'info'|'debug'} level
  * @param {string} mod - Module name (e.g. 'firehose', 'trends')
  * @param {string} message
- * @param {*} [details] - Optional details object/string
+ * @param {*} [details] - Optional details object/string. If an object, a
+ *   `site_id` field will be promoted to the logs.site_id column.
+ * @param {number} [siteId] - Override: explicit per-site tag. Usually supplied
+ *   by the wrapper returned from logger.forSite(siteId).
  */
-function log(level, mod, message, details) {
+function log(level, mod, message, details, siteId) {
   // Winston log
   const meta = { module: mod };
   if (details !== undefined && details !== null) {
@@ -162,8 +177,12 @@ function log(level, mod, message, details) {
   }
   winstonLogger.log(level, message, meta);
 
-  // SQLite log (async-safe, fire-and-forget)
-  writeToDb(level, mod, message, details);
+  // SQLite log (async-safe, fire-and-forget). Explicit siteId wins over
+  // inline-in-details tagging; either fills logs.site_id.
+  const resolvedSiteId = Number.isInteger(siteId) && siteId > 0
+    ? siteId
+    : _extractSiteId(details);
+  writeToDb(level, mod, message, details, resolvedSiteId);
 }
 
 /**
@@ -174,6 +193,27 @@ function warn(mod, message, details) { log('warn', mod, message, details); }
 function error(mod, message, details) { log('error', mod, message, details); }
 function debug(mod, message, details) { log('debug', mod, message, details); }
 
+/**
+ * Create a child logger bound to a specific site. Every call through the
+ * returned object stamps logs.site_id = siteId. Intended for per-site modules
+ * (FirehoseListener, WordPressPublisher, AutopilotEngine) that already know
+ * their siteId at construction time.
+ *
+ * @param {number} siteId
+ * @returns {{ info, warn, error, debug, log }}
+ */
+function forSite(siteId) {
+  const sid = Number.isInteger(siteId) && siteId > 0 ? siteId : null;
+  return {
+    log:   function (level, mod, message, details) { log(level, mod, message, details, sid); },
+    info:  function (mod, message, details)        { log('info',  mod, message, details, sid); },
+    warn:  function (mod, message, details)        { log('warn',  mod, message, details, sid); },
+    error: function (mod, message, details)        { log('error', mod, message, details, sid); },
+    debug: function (mod, message, details)        { log('debug', mod, message, details, sid); },
+    forSite: forSite, // keep the method available on child loggers too
+  };
+}
+
 module.exports = {
   log,
   info,
@@ -181,5 +221,6 @@ module.exports = {
   error,
   debug,
   setDb,
+  forSite,
   winstonLogger,
 };

@@ -12,8 +12,11 @@ class AutopilotEngine {
   constructor(config, db, logger, siteId) {
     this.config = config;
     this.db = db;
-    this.logger = logger;
     this.siteId = siteId || null;  // null = use global config (backward compat)
+    // Per-site log tagging when the engine was created for a specific site.
+    this.logger = (this.siteId && logger && typeof logger.forSite === 'function')
+      ? logger.forSite(this.siteId)
+      : logger;
   }
 
   // ─── Config helpers ──────────────────────────────────────────────────────

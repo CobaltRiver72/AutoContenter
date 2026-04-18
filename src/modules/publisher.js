@@ -312,8 +312,11 @@ function buildSchemaMarkup(rewrittenArticle, wpPostUrl, siteName, schemaTypes, t
 class WordPressPublisher {
   constructor(config, logger, siteId, siteCredentials) {
     this.config = config;
-    this.logger = logger;
     this.siteId = siteId || 1;
+    // Per-site log tagging — every line from this publisher hits logs.site_id.
+    this.logger = (logger && typeof logger.forSite === 'function')
+      ? logger.forSite(this.siteId)
+      : logger;
     this._siteCredentials = siteCredentials || null;
 
     this.authHeader = '';

@@ -1283,9 +1283,15 @@ class ArticleRewriter {
       this.logger.info('rewriter', 'SUCCESS: ' + provider + ' / ' + primaryModel + ' — ' + result.tokensUsed + ' tokens');
       return result;
     } catch (primaryErr) {
-      this.logger.error('rewriter', 'PRIMARY FAILED (' + provider + '): ' + sanitizeAxiosError(primaryErr).message);
+      var primaryMsg = sanitizeAxiosError(primaryErr).message;
+      this.logger.error('rewriter', 'PRIMARY FAILED (' + provider + '): ' + primaryMsg);
 
-      if (!enableFallback) throw primaryErr;
+      if (!enableFallback) {
+        this.logger.warn('rewriter',
+          'Fallback is DISABLED (ENABLE_FALLBACK=false). To auto-retry with a different provider, ' +
+          'enable it in Settings → AI Rewrite Models.');
+        throw primaryErr;
+      }
 
       // Fallback chain: only cascade to MORE reliable providers than
       // the one that just failed. Reliability order: anthropic > openai > openrouter.
@@ -1297,10 +1303,30 @@ class ArticleRewriter {
       var fallbackProviders = fallbackChain[provider] || [];
       var lastError = primaryErr;
 
+      // Track exactly what happened for each candidate so the final error
+      // message tells the admin whether providers were skipped (missing key,
+      // bad format) or actually tried and failed. Previously the chain
+      // silently `continue`d when a key was missing, leaving admins with an
+      // "all providers failed" message and no clue that no fallback was
+      // even configured.
+      var fallbackTrace = [];
+
+      if (fallbackProviders.length === 0) {
+        self.logger.warn('rewriter',
+          'No fallback chain defined for provider "' + provider + '". Primary error surfaces as-is.');
+      }
+
       for (var fi = 0; fi < fallbackProviders.length; fi++) {
         var fbProvider = fallbackProviders[fi];
         var fb = self._getProviderKeyModel(fbProvider, {});
-        if (!fb.key) continue;
+
+        if (!fb.key) {
+          self.logger.warn('rewriter',
+            'Skipping ' + fbProvider + ' fallback: API key not configured. ' +
+            'Add one in Settings → AI Rewrite Models to activate fallback.');
+          fallbackTrace.push(fbProvider + '=not_configured');
+          continue;
+        }
 
         // Skip this fallback if the saved key is clearly for another
         // provider (e.g. an sk-or-v1- key pasted into the OpenAI field).
@@ -1308,6 +1334,14 @@ class ArticleRewriter {
         var fbCheck = validateKeyFormat(fbProvider, fb.key);
         if (!fbCheck.ok) {
           self.logger.warn('rewriter', 'Skipping ' + fbProvider + ' fallback: ' + fbCheck.reason + ' — fix the key in Settings.');
+          fallbackTrace.push(fbProvider + '=bad_key_format');
+          continue;
+        }
+
+        if (!fb.model) {
+          self.logger.warn('rewriter',
+            'Skipping ' + fbProvider + ' fallback: model ID is empty. Pick a model in Settings.');
+          fallbackTrace.push(fbProvider + '=no_model');
           continue;
         }
 
@@ -1328,12 +1362,22 @@ class ArticleRewriter {
           self.logger.info('rewriter', 'FALLBACK SUCCESS: ' + fbProvider + ' / ' + fb.model);
           return fbResult;
         } catch (fbErr) {
-          self.logger.error('rewriter', 'FALLBACK FAILED (' + fbProvider + '): ' + sanitizeAxiosError(fbErr).message);
+          var fbMsg = sanitizeAxiosError(fbErr).message;
+          self.logger.error('rewriter', 'FALLBACK FAILED (' + fbProvider + '): ' + fbMsg);
+          fallbackTrace.push(fbProvider + '=failed:' + fbMsg);
           lastError = fbErr;
         }
       }
 
-      throw new Error('All providers failed. Last error: ' + lastError.message);
+      // Build a message that tells the admin the whole story, not just the
+      // last error. Primary + each fallback attempt (or skip reason).
+      var traceStr = fallbackTrace.length
+        ? fallbackTrace.join(', ')
+        : (fallbackProviders.length === 0 ? 'none (no chain for ' + provider + ')' : 'all skipped');
+      throw new Error(
+        'All providers failed. Primary ' + provider + ': ' + primaryMsg +
+        ' | Fallbacks: ' + traceStr
+      );
     }
   }
 
