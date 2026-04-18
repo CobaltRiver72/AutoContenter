@@ -109,9 +109,9 @@ class ArticleBuffer {
       if (!this._stmts.insert) {
         this._stmts.insert = this.db.prepare(`
           INSERT OR IGNORE INTO articles
-            (firehose_event_id, url, domain, title, publish_time, content_markdown, fingerprint, authority_tier, page_category, language, received_at)
+            (firehose_event_id, url, domain, title, publish_time, content_markdown, fingerprint, authority_tier, page_category, language, source_site_id, received_at)
           VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         `);
       }
 
@@ -125,7 +125,8 @@ class ArticleBuffer {
         fingerprint,
         article.authority_tier || 3,
         article.page_category ? (Array.isArray(article.page_category) ? article.page_category.join(',') : article.page_category) : null,
-        article.language || null
+        article.language || null,
+        article.source_site_id || 1
       );
 
       if (result.changes === 0) {

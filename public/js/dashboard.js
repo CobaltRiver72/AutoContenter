@@ -469,6 +469,21 @@
     else _apiCache.clear();
   }
 
+  // ─── Inflight counter + dirty-form registry ─────────────────────────────
+  // Consumed by switchSite() so the user can't change active site mid-save or
+  // abandon unsaved edits without an explicit confirm.
+  var _apiPendingCount = 0;
+  var _dirtyForms = new Set();
+  function _incPending() { _apiPendingCount++; }
+  function _decPending() { _apiPendingCount = Math.max(0, _apiPendingCount - 1); }
+  function markFormDirty(id)  { if (id) _dirtyForms.add(id); }
+  function markFormClean(id)  { if (id) _dirtyForms.delete(id); }
+  function getDirtyForms()    { return Array.from(_dirtyForms); }
+  function getPendingCount()  { return _apiPendingCount; }
+  // Expose for onclick handlers + ad-hoc debugging.
+  window.markFormDirty = markFormDirty;
+  window.markFormClean = markFormClean;
+
   function fetchApi(url, options) {
     options = options || {};
     options.credentials = 'same-origin';
@@ -495,6 +510,7 @@
       options.body = JSON.stringify(options.body);
     }
 
+    _incPending();
     var promise = fetch(url, options).then(function (res) {
       if (res.status === 401) {
         window.location.href = '/login';
@@ -518,9 +534,11 @@
         _apiInvalidate(url);
       }
       _apiInflight.delete(url);
+      _decPending();
       return data;
     }).catch(function (err) {
       _apiInflight.delete(url);
+      _decPending();
       throw err;
     });
 
@@ -8237,6 +8255,31 @@
 
   function switchSite(siteId) {
     if (siteId === state.activeSiteId) return;
+
+    // Guard 1: in-flight requests — switching now could send mixed X-Site-Id
+    // headers for requests initiated against the previous site.
+    var pending = getPendingCount();
+    if (pending > 0) {
+      if (!confirm(pending + ' request(s) still in flight. Switch anyway? (they may complete against the new site)')) {
+        // Revert the dropdown to reflect the still-active site.
+        var selRevert = document.getElementById('site-selector');
+        if (selRevert) selRevert.value = String(state.activeSiteId);
+        return;
+      }
+    }
+
+    // Guard 2: dirty forms — unsaved edits will be lost on page reload.
+    var dirty = getDirtyForms();
+    if (dirty.length > 0) {
+      if (!confirm('Unsaved changes on: ' + dirty.join(', ') + '.\nSwitching sites will discard them. Continue?')) {
+        var selRevert2 = document.getElementById('site-selector');
+        if (selRevert2) selRevert2.value = String(state.activeSiteId);
+        return;
+      }
+      // User chose to discard — clear the registry.
+      _dirtyForms.clear();
+    }
+
     state.activeSiteId = siteId;
     // Persist in session server-side (fire-and-forget)
     fetchApi('/api/sites/switch', { method: 'POST', body: { site_id: siteId } }).catch(function () {});
@@ -8302,41 +8345,96 @@
       var el = document.getElementById('sites-list');
       if (!el) return;
       if (sites.length === 0) {
-        el.innerHTML = '<p style="color:var(--text-tertiary)">No sites yet.</p>';
+        el.innerHTML = '<p style="color:var(--text-tertiary)">No sites yet. Click <strong>+ Add Site</strong> to connect your first WordPress site.</p>';
         return;
       }
+
+      // Render the skeleton immediately with placeholders for per-site stats,
+      // then fill in each row's numbers from /api/sites/:id/stats (parallel).
       var rows = sites.map(function (s) {
-        var wpBadge = s.has_wp
-          ? '<span style="background:var(--success-soft);color:var(--success);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">WP ✓</span>'
-          : '<span style="background:var(--bg-surface-2);color:var(--text-tertiary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">WP –</span>';
-        var fhBadge = s.has_firehose
-          ? '<span style="background:var(--success-soft);color:var(--success);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Firehose ✓</span>'
-          : '<span style="background:var(--bg-surface-2);color:var(--text-tertiary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Firehose –</span>';
-        var inactiveBadge = s.is_active ? '' : ' <span style="background:var(--danger-soft);color:var(--danger);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Inactive</span>';
         var canDelete = s.id !== 1;
-        return '<tr>' +
-          '<td style="width:16px;padding-right:0"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + escapeHtml(s.color || '#3b82f6') + '"></span></td>' +
-          '<td><strong>' + escapeHtml(s.name) + '</strong>' + inactiveBadge + '<br><span style="color:var(--text-tertiary);font-size:var(--text-xs)">' + escapeHtml(s.slug) + '</span></td>' +
-          '<td>' + wpBadge + ' ' + fhBadge + '</td>' +
-          '<td style="color:var(--text-tertiary);font-size:var(--text-xs);max-width:180px;overflow:hidden;text-overflow:ellipsis">' + (s.wp_url ? escapeHtml(s.wp_url) : '—') + '</td>' +
-          '<td style="text-align:right;white-space:nowrap">' +
+        var wpDot = s.has_wp
+          ? '<span title="WP creds saved" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--success);margin-right:4px"></span>'
+          : '<span title="WP creds missing" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bg-surface-2);border:1px solid var(--border-default);margin-right:4px"></span>';
+        var fhDot = s.has_firehose || s.id === 1
+          ? '<span title="Firehose token saved" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--success);margin-right:4px"></span>'
+          : '<span title="Firehose token missing" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bg-surface-2);border:1px solid var(--border-default);margin-right:4px"></span>';
+        var inactiveBadge = s.is_active ? '' : ' <span style="background:var(--danger-soft);color:var(--danger);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Inactive</span>';
+        var siteActions = '';
+        if (s.is_active) {
+          siteActions =
             '<button class="btn btn-sm" onclick="_sitesShowForm(' + s.id + ')">Edit</button>' +
-            (canDelete ? ' <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="_sitesDelete(' + s.id + ',\'' + escapeHtml(s.name).replace(/'/g, "\\'") + '\')">Deactivate</button>' : '') +
-          '</td>' +
+            (canDelete ? ' <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="_sitesDelete(' + s.id + ',\'' + escapeHtml(s.name).replace(/'/g, "\\'") + '\')">Deactivate</button>' : '');
+        } else {
+          siteActions =
+            '<button class="btn btn-sm" onclick="_sitesShowForm(' + s.id + ')">Edit</button>' +
+            ' <button class="btn btn-sm btn-primary" onclick="_sitesReactivate(' + s.id + ')">Re-activate</button>';
+        }
+        return '<tr data-site-id="' + s.id + '" style="border-top:1px solid var(--border-subtle)">' +
+          '<td style="width:16px;padding:8px 0 8px 8px"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + escapeHtml(s.color || '#3b82f6') + '"></span></td>' +
+          '<td style="padding:8px"><strong>' + escapeHtml(s.name) + '</strong>' + inactiveBadge + '<br><span style="color:var(--text-tertiary);font-size:var(--text-xs)">' + escapeHtml(s.slug) + '</span></td>' +
+          '<td style="padding:8px;white-space:nowrap">' + wpDot + 'WP &nbsp; ' + fhDot + 'Firehose</td>' +
+          '<td style="padding:8px;color:var(--text-tertiary);font-size:var(--text-xs);max-width:220px;overflow:hidden;text-overflow:ellipsis" title="' + escapeHtml(s.wp_url || '') + '">' + (s.wp_url ? escapeHtml(s.wp_url) : '—') + '</td>' +
+          '<td class="sts-articles" style="padding:8px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
+          '<td class="sts-published" style="padding:8px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
+          '<td class="sts-last" style="padding:8px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
+          '<td style="padding:8px;text-align:right;white-space:nowrap">' + siteActions + '</td>' +
           '</tr>';
       }).join('');
-      el.innerHTML = '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--border-subtle)">' +
-        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)"></th>' +
-        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">NAME</th>' +
-        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">CONNECTIONS</th>' +
-        '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">WP URL</th>' +
-        '<th></th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table>';
+      el.innerHTML =
+        '<table style="width:100%;border-collapse:collapse">' +
+          '<thead><tr style="border-bottom:1px solid var(--border-default)">' +
+            '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)"></th>' +
+            '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">NAME</th>' +
+            '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">CONNECTIONS</th>' +
+            '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">WP URL</th>' +
+            '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">ARTICLES (TODAY / TOTAL)</th>' +
+            '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">PUBLISHED (TODAY / TOTAL)</th>' +
+            '<th style="padding:8px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">LAST PUBLISHED</th>' +
+            '<th></th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>';
+
+      // Fan out stats calls, one per site (non-blocking).
+      sites.forEach(function (s) {
+        fetchApi('/api/sites/' + s.id + '/stats', { bypassCache: true }).then(function (st) {
+          if (!st || !st.ok) return;
+          var tr = document.querySelector('tr[data-site-id="' + s.id + '"]');
+          if (!tr) return;
+          var fhColor = ({
+            ok:             'var(--success)',
+            stale:          'var(--warn, #f59e0b)',
+            dead:           'var(--danger)',
+            no_data:        'var(--bg-surface-2)',
+            not_configured: 'var(--bg-surface-2)',
+            unknown:        'var(--bg-surface-2)'
+          })[st.health && st.health.firehose] || 'var(--bg-surface-2)';
+          var fhDotLive = '<span title="' + (st.health && st.health.firehose || '') + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + fhColor + ';margin-right:4px"></span>';
+          var articlesCell = tr.querySelector('.sts-articles');
+          if (articlesCell) articlesCell.innerHTML = fhDotLive + (st.articlesToday || 0) + ' / ' + (st.articlesTotal || 0);
+          var pubCell = tr.querySelector('.sts-published');
+          if (pubCell) pubCell.textContent = (st.publishedToday || 0) + ' / ' + (st.publishedTotal || 0);
+          var lastCell = tr.querySelector('.sts-last');
+          if (lastCell) lastCell.textContent = st.lastPublishedAt ? timeAgo(st.lastPublishedAt) : '—';
+        }).catch(function () {});
+      });
     }).catch(function (err) {
       var el = document.getElementById('sites-list');
       if (el) el.innerHTML = '<p style="color:var(--danger)">' + escapeHtml(err.message) + '</p>';
     });
   }
+
+  function _sitesReactivate(siteId) {
+    fetchApi('/api/sites/' + siteId + '/activate', { method: 'POST' }).then(function () {
+      showToast('Site re-activated', 'success');
+      _sitesLoadList();
+      loadSites();
+    }).catch(function (err) {
+      showToast('Re-activate failed: ' + err.message, 'error');
+    });
+  }
+  window._sitesReactivate = _sitesReactivate;
 
   function _sitesShowForm(siteId) {
     _sitesEditingId = siteId;
@@ -8355,9 +8453,20 @@
     if (!wrap) return;
     var isEdit = !!_sitesEditingId;
     var keepHint = isEdit ? 'Leave blank to keep current' : '';
+    // Build an App-Password help link using the site's URL (if set).
+    var appPassHelpUrl = site.wp_url
+      ? (site.wp_url.replace(/\/$/, '') + '/wp-admin/profile.php#application-passwords-section')
+      : '';
+
+    var testDisabled = !(isEdit && site.has_wp);
+    var testFhDisabled = !(isEdit && (site.has_firehose || site.id === 1));
+
     wrap.innerHTML = [
       '<div class="settings-section" style="margin-top:var(--space-6);padding:var(--space-6);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg)">',
-      '<h3 style="font-size:var(--text-md);font-weight:var(--weight-semibold);margin-bottom:var(--space-5)">' + (isEdit ? 'Edit Site' : 'Add New Site') + '</h3>',
+      '<h3 style="font-size:var(--text-md);font-weight:var(--weight-semibold);margin-bottom:var(--space-4)">' + (isEdit ? 'Edit Site' : 'Connect a WordPress Site') + '</h3>',
+      '<p style="font-size:var(--text-sm);color:var(--text-tertiary);margin:0 0 var(--space-5) 0">' +
+        'Each site gets its own WordPress credentials and Firehose feed. You can run up to 10 sites in parallel — publish, autopilot, and feed all scope by the active site.' +
+      '</p>',
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)">',
         '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">Name *</label>',
         '<input class="settings-input" id="sf-name" type="text" value="' + escapeHtml(site.name || '') + '" placeholder="My News Site"></div>',
@@ -8366,23 +8475,45 @@
         '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">Brand Color</label>',
         '<input class="settings-input" id="sf-color" type="color" value="' + escapeHtml(site.color || '#3b82f6') + '" style="height:36px;padding:2px 6px;cursor:pointer"></div>',
         '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">WordPress URL</label>',
-        '<input class="settings-input" id="sf-wp-url" type="url" value="' + escapeHtml(site.wp_url || '') + '" placeholder="https://yoursite.com"></div>',
+        '<input class="settings-input" id="sf-wp-url" type="url" value="' + escapeHtml(site.wp_url || '') + '" placeholder="https://yoursite.com">',
+        '<div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:4px">The root URL, e.g. <code>https://mysite.com</code>. Scheme is added and trailing slash is removed on save.</div></div>',
         '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">WP Username</label>',
-        '<input class="settings-input" id="sf-wp-user" type="text" placeholder="' + (isEdit && site.has_wp ? keepHint : 'admin') + '"></div>',
-        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">WP App Password</label>',
-        '<input class="settings-input" id="sf-wp-pass" type="password" placeholder="' + (isEdit && site.has_wp ? keepHint : 'xxxx xxxx xxxx xxxx') + '"></div>',
+        '<input class="settings-input" id="sf-wp-user" type="text" placeholder="' + (isEdit && site.has_wp ? keepHint : 'admin') + '">',
+        '<div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:4px">Your WordPress login username — not email.</div></div>',
+        '<div><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">WP Application Password</label>',
+        '<input class="settings-input" id="sf-wp-pass" type="password" placeholder="' + (isEdit && site.has_wp ? keepHint : 'xxxx xxxx xxxx xxxx') + '">',
+        '<div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:4px">' +
+          'NOT your login password. Create one at ' +
+          (appPassHelpUrl
+            ? '<a href="' + escapeHtml(appPassHelpUrl) + '" target="_blank" rel="noopener" style="color:var(--accent)">WP Admin → Users → Profile → Application Passwords</a>'
+            : '<strong>WP Admin → Users → Profile → Application Passwords</strong>') +
+          '. Format: <code>xxxx xxxx xxxx xxxx</code>.' +
+        '</div></div>',
         '<div style="grid-column:1/-1"><label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:4px">Firehose Token</label>',
-        '<input class="settings-input" id="sf-fh-token" type="text" placeholder="' + (isEdit && site.has_firehose ? keepHint : 'fh_...') + '"></div>',
+        '<input class="settings-input" id="sf-fh-token" type="text" placeholder="' + (isEdit && site.has_firehose ? keepHint : 'fh_... or fhm_...') + '">',
+        '<div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:4px">' +
+          'Ahrefs Firehose tap token (starts <code>fh_</code>) or management key (<code>fhm_</code>). ' +
+          (site.id === 1 ? 'Site 1 also honours the global <code>FIREHOSE_TOKEN</code> setting.' : '') +
+        '</div></div>',
       '</div>',
       '<div id="sf-error" style="color:var(--danger);font-size:var(--text-sm);margin-top:var(--space-3);display:none"></div>',
-      '<div style="display:flex;gap:var(--space-3);margin-top:var(--space-5)">',
+      '<div id="sf-test-result" style="font-size:var(--text-sm);margin-top:var(--space-3);display:none"></div>',
+      '<div style="display:flex;gap:var(--space-3);margin-top:var(--space-5);flex-wrap:wrap">',
         '<button class="btn btn-primary" id="sf-save-btn">Save Site</button>',
         '<button class="btn" onclick="_sitesHideForm()">Cancel</button>',
+        '<span style="flex:1"></span>',
+        '<button class="btn" id="sf-test-wp" ' + (testDisabled ? 'disabled title="Save credentials first"' : '') + '>Test WP</button>',
+        '<button class="btn" id="sf-test-fh" ' + (testFhDisabled ? 'disabled title="Save firehose token first"' : '') + '>Test Firehose</button>',
       '</div>',
       '</div>'
     ].join('');
 
     document.getElementById('sf-save-btn').addEventListener('click', _sitesSave);
+    var testWpBtn = document.getElementById('sf-test-wp');
+    if (testWpBtn) testWpBtn.addEventListener('click', function () { _sitesTestWp(_sitesEditingId); });
+    var testFhBtn = document.getElementById('sf-test-fh');
+    if (testFhBtn) testFhBtn.addEventListener('click', function () { _sitesTestFirehose(_sitesEditingId); });
+
     // Auto-generate slug from name on new sites only
     if (!isEdit) {
       document.getElementById('sf-name').addEventListener('input', function () {
@@ -8390,8 +8521,45 @@
         document.getElementById('sf-slug').value = slug;
       });
     }
+    // Normalize WP URL on blur — scheme added, trailing slash removed.
+    var urlInput = document.getElementById('sf-wp-url');
+    if (urlInput) {
+      urlInput.addEventListener('blur', function () {
+        var v = (this.value || '').trim();
+        if (!v) return;
+        if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+        v = v.replace(/\/+$/, '');
+        this.value = v;
+      });
+    }
     wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
+
+  function _sitesShowTestResult(ok, message) {
+    var el = document.getElementById('sf-test-result');
+    if (!el) return;
+    el.style.display = 'block';
+    el.style.color = ok ? 'var(--success)' : 'var(--danger)';
+    el.textContent = (ok ? '✅ ' : '❌ ') + message;
+  }
+
+  function _sitesTestWp(siteId) {
+    if (!siteId) { _sitesShowTestResult(false, 'Save the site first to run a WP test.'); return; }
+    _sitesShowTestResult(true, 'Testing WordPress connection…');
+    fetchApi('/api/sites/' + siteId + '/test-wp', { method: 'POST' })
+      .then(function (r) { _sitesShowTestResult(true, (r && r.message) || 'WP connection OK'); })
+      .catch(function (err) { _sitesShowTestResult(false, err.message); });
+  }
+
+  function _sitesTestFirehose(siteId) {
+    if (!siteId) { _sitesShowTestResult(false, 'Save the site first to run a Firehose test.'); return; }
+    _sitesShowTestResult(true, 'Testing Firehose token…');
+    fetchApi('/api/sites/' + siteId + '/test-firehose', { method: 'POST' })
+      .then(function (r) { _sitesShowTestResult(true, (r && r.message) || 'Firehose OK'); })
+      .catch(function (err) { _sitesShowTestResult(false, err.message); });
+  }
+  window._sitesTestWp = _sitesTestWp;
+  window._sitesTestFirehose = _sitesTestFirehose;
 
   function _sitesHideForm() {
     var wrap = document.getElementById('sites-form-wrap');
@@ -8411,6 +8579,37 @@
 
     if (!name) { errEl.textContent = 'Name is required.'; errEl.style.display = 'block'; return; }
     if (!slug) { errEl.textContent = 'Slug is required.'; errEl.style.display = 'block'; return; }
+
+    // Normalize WP URL — scheme + strip trailing slash.
+    if (wpUrl) {
+      if (!/^https?:\/\//i.test(wpUrl)) wpUrl = 'https://' + wpUrl;
+      wpUrl = wpUrl.replace(/\/+$/, '');
+    }
+
+    // Warn (don't block) on a duplicate WP URL against a different site.
+    if (wpUrl && Array.isArray(state.sites)) {
+      var dup = state.sites.find(function (s) {
+        return s.id !== _sitesEditingId && s.wp_url && s.wp_url.replace(/\/+$/, '').toLowerCase() === wpUrl.toLowerCase();
+      });
+      if (dup) {
+        if (!confirm('Another site ("' + dup.name + '") is already pointing at ' + wpUrl + '.\nSave anyway?')) {
+          return;
+        }
+      }
+    }
+
+    // App-password sanity: 4 blocks of 4 chars (with optional spaces) is the
+    // WP format. A pasted login password is typically far shorter or has no
+    // structure — flag with a confirm, don't block.
+    if (wpPass && wpPass.indexOf('••') === -1) {
+      var normalized = wpPass.replace(/\s+/g, '');
+      if (normalized.length < 20) {
+        if (!confirm('The WP App Password looks unusually short (' + normalized.length + ' chars). These are normally 24 characters like "xxxx xxxx xxxx xxxx xxxx xxxx". Save anyway?')) {
+          return;
+        }
+      }
+    }
+
     errEl.style.display = 'none';
 
     var body = { name: name, slug: slug, color: color, wp_url: wpUrl };
@@ -8426,6 +8625,7 @@
 
     fetchApi(url, { method: method, body: body }).then(function (data) {
       if (!data || !data.ok) throw new Error((data && data.error) || 'Save failed');
+      showToast(_sitesEditingId ? 'Site updated' : 'Site created — use "Test WP" and "Test Firehose" to verify', 'success');
       _sitesHideForm();
       _sitesLoadList();
       loadSites(); // refresh topbar dropdown
@@ -8876,8 +9076,30 @@
     }
     if (!promises.length) { showToast('No changes to save', 'info'); return; }
     Promise.all(promises)
-      .then(function () { showToast('WordPress settings saved', 'success'); })
+      .then(function () {
+        markFormClean('WP Settings');
+        showToast('WordPress settings saved', 'success');
+      })
       .catch(function (err) { showToast('Save failed: ' + err.message, 'error'); });
+  }
+
+  // IDs of inputs whose edits should flag the WP Settings form as dirty.
+  var _WP_SETTINGS_INPUT_IDS = [
+    'wp-site-url', 'wp-pub-username', 'wp-pub-password',
+    'wp-post-status', 'wp-author-id', 'wp-default-category',
+    'wp-always-append-category', 'wp-default-author-username',
+    'wp-comment-status', 'wp-ping-status'
+  ];
+
+  function _wireWpSettingsDirtyTracking() {
+    _WP_SETTINGS_INPUT_IDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el || el._dirtyWired) return;
+      el._dirtyWired = true;
+      var handler = function () { markFormDirty('WP Settings'); };
+      el.addEventListener('input', handler);
+      el.addEventListener('change', handler);
+    });
   }
 
   function loadWPPublishingSettings() {
@@ -8892,6 +9114,9 @@
       if (el) el.placeholder = site.has_wp ? '(saved — enter new to change)' : 'WordPress username';
       el = $('wp-pub-password');
       if (el) el.placeholder = site.has_wp ? '(saved — enter new to change)' : 'App password';
+      _wireWpSettingsDirtyTracking();
+      // Freshly loaded state is clean by definition.
+      markFormClean('WP Settings');
     }).catch(function () {});
 
     // Post defaults from per-site config
@@ -8918,6 +9143,8 @@
       if (el) el.value = s.WP_COMMENT_STATUS || '';
       el = $('wp-ping-status');
       if (el) el.value = s.WP_PING_STATUS || '';
+      _wireWpSettingsDirtyTracking();
+      markFormClean('WP Settings');
     }).catch(function () {});
   }
 

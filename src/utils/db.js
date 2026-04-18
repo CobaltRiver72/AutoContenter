@@ -999,6 +999,15 @@ function runMigrations() {
       db.exec('CREATE INDEX IF NOT EXISTS idx_' + _tbl + '_site ON ' + _tbl + '(site_id)');
     }
 
+    // ─── 3b. Tag articles with source_site_id (which site's firehose brought it)
+    //         Articles don't "belong" to a site the way drafts do — the same
+    //         article can cluster and fan out to multiple sites. But we need
+    //         to know WHICH firehose received it so the Feed page can filter.
+    try {
+      db.exec('ALTER TABLE articles ADD COLUMN source_site_id INTEGER DEFAULT 1');
+    } catch (_e) { /* column already exists — safe to ignore */ }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_articles_source_site ON articles(source_site_id)');
+
     // ─── 4. Fix drafts unique index: UNIQUE(source_url) → UNIQUE(source_url, site_id)
     //        Same URL can exist as drafts for different sites in multi-site mode.
     //        Drop both the old non-unique and UNIQUE indexes — the new composite

@@ -382,11 +382,14 @@ function createApiRouter(deps) {
   router.get('/feed', function (req, res) {
     try {
       var p = parsePageParam(req, 50);
-      var countStmt = db.prepare('SELECT COUNT(*) as total FROM articles');
+      var sid = req.siteId || 0;
+      var where = sid ? 'WHERE source_site_id = @site_id' : '';
+      var countStmt = db.prepare('SELECT COUNT(*) as total FROM articles ' + where);
       var dataStmt = db.prepare(
-        'SELECT * FROM articles ORDER BY received_at DESC LIMIT @limit OFFSET @offset'
+        'SELECT * FROM articles ' + where + ' ORDER BY received_at DESC LIMIT @limit OFFSET @offset'
       );
-      var result = paginate(dataStmt, countStmt, null, p.page, p.perPage);
+      var params = sid ? { site_id: sid } : null;
+      var result = paginate(dataStmt, countStmt, params, p.page, p.perPage);
       res.json(result);
     } catch (err) {
       logger.error('api', 'Failed to fetch feed', err.message);
@@ -406,10 +409,18 @@ function createApiRouter(deps) {
     res.write(':\n\n'); // SSE comment to establish connection
 
     // Send initial batch of recent articles so the dashboard isn't empty on load
+    var sseSiteId = req.siteId || 0;
     try {
-      var recentArticles = db.prepare(
-        'SELECT * FROM articles ORDER BY received_at DESC LIMIT 50'
-      ).all();
+      var recentArticles;
+      if (sseSiteId) {
+        recentArticles = db.prepare(
+          'SELECT * FROM articles WHERE source_site_id = ? ORDER BY received_at DESC LIMIT 50'
+        ).all(sseSiteId);
+      } else {
+        recentArticles = db.prepare(
+          'SELECT * FROM articles ORDER BY received_at DESC LIMIT 50'
+        ).all();
+      }
       if (recentArticles.length > 0) {
         res.write('event: initial-batch\ndata: ' + JSON.stringify(recentArticles) + '\n\n');
       }
@@ -422,30 +433,37 @@ function createApiRouter(deps) {
     }, 30000);
 
     function onArticle(article) {
+      // Site-scoped SSE: only forward articles whose firehose belongs to the
+      // active site. "All Sites" mode (sseSiteId=0) forwards everything.
+      if (sseSiteId && article && article.source_site_id && article.source_site_id !== sseSiteId) {
+        return;
+      }
       var data = JSON.stringify(article);
       res.write('event: article\ndata: ' + data + '\n\n');
     }
 
+    // Subscribe to BOTH the legacy single-site firehose AND the multi-site pool
+    // so sites 2+ (served by the pool) also stream into the live feed.
     if (firehose && typeof firehose.on === 'function') {
       firehose.on('article', onArticle);
     }
+    if (firehosePool && typeof firehosePool.on === 'function') {
+      firehosePool.on('article', onArticle);
+    }
 
-    req.on('close', function () {
+    function unsubscribe() {
       if (firehose && typeof firehose.removeListener === 'function') {
         firehose.removeListener('article', onArticle);
       }
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = null;
-    });
-
-    // Also handle broken pipe / error
-    req.on('error', function () {
-      if (firehose && typeof firehose.removeListener === 'function') {
-        firehose.removeListener('article', onArticle);
+      if (firehosePool && typeof firehosePool.removeListener === 'function') {
+        firehosePool.removeListener('article', onArticle);
       }
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = null;
-    });
+    }
+
+    req.on('close', unsubscribe);
+    req.on('error', unsubscribe);
   });
 
   // ─── GET /api/trends ───────────────────────────────────────────────────────
@@ -482,8 +500,15 @@ function createApiRouter(deps) {
         params.push('%' + keywords[i] + '%');
       }
 
+      // Site-scope: only search articles whose firehose belongs to the active site.
+      var srchSiteId = req.siteId || 0;
+      if (srchSiteId) {
+        whereClauses.push('source_site_id = ?');
+        params.push(srchSiteId);
+      }
+
       var sql = 'SELECT id, firehose_event_id, url, domain, title, publish_time, ' +
-                'page_category, language, authority_tier, cluster_id, received_at ' +
+                'page_category, language, authority_tier, cluster_id, received_at, source_site_id ' +
                 'FROM articles WHERE ' + whereClauses.join(' AND ') +
                 ' ORDER BY received_at DESC LIMIT ?';
       params.push(limit);
@@ -897,27 +922,62 @@ function createApiRouter(deps) {
   router.get('/stats', function (req, res) {
     try {
       var today = new Date().toISOString().slice(0, 10);
+      var todayStart = today + 'T00:00:00';
+      var statsSid = req.siteId || 0;
 
-      var articlesToday = db.prepare(
-        "SELECT COUNT(*) as count FROM articles WHERE received_at >= ?"
-      ).get(today + 'T00:00:00');
+      // Articles are scoped by source_site_id (which firehose brought it in).
+      // Clusters aren't directly site-owned — a cluster is "for a site" if it
+      // produced at least one draft for that site. We reflect that with a
+      // correlated EXISTS on drafts.site_id.
+      // Published is a direct site_id filter.
+      var articlesToday, clustersToday, publishedToday, totalArticles, hourlyData;
 
-      var clustersToday = db.prepare(
-        "SELECT COUNT(*) as count FROM clusters WHERE detected_at >= ?"
-      ).get(today + 'T00:00:00');
+      if (statsSid) {
+        articlesToday = db.prepare(
+          "SELECT COUNT(*) as count FROM articles WHERE received_at >= ? AND source_site_id = ?"
+        ).get(todayStart, statsSid);
 
-      var publishedToday = db.prepare(
-        "SELECT COUNT(*) as count FROM published WHERE published_at >= ?"
-      ).get(today + 'T00:00:00');
+        clustersToday = db.prepare(
+          "SELECT COUNT(DISTINCT c.id) as count FROM clusters c " +
+          "WHERE c.detected_at >= ? AND EXISTS (" +
+          "  SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?" +
+          ")"
+        ).get(todayStart, statsSid);
 
-      var totalArticles = db.prepare('SELECT COUNT(*) as count FROM articles').get();
+        publishedToday = db.prepare(
+          "SELECT COUNT(*) as count FROM published WHERE published_at >= ? AND site_id = ?"
+        ).get(todayStart, statsSid);
 
-      // Articles per hour (last 24h) for chart
-      var hourlyData = db.prepare(
-        "SELECT strftime('%Y-%m-%dT%H:00:00', received_at) as hour, COUNT(*) as count " +
-        "FROM articles WHERE received_at >= datetime('now', '-24 hours') " +
-        "GROUP BY hour ORDER BY hour"
-      ).all();
+        totalArticles = db.prepare(
+          'SELECT COUNT(*) as count FROM articles WHERE source_site_id = ?'
+        ).get(statsSid);
+
+        hourlyData = db.prepare(
+          "SELECT strftime('%Y-%m-%dT%H:00:00', received_at) as hour, COUNT(*) as count " +
+          "FROM articles WHERE received_at >= datetime('now', '-24 hours') AND source_site_id = ? " +
+          "GROUP BY hour ORDER BY hour"
+        ).all(statsSid);
+      } else {
+        articlesToday = db.prepare(
+          "SELECT COUNT(*) as count FROM articles WHERE received_at >= ?"
+        ).get(todayStart);
+
+        clustersToday = db.prepare(
+          "SELECT COUNT(*) as count FROM clusters WHERE detected_at >= ?"
+        ).get(todayStart);
+
+        publishedToday = db.prepare(
+          "SELECT COUNT(*) as count FROM published WHERE published_at >= ?"
+        ).get(todayStart);
+
+        totalArticles = db.prepare('SELECT COUNT(*) as count FROM articles').get();
+
+        hourlyData = db.prepare(
+          "SELECT strftime('%Y-%m-%dT%H:00:00', received_at) as hour, COUNT(*) as count " +
+          "FROM articles WHERE received_at >= datetime('now', '-24 hours') " +
+          "GROUP BY hour ORDER BY hour"
+        ).all();
+      }
 
       res.json({
         articlesToday: articlesToday ? articlesToday.count : 0,
@@ -925,6 +985,7 @@ function createApiRouter(deps) {
         publishedToday: publishedToday ? publishedToday.count : 0,
         totalArticles: totalArticles ? totalArticles.count : 0,
         hourlyArticles: hourlyData,
+        siteId: statsSid,
       });
     } catch (err) {
       logger.error('api', 'Failed to fetch stats', err.message);
@@ -937,8 +998,15 @@ function createApiRouter(deps) {
 
   router.get('/sources/stats', function (req, res) {
     try {
+      // Site-scope: filter to articles brought in by the active site's firehose.
+      // All Sites mode (srcSid=0) leaves the clauses empty.
+      var srcSid = req.siteId || 0;
+      var artWhere = srcSid ? ' WHERE source_site_id = ?' : '';
+      var artAnd   = srcSid ? ' AND source_site_id = ?'   : '';
+      var artP     = srcSid ? [srcSid] : [];
+
       // ── 1. Per-domain summary ──────────────────────────────────────────────
-      var domainRows = db.prepare(`
+      var domainStmt = db.prepare(`
         SELECT
           domain,
           COUNT(*)                                                AS total,
@@ -954,18 +1022,20 @@ function createApiRouter(deps) {
           MIN(received_at)                                        AS first_seen,
           GROUP_CONCAT(DISTINCT page_category)                   AS categories
         FROM articles
+        ` + artWhere + `
         GROUP BY domain
         ORDER BY total DESC
         LIMIT 100
-      `).all();
+      `);
+      var domainRows = srcSid ? domainStmt.all(srcSid) : domainStmt.all();
 
       // ── 2. Draft conversion per domain ────────────────────────────────────
-      var draftRows = db.prepare(`
-        SELECT source_domain AS domain, COUNT(*) AS draft_count
-        FROM drafts
-        WHERE source_domain IS NOT NULL AND source_domain != ''
-        GROUP BY source_domain
-      `).all();
+      var draftSql = 'SELECT source_domain AS domain, COUNT(*) AS draft_count ' +
+                     'FROM drafts WHERE source_domain IS NOT NULL AND source_domain != ""' +
+                     (srcSid ? ' AND site_id = ?' : '') +
+                     ' GROUP BY source_domain';
+      var draftStmt = db.prepare(draftSql);
+      var draftRows = srcSid ? draftStmt.all(srcSid) : draftStmt.all();
       var draftMap = {};
       draftRows.forEach(function(r) { draftMap[r.domain] = r.draft_count; });
 
@@ -974,58 +1044,68 @@ function createApiRouter(deps) {
       var sparklineRows = [];
       if (topDomains.length > 0) {
         var placeholders = topDomains.map(function() { return '?'; }).join(',');
-        sparklineRows = db.prepare(`
+        var sparkSql = `
           SELECT
             domain,
             DATE(received_at) AS day,
             COUNT(*)          AS count
           FROM articles
           WHERE received_at >= DATE('now', '-7 days')
-            AND domain IN (` + placeholders + `)
+            AND domain IN (` + placeholders + `)` + artAnd + `
           GROUP BY domain, day
           ORDER BY domain, day
-        `).all(topDomains);
+        `;
+        var sparkParams = srcSid ? topDomains.concat([srcSid]) : topDomains;
+        sparklineRows = db.prepare(sparkSql).all(sparkParams);
       }
 
       // ── 4. Language totals ────────────────────────────────────────────────
-      var langTotals = db.prepare(`
+      var langSql = `
         SELECT
           COALESCE(language, 'unknown') AS language,
           COUNT(*) AS count
-        FROM articles
+        FROM articles` + artWhere + `
         GROUP BY language
         ORDER BY count DESC
-      `).all();
+      `;
+      var langStmt = db.prepare(langSql);
+      var langTotals = srcSid ? langStmt.all(srcSid) : langStmt.all();
 
       // ── 5. Category totals ────────────────────────────────────────────────
-      var categoryTotals = db.prepare(`
+      var catSql = `
         SELECT
           COALESCE(page_category, 'uncategorized') AS category,
           COUNT(*) AS count
-        FROM articles
+        FROM articles` + artWhere + `
         GROUP BY page_category
         ORDER BY count DESC
         LIMIT 20
-      `).all();
+      `;
+      var catStmt = db.prepare(catSql);
+      var categoryTotals = srcSid ? catStmt.all(srcSid) : catStmt.all();
 
       // ── 6. Stale domains (no article in last 24h) ─────────────────────────
-      var staleDomains = db.prepare(`
+      var staleSql = `
         SELECT domain, MAX(received_at) AS last_seen, COUNT(*) AS total
-        FROM articles
+        FROM articles` + artWhere + `
         GROUP BY domain
         HAVING last_seen < datetime('now', '-24 hours')
         ORDER BY last_seen DESC
         LIMIT 20
-      `).all();
+      `;
+      var staleStmt = db.prepare(staleSql);
+      var staleDomains = srcSid ? staleStmt.all(srcSid) : staleStmt.all();
 
       // ── 7. New domains today ──────────────────────────────────────────────
-      var newToday = db.prepare(`
+      var newSql = `
         SELECT domain, MIN(received_at) AS first_seen, COUNT(*) AS count
-        FROM articles
+        FROM articles` + artWhere + `
         GROUP BY domain
         HAVING DATE(first_seen) = DATE('now')
         ORDER BY first_seen DESC
-      `).all();
+      `;
+      var newStmt = db.prepare(newSql);
+      var newToday = srcSid ? newStmt.all(srcSid) : newStmt.all();
 
       // Attach draft counts to domain rows
       domainRows.forEach(function(r) {
@@ -5796,32 +5876,66 @@ function createApiRouter(deps) {
     }
   });
 
+  // Helper: read a boolean flag for the active site, falling back to global
+  // settings when the site has no per-site override. siteId=0 reads global only.
+  function _readEnabledFlag(key, siteId) {
+    if (siteId) {
+      var siteVal = siteConfigMod.getSiteConfig(siteId, key);
+      if (siteVal !== undefined && siteVal !== null && siteVal !== '') {
+        return siteVal === true || siteVal === 1 || String(siteVal).toLowerCase() === 'true' || siteVal === '1';
+      }
+    }
+    var { get: cfgGet } = require('../utils/config');
+    var globalVal = cfgGet(key);
+    return globalVal === true || globalVal === 1 || String(globalVal).toLowerCase() === 'true' || globalVal === '1';
+  }
+
   router.post('/autopilot/toggle', function (req, res) {
     try {
-      var { get: cfgGet, set: cfgSet } = require('../utils/config');
-      var current = cfgGet('AUTOPILOT_ENABLED');
-      var isEnabled = current === true || current === 1 || String(current).toLowerCase() === 'true' || current === '1';
-      var newValue = isEnabled ? 'false' : 'true';
-      cfgSet('AUTOPILOT_ENABLED', newValue, req.app.locals.db);
+      var toggleSiteId = req.siteId || 0;
+      var isEnabled = _readEnabledFlag('AUTOPILOT_ENABLED', toggleSiteId);
+      var newValue  = isEnabled ? 'false' : 'true';
+      if (toggleSiteId) {
+        siteConfigMod.setSiteConfig(toggleSiteId, 'AUTOPILOT_ENABLED', newValue);
+      } else {
+        var { set: cfgSet } = require('../utils/config');
+        cfgSet('AUTOPILOT_ENABLED', newValue, req.app.locals.db);
+      }
       var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
-      res.json({ ok: true, enabled: newValue === 'true', status: ap ? ap.getStatus() : null });
+      res.json({
+        ok: true,
+        enabled: newValue === 'true',
+        siteId: toggleSiteId,
+        scope: toggleSiteId ? 'site' : 'global',
+        status: ap ? ap.getStatus() : null,
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
 
-  // POST /api/auto-rewrite/toggle — toggle AUTO_REWRITE_ENABLED
+  // POST /api/auto-rewrite/toggle — toggle AUTO_REWRITE_ENABLED (per-site or global)
   router.post('/auto-rewrite/toggle', function (req, res) {
     try {
-      var { get: cfgGet, set: cfgSet } = require('../utils/config');
-      var current = cfgGet('AUTO_REWRITE_ENABLED');
-      var isEnabled = current === true || current === 1 || String(current).toLowerCase() === 'true' || current === '1';
-      var newValue = isEnabled ? 'false' : 'true';
-      cfgSet('AUTO_REWRITE_ENABLED', newValue, req.app.locals.db);
+      var toggleSiteId = req.siteId || 0;
+      var isEnabled = _readEnabledFlag('AUTO_REWRITE_ENABLED', toggleSiteId);
+      var newValue  = isEnabled ? 'false' : 'true';
+      if (toggleSiteId) {
+        siteConfigMod.setSiteConfig(toggleSiteId, 'AUTO_REWRITE_ENABLED', newValue);
+      } else {
+        var { set: cfgSet } = require('../utils/config');
+        cfgSet('AUTO_REWRITE_ENABLED', newValue, req.app.locals.db);
+      }
       var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
       var status = pipeline && typeof pipeline.getAutoRewriteStatus === 'function'
         ? pipeline.getAutoRewriteStatus() : null;
-      res.json({ ok: true, enabled: newValue === 'true', status: status });
+      res.json({
+        ok: true,
+        enabled: newValue === 'true',
+        siteId: toggleSiteId,
+        scope: toggleSiteId ? 'site' : 'global',
+        status: status,
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -5854,26 +5968,41 @@ function createApiRouter(deps) {
       return res.status(500).json({ ok: false, error: 'scheduler not initialised' });
     }
     var db = req.app.locals.db;
-    var autoRw = cfgGet('AUTO_REWRITE_ENABLED');
-    var autoPub = cfgGet('AUTOPILOT_ENABLED');
-    var gateSummary = 'rewrite=' + autoRw + ' publish=' + autoPub;
+    // Scope to the active site. siteId=0 (All Sites) runs the unscoped loop.
+    var rnSiteId = req.siteId || 0;
+    var autoRw = rnSiteId
+      ? siteConfigMod.getSiteConfig(rnSiteId, 'AUTO_REWRITE_ENABLED')
+      : cfgGet('AUTO_REWRITE_ENABLED');
+    var autoPub = rnSiteId
+      ? siteConfigMod.getSiteConfig(rnSiteId, 'AUTOPILOT_ENABLED')
+      : cfgGet('AUTOPILOT_ENABLED');
+    var gateSummary = 'rewrite=' + autoRw + ' publish=' + autoPub + ' site=' + (rnSiteId || 'all');
     logger.info('autopilot', 'Run-Now triggered by user (' + gateSummary + ')');
 
     // ─── Filter drop-off diagnostic ─────────────────────────────────────────
     // Runs COUNT(DISTINCT cluster_id) against the same tables the rewrite
     // selector uses, adding one filter per stage. Reveals which filter is
     // cutting candidates to zero. Matches pipeline.js _rewriteLoop selector
-    // semantics (pipeline.js:257-274).
-    var diagnostic = { stages: [], biggestDrop: null, error: null };
+    // semantics (pipeline.js:257-274). When the admin is on a specific site,
+    // every stage also filters `d.site_id = ?` so the counts reflect ONLY
+    // that site's pipeline — never surfacing Site A's backlog while scoped
+    // to Site B.
+    var diagnostic = { stages: [], biggestDrop: null, error: null, siteId: rnSiteId };
     try {
       var minSources = parseInt(cfgGet('MIN_SOURCES_THRESHOLD'), 10);
       if (isNaN(minSources) || minSources < 1) minSources = 2;
       var minSim = parseFloat(cfgGet('AUTOPILOT_MIN_SIMILARITY'));
       if (isNaN(minSim)) minSim = 0.30;
 
+      // Per-site filter — prepended as a leading param so stage param arrays
+      // stay simple. When unscoped, F_SITE is empty.
+      var F_SITE = rnSiteId ? ' AND d.site_id = ?' : '';
+      var siteLeadParams = rnSiteId ? [rnSiteId] : [];
+
       var base = "SELECT COUNT(DISTINCT d.cluster_id) AS n FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
-        "WHERE d.status='draft' AND c.status='queued' AND d.cluster_role='primary'";
+        "WHERE d.status='draft' AND c.status='queued' AND d.cluster_role='primary'" +
+        F_SITE;
       var F_MODE = " AND d.mode IN ('auto','manual_import')";
       var F_SOURCES = " AND c.article_count >= ?";
       var F_SIM = " AND (c.avg_similarity IS NULL OR c.avg_similarity >= ?)";
@@ -5882,12 +6011,12 @@ function createApiRouter(deps) {
         "AND d2.status='fetching' AND d2.mode IN ('auto','manual_import'))";
 
       var stages = [
-        { key: 'pending_primary',     sql: base,                                                  params: [],                     note: 'baseline: draft + queued + primary' },
-        { key: 'mode_auto',           sql: base + F_MODE,                                         params: [],                     note: "mode IN (auto, manual_import)" },
-        { key: 'min_sources',         sql: base + F_MODE + F_SOURCES,                             params: [minSources],           note: 'article_count >= ' + minSources },
-        { key: 'min_similarity',      sql: base + F_MODE + F_SOURCES + F_SIM,                     params: [minSources, minSim],   note: 'avg_similarity >= ' + minSim },
-        { key: 'not_locked',          sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK,            params: [minSources, minSim],   note: 'primary draft not locked' },
-        { key: 'no_sibling_fetching', sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK + F_NOSIB,  params: [minSources, minSim],   note: 'no sibling still in fetching' },
+        { key: 'pending_primary',     sql: base,                                                  params: siteLeadParams.slice(),                                       note: 'baseline: draft + queued + primary' + (rnSiteId ? ' (site=' + rnSiteId + ')' : '') },
+        { key: 'mode_auto',           sql: base + F_MODE,                                         params: siteLeadParams.slice(),                                       note: "mode IN (auto, manual_import)" },
+        { key: 'min_sources',         sql: base + F_MODE + F_SOURCES,                             params: siteLeadParams.concat([minSources]),                          note: 'article_count >= ' + minSources },
+        { key: 'min_similarity',      sql: base + F_MODE + F_SOURCES + F_SIM,                     params: siteLeadParams.concat([minSources, minSim]),                  note: 'avg_similarity >= ' + minSim },
+        { key: 'not_locked',          sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK,            params: siteLeadParams.concat([minSources, minSim]),                  note: 'primary draft not locked' },
+        { key: 'no_sibling_fetching', sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK + F_NOSIB,  params: siteLeadParams.concat([minSources, minSim]),                  note: 'no sibling still in fetching' },
       ];
 
       for (var i = 0; i < stages.length; i++) {
@@ -5971,6 +6100,8 @@ function createApiRouter(deps) {
           traceKwParams.push('%' + traceBlockedKw[tki] + '%');
         }
 
+        var traceSiteWhere = rnSiteId ? ' AND d.site_id = ?' : '';
+        var traceSiteParams = rnSiteId ? [rnSiteId] : [];
         var traceSql =
           "SELECT d.cluster_id, c.topic, c.trends_boosted, COUNT(*) as draft_count " +
           "FROM drafts d " +
@@ -5984,13 +6115,13 @@ function createApiRouter(deps) {
           "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
           "    AND d2.status = 'fetching' AND d2.mode IN ('auto', 'manual_import')" +
           "  )" +
-          traceKwWhere + " " +
+          traceKwWhere + traceSiteWhere + " " +
           "GROUP BY d.cluster_id " +
           "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
           "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
           "LIMIT ?";
         var traceStmt = db.prepare(traceSql);
-        var traceParams = [realMinSources, realMinSim].concat(traceKwParams).concat([slots]);
+        var traceParams = [realMinSources, realMinSim].concat(traceKwParams).concat(traceSiteParams).concat([slots]);
         var loopRows = traceStmt.all.apply(traceStmt, traceParams);
 
         logger.info('autopilot',
@@ -6018,7 +6149,7 @@ function createApiRouter(deps) {
       logger.info('autopilot', 'Run-Now skipped rewrite: scheduler already running (rewriteRunning=true)');
     } else {
       try {
-        await pipeline._rewriteLoop();
+        await pipeline._rewriteLoop(rnSiteId || undefined);
       } catch (e) {
         errors.push('rewrite: ' + e.message);
         logger.error('autopilot', 'Run-Now rewrite failed: ' + e.message);
@@ -6035,7 +6166,7 @@ function createApiRouter(deps) {
       logger.info('autopilot', 'Run-Now skipped publish: scheduler already running (publishRunning=true)');
     } else {
       try {
-        await pipeline._publishLoop();
+        await pipeline._publishLoop(rnSiteId || undefined);
       } catch (e) {
         errors.push('publish: ' + e.message);
         logger.error('autopilot', 'Run-Now publish failed: ' + e.message);
@@ -6061,6 +6192,8 @@ function createApiRouter(deps) {
 
     res.json({
       ok: errors.length === 0,
+      siteId: rnSiteId,
+      scope: rnSiteId ? 'site' : 'all',
       gates: { rewriteEnabled: String(autoRw) === 'true', publishEnabled: String(autoPub) === 'true' },
       skipped: { rewrite: rewriteSkipped, publish: publishSkipped },
       delta: delta,
@@ -6918,6 +7051,265 @@ function createApiRouter(deps) {
       }
       siteConfigMod.bulkSetSiteConfig(siteId, body.config);
       res.json({ ok: true, message: 'Site config updated', siteId: siteId });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/sites/:id/test-wp ───────────────────────────────────────────
+  // Authenticated ping against the site's WordPress REST API.
+  // Returns the authenticated username on success, or a targeted error hint
+  // (401 = auth stripping, 404 = REST disabled, other = generic).
+  router.post('/sites/:id/test-wp', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var site = siteConfigMod.getSite(siteId);
+      if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
+
+      var wpUrl = (site.wp_url || '').replace(/\/$/, '');
+      var wpUser = site.wp_username || '';
+      var wpPass = site.wp_app_password || '';
+      if (!wpUrl || !wpUser || !wpPass) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Site is missing WP credentials',
+          missing: {
+            wp_url: !wpUrl,
+            wp_username: !wpUser,
+            wp_app_password: !wpPass,
+          },
+        });
+      }
+
+      try { assertSafeUrl(wpUrl); } catch (safeErr) {
+        return res.status(400).json({ ok: false, error: 'WordPress URL rejected: ' + safeErr.message });
+      }
+
+      var authHeader = 'Basic ' + Buffer.from(wpUser + ':' + wpPass).toString('base64');
+      var restRouteUrl = wpUrl + '/?rest_route=' + encodeURIComponent('/wp/v2/users/me');
+
+      axios.get(restRouteUrl, safeAxiosOptions({
+        headers: { 'Authorization': authHeader },
+        timeout: 15000,
+      }))
+        .then(function (userRes) {
+          if (userRes.data && userRes.data.id) {
+            res.json({
+              ok: true,
+              message: 'Authenticated as ' + (userRes.data.name || userRes.data.slug),
+              siteId: siteId,
+              wpUrl: wpUrl,
+              userId: userRes.data.id,
+              username: userRes.data.slug || userRes.data.name,
+            });
+          } else {
+            res.status(502).json({ ok: false, error: 'Unexpected response from WordPress (no user id)' });
+          }
+        })
+        .catch(function (err) {
+          var safe = sanitizeAxiosError(err);
+          var statusCode = safe.status;
+          var wpMsg = safe.data || safe.message;
+          var hint = '';
+          if (statusCode === 401) {
+            hint = 'Authentication failed. Likely causes: wrong username/password, or the WP server strips the Authorization header. ' +
+                   'Confirm you used a WordPress Application Password (not your login password) and that the REST API is reachable.';
+          } else if (statusCode === 404) {
+            hint = 'REST API not found. Go to WP Admin → Settings → Permalinks → Save, and confirm no security plugin is blocking /wp-json/.';
+          } else if (!statusCode) {
+            hint = 'Cannot reach WordPress. Check the URL, DNS, and firewall.';
+          } else {
+            hint = 'WP returned HTTP ' + statusCode + ': ' + wpMsg;
+          }
+          res.status(statusCode || 500).json({ ok: false, error: hint, rawStatus: statusCode });
+        });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/sites/:id/test-firehose ─────────────────────────────────────
+  // Validates the stored firehose token. Management keys (fhm_*) are checked by
+  // hitting the taps list endpoint; tap tokens (fh_*) are checked with a short
+  // HEAD-style probe against the stream URL.
+  router.post('/sites/:id/test-firehose', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var site = siteConfigMod.getSite(siteId);
+      if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
+
+      var token = site.firehose_token;
+      // Site 1 may store its token in global settings for backward compat.
+      if (!token && siteId === 1) {
+        token = cfgGet('FIREHOSE_TOKEN') || cfgGet('RAPIDAPI_FIREHOSE_KEY') || cfgGet('AHREFS_FIREHOSE_TOKEN');
+      }
+      if (!token) {
+        return res.status(400).json({ ok: false, error: 'No firehose token set for this site' });
+      }
+
+      token = String(token).trim();
+      var kind = token.indexOf('fhm_') === 0 ? 'management' : 'tap';
+
+      if (kind === 'management') {
+        axios.get('https://api.firehose.com/v1/taps', {
+          headers: { 'Authorization': 'Bearer ' + token },
+          timeout: 10000,
+        })
+          .then(function (r) {
+            var taps = r.data;
+            if (!Array.isArray(taps)) taps = taps.taps || taps.data || [];
+            res.json({
+              ok: true,
+              kind: 'management',
+              message: 'Management key valid. ' + taps.length + ' tap(s) available.',
+              tapCount: taps.length,
+            });
+          })
+          .catch(function (err) {
+            var safe = sanitizeAxiosError(err);
+            res.status(safe.status || 500).json({
+              ok: false,
+              kind: 'management',
+              error: safe.status === 401
+                ? 'Management key rejected by Ahrefs (401). Regenerate it from your Ahrefs Firehose dashboard.'
+                : 'Could not validate key: ' + (safe.data || safe.message || 'unknown error'),
+            });
+          });
+      } else {
+        // Tap token — probe the stream URL. An SSE endpoint returns 200 with
+        // text/event-stream on auth success. A short abort with axios on
+        // responseType:'stream' is sufficient to detect auth failure.
+        var probeUrl = 'https://api.firehose.com/v1/stream';
+        axios.get(probeUrl, {
+          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'text/event-stream' },
+          timeout: 8000,
+          responseType: 'stream',
+        })
+          .then(function (streamRes) {
+            var ok = streamRes.status >= 200 && streamRes.status < 300;
+            try { streamRes.data.destroy(); } catch (_ignore) {}
+            if (ok) {
+              res.json({ ok: true, kind: 'tap', message: 'Tap token accepted. Stream is reachable.' });
+            } else {
+              res.status(streamRes.status).json({ ok: false, kind: 'tap', error: 'Stream returned HTTP ' + streamRes.status });
+            }
+          })
+          .catch(function (err) {
+            var safe = sanitizeAxiosError(err);
+            res.status(safe.status || 500).json({
+              ok: false,
+              kind: 'tap',
+              error: safe.status === 401
+                ? 'Tap token rejected (401). Check it was copied cleanly and has not been revoked.'
+                : 'Could not reach Ahrefs stream: ' + (safe.data || safe.message || err.message),
+            });
+          });
+      }
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/sites/:id/stats ──────────────────────────────────────────────
+  // Snapshot of per-site activity for the Sites management page.
+  router.get('/sites/:id/stats', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var site = siteConfigMod.getSite(siteId);
+      if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
+
+      var now = 'datetime("now")';
+      var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
+
+      var articlesToday = db.prepare(
+        "SELECT COUNT(*) AS n FROM articles WHERE source_site_id = ? AND received_at >= ?"
+      ).get(siteId, todayStart).n || 0;
+
+      var articlesTotal = db.prepare(
+        "SELECT COUNT(*) AS n FROM articles WHERE source_site_id = ?"
+      ).get(siteId).n || 0;
+
+      var lastArticleRow = db.prepare(
+        "SELECT MAX(received_at) AS t FROM articles WHERE source_site_id = ?"
+      ).get(siteId);
+      var lastArticleAt = lastArticleRow && lastArticleRow.t ? lastArticleRow.t : null;
+
+      var publishedToday = db.prepare(
+        "SELECT COUNT(*) AS n FROM published WHERE site_id = ? AND published_at >= ?"
+      ).get(siteId, todayStart).n || 0;
+
+      var publishedTotal = db.prepare(
+        "SELECT COUNT(*) AS n FROM published WHERE site_id = ?"
+      ).get(siteId).n || 0;
+
+      var lastPublishedRow = db.prepare(
+        "SELECT MAX(published_at) AS t FROM published WHERE site_id = ?"
+      ).get(siteId);
+      var lastPublishedAt = lastPublishedRow && lastPublishedRow.t ? lastPublishedRow.t : null;
+
+      var draftsPending = db.prepare(
+        "SELECT COUNT(*) AS n FROM drafts WHERE site_id = ? AND status IN ('draft', 'fetching')"
+      ).get(siteId).n || 0;
+
+      var draftsReady = db.prepare(
+        "SELECT COUNT(*) AS n FROM drafts WHERE site_id = ? AND status = 'ready'"
+      ).get(siteId).n || 0;
+
+      var draftsFailed = db.prepare(
+        "SELECT COUNT(*) AS n FROM drafts WHERE site_id = ? AND status = 'failed'"
+      ).get(siteId).n || 0;
+
+      // Health derivation: fresh if received an article in the last 2 hours.
+      var healthFirehose = 'unknown';
+      if (lastArticleAt) {
+        var lastMs = new Date(lastArticleAt).getTime();
+        var ageMs = Date.now() - lastMs;
+        if (ageMs < 2 * 3600 * 1000) healthFirehose = 'ok';
+        else if (ageMs < 24 * 3600 * 1000) healthFirehose = 'stale';
+        else healthFirehose = 'dead';
+      } else if (!site.firehose_token && !(siteId === 1)) {
+        healthFirehose = 'not_configured';
+      } else {
+        healthFirehose = 'no_data';
+      }
+
+      res.json({
+        ok: true,
+        siteId: siteId,
+        articlesToday: articlesToday,
+        articlesTotal: articlesTotal,
+        publishedToday: publishedToday,
+        publishedTotal: publishedTotal,
+        lastArticleAt: lastArticleAt,
+        lastPublishedAt: lastPublishedAt,
+        draftsPending: draftsPending,
+        draftsReady: draftsReady,
+        draftsFailed: draftsFailed,
+        health: {
+          firehose: healthFirehose,
+          wp: site.wp_url && site.wp_username && site.wp_app_password ? 'configured' : 'not_configured',
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── POST /api/sites/:id/activate — re-activate a previously deactivated site
+  router.post('/sites/:id/activate', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var site = siteConfigMod.getSite(siteId);
+      if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
+      siteConfigMod.updateSite(siteId, { is_active: 1 });
+      // Hot-start the firehose listener if token is present
+      var pool = req.app.locals.modules && req.app.locals.modules.firehosePool;
+      if (pool && site.firehose_token) {
+        pool.addSite(siteId).catch(function (e) {
+          logger.warn('api', 'firehosePool.addSite failed on activate: ' + e.message);
+        });
+      }
+      res.json({ ok: true, siteId: siteId, message: 'Site re-activated' });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
