@@ -8724,6 +8724,10 @@
 
   var _feedsViewState = { view: 'list', feedId: null, tab: 'stories' };
   var _feedsCurrentFeed = null;
+  // Capabilities come back with every /api/feeds list call. Cached so the
+  // "Create Feed" form can decide whether the token field is optional
+  // without a second round-trip. Refreshed on every list render.
+  var _feedsCaps = { mgmt_key_configured: false, rule_count: 0, rule_limit: 25 };
 
   function loadFeedsPage() {
     _feedsSwitch({ view: 'list' });
@@ -8759,6 +8763,7 @@
   function _feedsLoadList() {
     fetchApi('/api/feeds', { bypassCache: true }).then(function (data) {
       var feeds = (data && data.feeds) || [];
+      if (data && data.capabilities) _feedsCaps = data.capabilities;
       var el = document.getElementById('feeds-list');
       if (!el) return;
       if (feeds.length === 0) {
@@ -8909,8 +8914,13 @@
 
         '<div id="ff-preview" style="font-size:var(--text-sm);color:var(--text-tertiary);display:none"></div>',
 
-        _feedsField('Firehose Token *', '<input class="settings-input" id="ff-token" type="text" value="' + escapeHtml(existingFeed && existingFeed.has_firehose_token ? '••••••••' : '') + '" placeholder="fh_... (per-feed Ahrefs tap)">',
-          'Each feed opens its own SSE connection. Tap tokens start <code>fh_</code>, management keys <code>fhm_</code>.'),
+        _feedsField(
+          _feedsCaps.mgmt_key_configured ? 'Firehose Token' : 'Firehose Token *',
+          '<input class="settings-input" id="ff-token" type="text" value="' + escapeHtml(existingFeed && existingFeed.has_firehose_token ? '••••••••' : '') + '" placeholder="' + (_feedsCaps.mgmt_key_configured ? 'Leave blank to auto-provision' : 'fh_... (per-feed Ahrefs tap)') + '">',
+          _feedsCaps.mgmt_key_configured
+            ? '<strong>Leave blank</strong> and a new tap + rule will be created for this feed using your management key (' + _feedsCaps.rule_count + '/' + _feedsCaps.rule_limit + ' rules used). Or paste your own <code>fh_</code> token to reuse an existing tap.'
+            : 'No management key on file yet — paste a <code>fh_</code> tap token, OR go to the <a href="#rules">Firehose Rules</a> page and connect with a <code>fhm_</code> management key first to unlock auto-provisioning.'
+        ),
 
         _feedsField('Target Country', _feedsCountrySelect(src.country || 'US'),
           'Used as a hint. Exact geo filtering via Include Websites below.'),
@@ -9030,7 +9040,12 @@
 
     if (!name)   return fail('Feed Name is required.');
     if (!siteId) return fail('Target Site is required.');
-    if (!feedId && !token) return fail('Firehose Token is required to create the feed.');
+    // Token is required ONLY when we don't have a management key on file
+    // (auto-provisioning is unavailable). With a key, the server creates
+    // the tap + rule from it.
+    if (!feedId && !token && !_feedsCaps.mgmt_key_configured) {
+      return fail('Firehose Token is required (or connect a management key in Firehose Rules first).');
+    }
     if (token.indexOf('••') === 0) token = null; // unchanged placeholder
 
     var body = {
@@ -9178,7 +9193,29 @@
         body.innerHTML = '<p style="color:var(--danger)">' + escapeHtml(e.message) + '</p>';
       });
     } else if (tab === 'configuration') {
+      // Ahrefs-side status: tap and rule ids let the admin verify that a
+      // Firehose tap was provisioned for this feed and that a Lucene rule
+      // is installed. Without a rule_id the SSE stream will error with
+      // "No rules configured" and the feed won't produce anything.
+      var provisionStatus;
+      if (feed.firehose_rule_id) {
+        provisionStatus =
+          '<div style="background:var(--success-soft);color:var(--success);padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
+          '<strong>✓ Firehose rule active.</strong> ' +
+          'Tap ' + (feed.firehose_tap_id ? '<code>' + escapeHtml(feed.firehose_tap_id) + '</code>' : '(admin-managed)') +
+          ' · Rule <code>' + escapeHtml(feed.firehose_rule_id) + '</code>' +
+          (feed.auto_provisioned ? ' · auto-provisioned' : ' · installed on admin-supplied tap') +
+          '</div>';
+      } else {
+        provisionStatus =
+          '<div style="background:var(--danger-soft);color:var(--danger);padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
+          '<strong>⚠ No Firehose rule installed.</strong> The SSE stream will return ' +
+          '<em>"No rules configured"</em> until a Lucene rule is attached to this feed\'s tap. ' +
+          'Edit the feed so the server can install one.' +
+          '</div>';
+      }
       body.innerHTML = [
+        provisionStatus,
         '<p style="color:var(--text-tertiary);margin-bottom:var(--space-4)">Edit the search query and source filters.</p>',
         '<button class="btn btn-primary" data-click="feedsEditCurrent">Edit feed</button>',
         '<pre style="background:var(--bg-surface-2);padding:var(--space-4);border-radius:var(--radius-md);overflow:auto;margin-top:var(--space-4);font-size:var(--text-xs)">' +

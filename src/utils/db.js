@@ -1067,6 +1067,13 @@ function runMigrations() {
       db.exec('CREATE INDEX IF NOT EXISTS idx_' + _ftbl + '_feed ON ' + _ftbl + '(feed_id)');
     }
 
+    // Track Ahrefs-side identifiers so we can update and tear down what we
+    // provisioned on the user's behalf. auto_provisioned=1 means "this app
+    // created this tap, this app owns its deletion on feed delete".
+    try { db.exec('ALTER TABLE feeds ADD COLUMN firehose_tap_id TEXT DEFAULT NULL'); } catch (_e) {}
+    try { db.exec('ALTER TABLE feeds ADD COLUMN firehose_rule_id TEXT DEFAULT NULL'); } catch (_e) {}
+    try { db.exec('ALTER TABLE feeds ADD COLUMN auto_provisioned INTEGER DEFAULT 0'); } catch (_e) {}
+
     // ─── 4. Fix drafts unique index: UNIQUE(source_url) → UNIQUE(source_url, site_id)
     //        Same URL can exist as drafts for different sites in multi-site mode.
     //        Drop both the old non-unique and UNIQUE indexes — the new composite

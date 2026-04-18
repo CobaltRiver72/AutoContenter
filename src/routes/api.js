@@ -7414,6 +7414,9 @@ function createApiRouter(deps) {
       dest_config:             _safeJsonParse(row.dest_config,   {}),
       quality_config:          _safeJsonParse(row.quality_config, {}),
       has_firehose_token:      !!row.firehose_token,
+      firehose_tap_id:         row.firehose_tap_id || null,
+      firehose_rule_id:        row.firehose_rule_id || null,
+      auto_provisioned:        !!row.auto_provisioned,
       last_fetched_at:         row.last_fetched_at,
       stories_count:           row.stories_count || 0,
       drafts_count:            row.drafts_count  || 0,
@@ -7447,6 +7450,8 @@ function createApiRouter(deps) {
   }
 
   // GET /api/feeds — list, filtered by active site (or All Sites when siteId=0).
+  // Also returns capability info so the UI knows whether to make the Firehose
+  // Token field optional (management key set → we can auto-provision).
   router.get('/feeds', function (req, res) {
     try {
       var sid = req.siteId || 0;
@@ -7459,7 +7464,19 @@ function createApiRouter(deps) {
       sql += ' ORDER BY created_at DESC';
       var stmt = db.prepare(sql);
       var rows = params.length ? stmt.all.apply(stmt, params) : stmt.all();
-      res.json({ ok: true, feeds: rows.map(_parseFeedRow) });
+      var mgmtKey = cfgGet('FIREHOSE_MANAGEMENT_KEY');
+      var activeRuleCount = (db.prepare(
+        "SELECT COUNT(*) AS n FROM feeds WHERE firehose_rule_id IS NOT NULL AND is_active = 1"
+      ).get() || {}).n || 0;
+      res.json({
+        ok: true,
+        feeds: rows.map(_parseFeedRow),
+        capabilities: {
+          mgmt_key_configured: !!mgmtKey,
+          rule_count: activeRuleCount,
+          rule_limit: 25,
+        },
+      });
     } catch (err) {
       logger.error('api', 'Failed to list feeds: ' + err.message);
       res.status(500).json({ ok: false, error: err.message });
@@ -7478,8 +7495,10 @@ function createApiRouter(deps) {
     }
   });
 
-  // POST /api/feeds — create.
-  router.post('/feeds', function (req, res) {
+  // POST /api/feeds — create. Auto-provisions a tap + rule from the org-wide
+  // management key when the admin didn't supply a per-feed tap token. That
+  // way "Create Feed" does the full end-to-end (tap + rule) in one click.
+  router.post('/feeds', async function (req, res) {
     try {
       var body = req.body || {};
       var v = _validateFeedBody(body, true);
@@ -7488,6 +7507,40 @@ function createApiRouter(deps) {
       var site = siteConfigMod.getSite(body.site_id);
       if (!site) return res.status(400).json({ ok: false, error: 'site_id does not exist' });
 
+      var firehoseAdmin = require('../utils/firehose-admin');
+      var { buildLuceneQuery } = require('../utils/lucene-builder');
+      var mgmtKey = cfgGet('FIREHOSE_MANAGEMENT_KEY');
+      var providedToken = (body.firehose_token || '').trim();
+
+      // Lucene query built from the form's structured filters.
+      var luceneQuery = buildLuceneQuery(body.source_config || {});
+      // We only auto-provision (create tap + rule) when the admin did NOT
+      // supply a tap token themselves AND we have a management key on file.
+      var willAutoProvision = !providedToken && !!mgmtKey;
+
+      if (willAutoProvision && !luceneQuery) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Add a search query, time range, or domain filter before saving — without at least one, the feed has nothing to match on.',
+        });
+      }
+
+      // Soft pre-check against the 25-rule org cap. The authoritative check
+      // is the 422 we'll get from createRule if we're already at the limit,
+      // but stopping here avoids creating an orphan tap just to fail on rule.
+      if (willAutoProvision) {
+        var localCount = (db.prepare(
+          "SELECT COUNT(*) AS n FROM feeds WHERE firehose_rule_id IS NOT NULL AND is_active = 1"
+        ).get() || {}).n || 0;
+        if (localCount >= 25) {
+          return res.status(422).json({
+            ok: false,
+            error: 'Ahrefs Firehose allows a maximum of 25 rules per organization. Delete or deactivate an existing feed before creating a new one.',
+          });
+        }
+      }
+
+      // ─── Insert the feed row first so we have an id to tag with ──────────
       var insert = db.prepare(
         'INSERT INTO feeds ' +
         '  (site_id, name, kind, is_active, source_config, dest_config, quality_config, firehose_token) ' +
@@ -7501,11 +7554,58 @@ function createApiRouter(deps) {
         JSON.stringify(body.source_config  || {}),
         JSON.stringify(body.dest_config    || {}),
         JSON.stringify(body.quality_config || {}),
-        body.firehose_token || null
+        providedToken || null
       );
-      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(info.lastInsertRowid);
+      var feedId = info.lastInsertRowid;
 
-      // Hot-start the feed's SSE listener when feeds-pool is wired.
+      // ─── Auto-provision (when eligible) ──────────────────────────────────
+      if (willAutoProvision) {
+        var tapResult = await firehoseAdmin.createTap(mgmtKey, body.name);
+        if (!tapResult.ok) {
+          // Roll the DB row back; no Ahrefs state to clean up yet.
+          db.prepare('DELETE FROM feeds WHERE id = ?').run(feedId);
+          return res.status(tapResult.status || 500).json({ ok: false, error: 'Could not create Firehose tap: ' + tapResult.error });
+        }
+        var tapId    = tapResult.data.tap_id;
+        var tapToken = tapResult.data.token;
+
+        var ruleResult = await firehoseAdmin.createRule(tapToken, luceneQuery, 'feed-' + feedId, { quality: true });
+        if (!ruleResult.ok) {
+          // Roll back: delete the tap (best effort) + the DB row.
+          logger.warn('api', 'Rule creation failed for new feed ' + feedId + '; deleting tap ' + tapId + ' to roll back');
+          firehoseAdmin.deleteTap(mgmtKey, tapId).catch(function () {});
+          db.prepare('DELETE FROM feeds WHERE id = ?').run(feedId);
+          return res.status(ruleResult.status || 500).json({ ok: false, error: 'Could not install rule on new tap: ' + ruleResult.error });
+        }
+
+        db.prepare(
+          'UPDATE feeds SET firehose_token = ?, firehose_tap_id = ?, firehose_rule_id = ?, auto_provisioned = 1, updated_at = datetime("now") WHERE id = ?'
+        ).run(tapToken, String(tapId), String(ruleResult.data.id), feedId);
+
+        logger.info('api', 'Feed ' + feedId + ' auto-provisioned tap ' + tapId + ' + rule ' + ruleResult.data.id + ' (query: ' + luceneQuery.substring(0, 80) + ')');
+      } else if (providedToken) {
+        // Admin supplied their own tap token — optionally install the feed's
+        // query as a rule on their tap so the filter actually takes effect.
+        // If they've already set up rules externally, skip to avoid surprises.
+        if (luceneQuery) {
+          var existingRules = await firehoseAdmin.listRules(providedToken);
+          if (existingRules.ok && existingRules.data.length === 0) {
+            var ruleRes = await firehoseAdmin.createRule(providedToken, luceneQuery, 'feed-' + feedId, { quality: true });
+            if (ruleRes.ok) {
+              db.prepare(
+                'UPDATE feeds SET firehose_rule_id = ?, updated_at = datetime("now") WHERE id = ?'
+              ).run(String(ruleRes.data.id), feedId);
+              logger.info('api', 'Feed ' + feedId + ' installed rule ' + ruleRes.data.id + ' on admin-supplied tap');
+            } else {
+              logger.warn('api', 'Feed ' + feedId + ' could not install rule on admin-supplied tap: ' + ruleRes.error);
+            }
+          }
+        }
+      }
+
+      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+
+      // Hot-start the feed's SSE listener once credentials are in place.
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool && row.is_active && row.firehose_token) {
         feedsPool.addFeed(row.id).catch(function (e) {
@@ -7519,9 +7619,11 @@ function createApiRouter(deps) {
     }
   });
 
-  // PUT /api/feeds/:id — update. Merges JSON configs so callers can PATCH
-  // individual keys without resending the whole blob.
-  router.put('/feeds/:id', function (req, res) {
+  // PUT /api/feeds/:id — update. When source_config changes and a rule_id
+  // is on file, also PUTs the new Lucene query to Ahrefs so the filter
+  // actually updates. Rule update failures are logged but don't block the
+  // DB save (admin can retry from the Configuration tab).
+  router.put('/feeds/:id', async function (req, res) {
     try {
       var feedId = parseInt(req.params.id, 10);
       var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
@@ -7540,8 +7642,6 @@ function createApiRouter(deps) {
           : existing.firehose_token,
       };
 
-      // JSON configs are replaced whole when supplied (client sends the full
-      // object). Partial merges happen client-side where they're more natural.
       next.source_config  = body.source_config  ? JSON.stringify(body.source_config)  : existing.source_config;
       next.dest_config    = body.dest_config    ? JSON.stringify(body.dest_config)    : existing.dest_config;
       next.quality_config = body.quality_config ? JSON.stringify(body.quality_config) : existing.quality_config;
@@ -7556,6 +7656,32 @@ function createApiRouter(deps) {
         next.source_config, next.dest_config, next.quality_config,
         feedId
       );
+
+      // If the query-affecting bits changed and we have a rule on Ahrefs
+      // pointing at this feed, update it in place. `tag` stays stable so
+      // orphan detection (tag=feed-<id>) keeps working.
+      var srcChanged = body.source_config
+        && existing.source_config !== JSON.stringify(body.source_config);
+      if (srcChanged && existing.firehose_rule_id && existing.firehose_token) {
+        try {
+          var { buildLuceneQuery } = require('../utils/lucene-builder');
+          var firehoseAdmin = require('../utils/firehose-admin');
+          var newLucene = buildLuceneQuery(body.source_config || {});
+          if (!newLucene) {
+            logger.warn('api', 'Feed ' + feedId + ' updated source_config has no filters — rule unchanged');
+          } else {
+            var upd = await firehoseAdmin.updateRule(existing.firehose_token, existing.firehose_rule_id, { value: newLucene });
+            if (!upd.ok) {
+              logger.warn('api', 'Feed ' + feedId + ' rule update failed: ' + upd.error);
+            } else {
+              logger.info('api', 'Feed ' + feedId + ' rule ' + existing.firehose_rule_id + ' updated to: ' + newLucene.substring(0, 80));
+            }
+          }
+        } catch (ruleErr) {
+          logger.warn('api', 'Rule update threw for feed ' + feedId + ': ' + ruleErr.message);
+        }
+      }
+
       var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
 
       // Hot-reload the SSE listener when config/token/activation changed.
@@ -7575,13 +7701,39 @@ function createApiRouter(deps) {
   });
 
   // DELETE /api/feeds/:id — soft delete (is_active=0) to preserve historical
-  // linkage for existing clusters/drafts/published rows.
-  router.delete('/feeds/:id', function (req, res) {
+  // linkage for existing clusters/drafts/published rows. On auto-provisioned
+  // feeds also tears down the tap + rule in Ahrefs so it stops consuming
+  // quota against the org's 25-rule cap.
+  router.delete('/feeds/:id', async function (req, res) {
     try {
       var feedId = parseInt(req.params.id, 10);
       var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
       if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
-      db.prepare('UPDATE feeds SET is_active = 0, updated_at = datetime("now") WHERE id = ?').run(feedId);
+
+      // Ahrefs cleanup (best-effort — never fail the delete on upstream issues).
+      var firehoseAdmin = require('../utils/firehose-admin');
+      var mgmtKey = cfgGet('FIREHOSE_MANAGEMENT_KEY');
+      if (existing.auto_provisioned && existing.firehose_tap_id && mgmtKey) {
+        try {
+          var delTap = await firehoseAdmin.deleteTap(mgmtKey, existing.firehose_tap_id);
+          if (!delTap.ok) {
+            logger.warn('api', 'deleteTap for feed ' + feedId + ' failed: ' + delTap.error);
+          } else {
+            logger.info('api', 'Feed ' + feedId + ' deleted tap ' + existing.firehose_tap_id);
+          }
+        } catch (e) { logger.warn('api', 'deleteTap threw: ' + e.message); }
+      } else if (existing.firehose_rule_id && existing.firehose_token) {
+        // Admin-supplied tap: delete just the rule we installed.
+        try {
+          var delRule = await firehoseAdmin.deleteRule(existing.firehose_token, existing.firehose_rule_id);
+          if (!delRule.ok) logger.warn('api', 'deleteRule for feed ' + feedId + ' failed: ' + delRule.error);
+        } catch (e) { logger.warn('api', 'deleteRule threw: ' + e.message); }
+      }
+
+      db.prepare(
+        'UPDATE feeds SET is_active = 0, firehose_rule_id = NULL, updated_at = datetime("now") WHERE id = ?'
+      ).run(feedId);
+
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
       res.json({ ok: true, message: 'Feed deactivated', feedId: feedId });
