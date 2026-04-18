@@ -8139,7 +8139,45 @@
     'createManualCluster':     function () { __createManualCluster(); },
     'dismissParent':           function (el) { if (el.parentElement) el.parentElement.remove(); },
     'stopOnly':                function (el, e) { e.stopPropagation(); },
-    'switchLotteryTab':        function (el) { window.__switchLotteryTab(el.dataset.tab); }
+    'switchLotteryTab':        function (el) { window.__switchLotteryTab(el.dataset.tab); },
+
+    // ─── Feeds page ────────────────────────────────────────────────────────
+    'feedsOpenKindPicker':     function () { _feedsOpenKindPicker(); },
+    'feedsCloseModal':         function () { _feedsCloseModal(); },
+    'feedsPickKind':           function (el) {
+      if (el.dataset.disabled === '1') {
+        showToast((el.dataset.title || 'This feed type') + ' — coming soon', 'info');
+        return;
+      }
+      _feedsCloseModal();
+      if (el.dataset.kind === 'firehose') _feedsOpenNewsForm();
+    },
+    'feedsOpenDetail':         function (el) { _feedsOpenDetail(Number(el.dataset.feedId)); },
+    'feedsBackToList':         function () { _feedsSwitch({ view: 'list' }); },
+    'feedsSwitchTab':          function (el) { _feedsSwitchTab(el.dataset.tab); },
+    'feedsEditCurrent':        function () { if (_feedsCurrentFeed) _feedsOpenNewsForm(_feedsCurrentFeed); },
+    'feedsSave':               function (el) {
+      var fid = el.dataset.feedId ? Number(el.dataset.feedId) : null;
+      _feedsSave(fid);
+    },
+    'feedsPreviewStories':     function () { _feedsPreviewStories(); },
+    'feedsAddDomain':          function (el) { _feedsAddDomain(el.dataset.list); },
+    'feedsRemoveDomain':       function (el) { if (el.parentElement) el.parentElement.remove(); },
+    'feedsTestToken':          function (el) { _feedsTestToken(Number(el.dataset.feedId)); },
+    'feedsDeactivate':         function (el) { _feedsDeactivate(Number(el.dataset.feedId)); },
+    'feedsReactivate':         function (el) { _feedsReactivate(Number(el.dataset.feedId)); },
+
+    // ─── Sites page (existing onclick handlers migrated to delegation) ────
+    'sitesAdd':                function () { _sitesShowForm(null); },
+    'sitesShowForm':           function (el) {
+      var id = el.dataset.siteId ? Number(el.dataset.siteId) : null;
+      _sitesShowForm(id);
+    },
+    'sitesDelete':             function (el) { _sitesDelete(Number(el.dataset.siteId), el.dataset.siteName || ''); },
+    'sitesReactivate':         function (el) { _sitesReactivate(Number(el.dataset.siteId)); },
+    'sitesHideForm':           function () { _sitesHideForm(); },
+    'sitesTestWp':             function (el) { _sitesTestWp(el.dataset.siteId ? Number(el.dataset.siteId) : _sitesEditingId); },
+    'sitesTestFirehose':       function (el) { _sitesTestFirehose(el.dataset.siteId ? Number(el.dataset.siteId) : _sitesEditingId); }
   };
 
   var INPUT_ACTIONS = {
@@ -8385,14 +8423,15 @@
           : '<span title="Firehose token missing" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bg-surface-2);border:1px solid var(--border-default);margin-right:4px"></span>';
         var inactiveBadge = s.is_active ? '' : ' <span style="background:var(--danger-soft);color:var(--danger);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Inactive</span>';
         var siteActions = '';
+        var safeName = escapeHtml(s.name);
         if (s.is_active) {
           siteActions =
-            '<button class="btn btn-sm" onclick="_sitesShowForm(' + s.id + ')">Edit</button>' +
-            (canDelete ? ' <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="_sitesDelete(' + s.id + ',\'' + escapeHtml(s.name).replace(/'/g, "\\'") + '\')">Deactivate</button>' : '');
+            '<button class="btn btn-sm" data-click="sitesShowForm" data-site-id="' + s.id + '">Edit</button>' +
+            (canDelete ? ' <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" data-click="sitesDelete" data-site-id="' + s.id + '" data-site-name="' + safeName + '">Deactivate</button>' : '');
         } else {
           siteActions =
-            '<button class="btn btn-sm" onclick="_sitesShowForm(' + s.id + ')">Edit</button>' +
-            ' <button class="btn btn-sm btn-primary" onclick="_sitesReactivate(' + s.id + ')">Re-activate</button>';
+            '<button class="btn btn-sm" data-click="sitesShowForm" data-site-id="' + s.id + '">Edit</button>' +
+            ' <button class="btn btn-sm btn-primary" data-click="sitesReactivate" data-site-id="' + s.id + '">Re-activate</button>';
         }
         return '<tr data-site-id="' + s.id + '" style="border-top:1px solid var(--border-subtle)">' +
           '<td style="width:16px;padding:8px 0 8px 8px"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + escapeHtml(s.color || '#3b82f6') + '"></span></td>' +
@@ -8524,7 +8563,7 @@
       '<div id="sf-test-result" style="font-size:var(--text-sm);margin-top:var(--space-3);display:none"></div>',
       '<div style="display:flex;gap:var(--space-3);margin-top:var(--space-5);flex-wrap:wrap">',
         '<button class="btn btn-primary" id="sf-save-btn">Save Site</button>',
-        '<button class="btn" onclick="_sitesHideForm()">Cancel</button>',
+        '<button class="btn" data-click="sitesHideForm">Cancel</button>',
         '<span style="flex:1"></span>',
         '<button class="btn" id="sf-test-wp" ' + (testDisabled ? 'disabled title="Save credentials first"' : '') + '>Test WP</button>',
         '<button class="btn" id="sf-test-fh" ' + (testFhDisabled ? 'disabled title="Save firehose token first"' : '') + '>Test Firehose</button>',
@@ -8684,6 +8723,7 @@
   // them so the admin doesn't need a full-page navigation to drill in.
 
   var _feedsViewState = { view: 'list', feedId: null, tab: 'stories' };
+  var _feedsCurrentFeed = null;
 
   function loadFeedsPage() {
     _feedsSwitch({ view: 'list' });
@@ -8708,12 +8748,11 @@
         '<h2 style="font-size:var(--text-xl);font-weight:var(--weight-semibold);margin:0">Feeds</h2>',
         '<p style="color:var(--text-tertiary);font-size:var(--text-sm);margin:4px 0 0 0">Each feed pulls content from one source and publishes it to one WordPress site.</p>',
       '</div>',
-      '<button class="btn btn-primary" id="feeds-add-btn">+ Create Feed</button>',
+      '<button class="btn btn-primary" data-click="feedsOpenKindPicker">+ Create Feed</button>',
       '</div>',
       '<div id="feeds-list"><p style="color:var(--text-tertiary)">Loading…</p></div>',
       '</div>'
     ].join('');
-    document.getElementById('feeds-add-btn').addEventListener('click', _feedsOpenKindPicker);
     _feedsLoadList();
   }
 
@@ -8726,7 +8765,7 @@
         el.innerHTML = [
           '<div style="padding:var(--space-8);border:1px dashed var(--border-default);border-radius:var(--radius-lg);text-align:center">',
           '<p style="color:var(--text-tertiary);margin:0 0 var(--space-4) 0">No feeds yet. Create one to start pulling content.</p>',
-          '<button class="btn btn-primary" onclick="_feedsOpenKindPicker()">+ Create Feed</button>',
+          '<button class="btn btn-primary" data-click="feedsOpenKindPicker">+ Create Feed</button>',
           '</div>'
         ].join('');
         return;
@@ -8741,7 +8780,7 @@
         var status = f.dest_config && f.dest_config.post_status === 'publish'
           ? '<span style="background:var(--accent-soft,var(--success-soft));color:var(--accent,var(--success));padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Auto-publish</span>'
           : '<span style="background:var(--bg-surface-2);color:var(--text-tertiary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Draft only</span>';
-        return '<tr data-feed-id="' + f.id + '" style="border-top:1px solid var(--border-subtle);cursor:pointer" onclick="_feedsOpenDetail(' + f.id + ')">' +
+        return '<tr data-feed-id="' + f.id + '" data-click="feedsOpenDetail" style="border-top:1px solid var(--border-subtle);cursor:pointer">' +
           '<td style="padding:10px">' + kindIcon + '</td>' +
           '<td style="padding:10px"><strong>' + escapeHtml(f.name) + '</strong>' +
           '<br><span style="color:var(--text-tertiary);font-size:var(--text-xs)">' +
@@ -8786,7 +8825,6 @@
   function _feedsOpenDetail(feedId) {
     _feedsSwitch({ view: 'detail', feedId: feedId, tab: 'stories' });
   }
-  window._feedsOpenDetail = _feedsOpenDetail;
 
   // ─── Kind-picker modal — four cards (News / YouTube / RSS / Keyword) ─────
   // Only the News Feed (Firehose) is live in Phase 1. The other three show a
@@ -8802,7 +8840,7 @@
           '<h3 style="margin:0;font-size:var(--text-lg);font-weight:var(--weight-semibold)">Create Feed</h3>',
           '<p style="margin:4px 0 0 0;color:var(--text-tertiary);font-size:var(--text-sm)">Set up a content feed to get content from external sources.</p>',
         '</div>',
-        '<button class="btn btn-sm" onclick="_feedsCloseModal()">✕</button>',
+        '<button class="btn btn-sm" data-click="feedsCloseModal">✕</button>',
       '</div>',
       '<div style="display:flex;flex-direction:column;gap:var(--space-3)">',
         _feedsKindCard('keyword',  '🔎', 'Setup a Keyword Feed',     'Track high-ranking keywords with a personalized feed.',    true),
@@ -8813,16 +8851,14 @@
       '</div>'
     ].join('');
     document.body.appendChild(modal);
+    // Clicking the backdrop (but not the card) dismisses the modal.
     modal.addEventListener('click', function (e) { if (e.target === modal) _feedsCloseModal(); });
   }
-  window._feedsOpenKindPicker = _feedsOpenKindPicker;
 
   function _feedsKindCard(kind, icon, title, desc, disabled) {
-    var onclick = disabled
-      ? 'onclick="showToast(\'' + escapeHtml(title).replace(/'/g,"\\'") + ' — coming soon\', \'info\')"'
-      : 'onclick="_feedsCloseModal(); _feedsOpenNewsForm()"';
     var style = 'border:1px solid var(--border-default);border-radius:var(--radius-md);padding:var(--space-4);cursor:' + (disabled ? 'not-allowed' : 'pointer') + ';opacity:' + (disabled ? '.55' : '1') + ';display:flex;gap:var(--space-4);align-items:center;background:var(--bg-surface)';
-    return '<div style="' + style + '" ' + onclick + '>' +
+    var dataAttrs = 'data-click="feedsPickKind" data-kind="' + escapeHtml(kind) + '" data-disabled="' + (disabled ? '1' : '0') + '" data-title="' + escapeHtml(title) + '"';
+    return '<div style="' + style + '" ' + dataAttrs + '>' +
       '<div style="font-size:24px;width:40px;text-align:center">' + icon + '</div>' +
       '<div style="flex:1">' +
         '<div style="font-weight:var(--weight-semibold)">' + escapeHtml(title) + (disabled ? ' <span style="font-size:var(--text-xs);color:var(--text-tertiary);font-weight:normal">— Coming soon</span>' : '') + '</div>' +
@@ -8835,7 +8871,6 @@
     var modals = document.querySelectorAll('.modal-backdrop');
     modals.forEach(function (m) { m.remove(); });
   }
-  window._feedsCloseModal = _feedsCloseModal;
 
   // ─── News Feed form — the real config form ──────────────────────────────
   function _feedsOpenNewsForm(existingFeed) {
@@ -8858,7 +8893,7 @@
           '<h3 style="margin:0;font-size:var(--text-lg);font-weight:var(--weight-semibold)">' + (editing ? 'Edit News Feed' : 'Create a News Feed') + '</h3>',
           '<p style="margin:4px 0 0 0;color:var(--text-tertiary);font-size:var(--text-sm)">Curated updates from your preferred news sources.</p>',
         '</div>',
-        '<button class="btn btn-sm" onclick="_feedsCloseModal()">✕</button>',
+        '<button class="btn btn-sm" data-click="feedsCloseModal">✕</button>',
       '</div>',
 
       '<div style="display:flex;flex-direction:column;gap:var(--space-5)">',
@@ -8869,7 +8904,7 @@
         _feedsField('Target Site *', '<select class="settings-input" id="ff-site">' + sitesOptions + '</select>',
           'Every story this feed ingests is published to this site.'),
 
-        _feedsField('Search Query', '<div style="display:flex;gap:var(--space-2)"><input class="settings-input" id="ff-query" type="text" value="' + escapeHtml(src.query || '') + '" placeholder="iphone launch" style="flex:1"><button class="btn" type="button" onclick="_feedsPreviewStories()">Preview</button></div>',
+        _feedsField('Search Query', '<div style="display:flex;gap:var(--space-2)"><input class="settings-input" id="ff-query" type="text" value="' + escapeHtml(src.query || '') + '" placeholder="iphone launch" style="flex:1"><button class="btn" type="button" data-click="feedsPreviewStories">Preview</button></div>',
           'ALL terms must appear in the article title/body. Leave blank to accept everything through the other filters.'),
 
         '<div id="ff-preview" style="font-size:var(--text-sm);color:var(--text-tertiary);display:none"></div>',
@@ -8919,15 +8954,14 @@
         '<div id="ff-error" style="color:var(--danger);font-size:var(--text-sm);display:none"></div>',
 
         '<div style="display:flex;gap:var(--space-3);margin-top:var(--space-3)">',
-          '<button class="btn btn-primary" onclick="_feedsSave(' + (existingFeed && existingFeed.id ? existingFeed.id : 'null') + ')">' + (editing ? 'Save' : 'Create Feed') + '</button>',
-          '<button class="btn" onclick="_feedsCloseModal()">Cancel</button>',
+          '<button class="btn btn-primary" data-click="feedsSave"' + (existingFeed && existingFeed.id ? ' data-feed-id="' + existingFeed.id + '"' : '') + '>' + (editing ? 'Save' : 'Create Feed') + '</button>',
+          '<button class="btn" data-click="feedsCloseModal">Cancel</button>',
         '</div>',
       '</div>',
       '</div>'
     ].join('');
     document.body.appendChild(modal);
   }
-  window._feedsOpenNewsForm = _feedsOpenNewsForm;
 
   function _feedsField(label, inputHtml, help) {
     return '<div>' +
@@ -8959,22 +8993,22 @@
   }
 
   function _feedsDomainList(id, initial) {
-    var rows = (initial || []).map(function (d, i) {
-      return '<div style="display:flex;gap:6px;margin-bottom:4px"><input class="settings-input" data-domain-for="' + id + '" type="text" value="' + escapeHtml(d) + '" style="flex:1"><button class="btn btn-sm" type="button" onclick="this.parentElement.remove()">−</button></div>';
+    var rows = (initial || []).map(function (d) {
+      return '<div style="display:flex;gap:6px;margin-bottom:4px"><input class="settings-input" data-domain-for="' + id + '" type="text" value="' + escapeHtml(d) + '" style="flex:1"><button class="btn btn-sm" type="button" data-click="feedsRemoveDomain">−</button></div>';
     }).join('');
     return '<div id="' + id + '-wrap">' + rows + '</div>' +
-      '<button class="btn btn-sm" type="button" onclick="_feedsAddDomain(\'' + id + '\')">+ Add website</button>';
+      '<button class="btn btn-sm" type="button" data-click="feedsAddDomain" data-list="' + id + '">+ Add website</button>';
   }
-  window._feedsAddDomain = function (id) {
+  function _feedsAddDomain(id) {
     var wrap = document.getElementById(id + '-wrap');
     if (!wrap) return;
     var div = document.createElement('div');
     div.style.cssText = 'display:flex;gap:6px;margin-bottom:4px';
-    div.innerHTML = '<input class="settings-input" data-domain-for="' + id + '" type="text" placeholder="example.com or *.example.com" style="flex:1"><button class="btn btn-sm" type="button" onclick="this.parentElement.remove()">−</button>';
+    div.innerHTML = '<input class="settings-input" data-domain-for="' + id + '" type="text" placeholder="example.com or *.example.com" style="flex:1"><button class="btn btn-sm" type="button" data-click="feedsRemoveDomain">−</button>';
     wrap.appendChild(div);
     var inp = div.querySelector('input');
     if (inp) inp.focus();
-  };
+  }
 
   function _feedsReadDomainList(id) {
     var inputs = document.querySelectorAll('input[data-domain-for="' + id + '"]');
@@ -9033,7 +9067,6 @@
       _feedsLoadList();
     }).catch(function (e) { fail(e.message); });
   }
-  window._feedsSave = _feedsSave;
 
   function _feedsPreviewStories() {
     var q = ($('ff-query').value || '').trim();
@@ -9066,7 +9099,6 @@
       out.textContent = 'Preview failed: ' + e.message;
     });
   }
-  window._feedsPreviewStories = _feedsPreviewStories;
 
   // ─── Feed detail page (Stories / Configuration / Settings tabs) ─────────
   function _feedsRenderDetail(section, feedId, activeTab) {
@@ -9077,16 +9109,17 @@
         return;
       }
       var f = r.feed;
+      _feedsCurrentFeed = f;
       var lastUpd = f.updated_at ? formatDateTime(f.updated_at) : '—';
       section.innerHTML = [
         '<div class="content-area">',
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-5)">',
-        '<div><button class="btn btn-sm" onclick="_feedsSwitch({view:\'list\'})">← Back to feeds</button></div>',
+        '<div><button class="btn btn-sm" data-click="feedsBackToList">← Back to feeds</button></div>',
         '<div style="display:flex;gap:var(--space-2)">',
-          '<button class="btn btn-sm" onclick="_feedsTestToken(' + feedId + ')">Test token</button>',
+          '<button class="btn btn-sm" data-click="feedsTestToken" data-feed-id="' + feedId + '">Test token</button>',
           f.is_active
-            ? '<button class="btn btn-sm" onclick="_feedsDeactivate(' + feedId + ')" style="color:var(--danger);border-color:var(--danger)">Pause</button>'
-            : '<button class="btn btn-sm btn-primary" onclick="_feedsReactivate(' + feedId + ')">Resume</button>',
+            ? '<button class="btn btn-sm" data-click="feedsDeactivate" data-feed-id="' + feedId + '" style="color:var(--danger);border-color:var(--danger)">Pause</button>'
+            : '<button class="btn btn-sm btn-primary" data-click="feedsReactivate" data-feed-id="' + feedId + '">Resume</button>',
         '</div>',
         '</div>',
         '<div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-5)">',
@@ -9107,17 +9140,15 @@
       _feedsRenderDetailTab(f, activeTab);
     });
   }
-  window._feedsSwitch = _feedsSwitch;
 
   function _feedsTab(key, label, active) {
     var isActive = key === active;
-    return '<div onclick="_feedsSwitchTab(\'' + key + '\')" style="padding:10px 0;cursor:pointer;color:' + (isActive ? 'var(--text-primary)' : 'var(--text-tertiary)') + ';font-weight:' + (isActive ? 'var(--weight-semibold)' : 'normal') + ';border-bottom:2px solid ' + (isActive ? 'var(--accent,var(--text-primary))' : 'transparent') + '">' + label + '</div>';
+    return '<div data-click="feedsSwitchTab" data-tab="' + escapeHtml(key) + '" style="padding:10px 0;cursor:pointer;color:' + (isActive ? 'var(--text-primary)' : 'var(--text-tertiary)') + ';font-weight:' + (isActive ? 'var(--weight-semibold)' : 'normal') + ';border-bottom:2px solid ' + (isActive ? 'var(--accent,var(--text-primary))' : 'transparent') + '">' + label + '</div>';
   }
 
   function _feedsSwitchTab(tab) {
     _feedsSwitch({ view: 'detail', feedId: _feedsViewState.feedId, tab: tab });
   }
-  window._feedsSwitchTab = _feedsSwitchTab;
 
   function _feedsRenderDetailTab(feed, tab) {
     var body = document.getElementById('feeds-detail-body');
@@ -9149,7 +9180,7 @@
     } else if (tab === 'configuration') {
       body.innerHTML = [
         '<p style="color:var(--text-tertiary);margin-bottom:var(--space-4)">Edit the search query and source filters.</p>',
-        '<button class="btn btn-primary" onclick="_feedsOpenNewsForm(' + JSON.stringify(feed).replace(/"/g,'&quot;') + ')">Edit feed</button>',
+        '<button class="btn btn-primary" data-click="feedsEditCurrent">Edit feed</button>',
         '<pre style="background:var(--bg-surface-2);padding:var(--space-4);border-radius:var(--radius-md);overflow:auto;margin-top:var(--space-4);font-size:var(--text-xs)">' +
           escapeHtml(JSON.stringify(feed.source_config, null, 2)) +
         '</pre>'
@@ -9157,7 +9188,7 @@
     } else if (tab === 'settings') {
       body.innerHTML = [
         '<p style="color:var(--text-tertiary);margin-bottom:var(--space-4)">Where this feed publishes to, and its quality gates.</p>',
-        '<button class="btn btn-primary" onclick="_feedsOpenNewsForm(' + JSON.stringify(feed).replace(/"/g,'&quot;') + ')">Edit feed</button>',
+        '<button class="btn btn-primary" data-click="feedsEditCurrent">Edit feed</button>',
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);margin-top:var(--space-4)">',
         '<div><strong>Destination (WordPress)</strong><pre style="background:var(--bg-surface-2);padding:var(--space-3);border-radius:var(--radius-md);overflow:auto;font-size:var(--text-xs)">' + escapeHtml(JSON.stringify(feed.dest_config, null, 2)) + '</pre></div>',
         '<div><strong>Quality gates</strong><pre style="background:var(--bg-surface-2);padding:var(--space-3);border-radius:var(--radius-md);overflow:auto;font-size:var(--text-xs)">' + escapeHtml(JSON.stringify(feed.quality_config, null, 2)) + '</pre></div>',
@@ -9166,24 +9197,24 @@
     }
   }
 
-  window._feedsTestToken = function (feedId) {
+  function _feedsTestToken(feedId) {
     fetchApi('/api/feeds/' + feedId + '/test-firehose', { method: 'POST' })
       .then(function (r) { showToast(r.message || 'OK', r.ok ? 'success' : 'error'); })
       .catch(function (e) { showToast('Test failed: ' + e.message, 'error'); });
-  };
-  window._feedsDeactivate = function (feedId) {
+  }
+  function _feedsDeactivate(feedId) {
     if (!confirm('Pause this feed? Its SSE connection will close. You can resume later.')) return;
     fetchApi('/api/feeds/' + feedId, { method: 'DELETE' }).then(function () {
       showToast('Feed paused', 'success');
       _feedsSwitch({ view: 'list' });
     }).catch(function (e) { showToast('Pause failed: ' + e.message, 'error'); });
-  };
-  window._feedsReactivate = function (feedId) {
+  }
+  function _feedsReactivate(feedId) {
     fetchApi('/api/feeds/' + feedId + '/activate', { method: 'POST' }).then(function () {
       showToast('Feed resumed', 'success');
       _feedsSwitch({ view: 'detail', feedId: feedId, tab: 'stories' });
     }).catch(function (e) { showToast('Resume failed: ' + e.message, 'error'); });
-  };
+  }
 
   // ─── Fuel Page ──────────────────────────────────────────────────────────
 
