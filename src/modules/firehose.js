@@ -404,7 +404,7 @@ class FirehoseListener extends EventEmitter {
   saveLastEventId(id) {
     try {
       if (this.feedId) {
-        this.db.prepare('UPDATE feeds SET firehose_last_event_id = ?, updated_at = datetime("now") WHERE id = ?').run(id, this.feedId);
+        this.db.prepare('UPDATE feeds SET firehose_last_event_id = ?, updated_at = datetime(\'now\') WHERE id = ?').run(id, this.feedId);
         return;
       }
       siteConfig.setSiteConfig(this.siteId, 'firehose_last_event_id', id);
