@@ -7291,7 +7291,6 @@ function createApiRouter(deps) {
       var site = siteConfigMod.getSite(siteId);
       if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
 
-      var now = 'datetime(\'now\')';
       var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
 
       var articlesToday = db.prepare(
@@ -7657,28 +7656,68 @@ function createApiRouter(deps) {
         feedId
       );
 
-      // If the query-affecting bits changed and we have a rule on Ahrefs
-      // pointing at this feed, update it in place. `tag` stays stable so
-      // orphan detection (tag=feed-<id>) keeps working.
+      // Rule sync. Three branches when the query-affecting source_config
+      // changed on PUT:
+      //   1. Existing rule on file → updateRule in place (keeps same rule id
+      //      so orphan detection via tag=feed-<id> stays stable).
+      //   2. No rule id yet but we have a tap token → create a rule on that
+      //      tap. Fixes legacy/pre-auto-provision feeds that never had one.
+      //   3. No rule id AND no tap token AND mgmt key on file → full
+      //      auto-provision (createTap + createRule), persist both ids.
+      // The latter two let admins fix feeds that predated auto-provisioning
+      // without having to delete + recreate from scratch.
       var srcChanged = body.source_config
         && existing.source_config !== JSON.stringify(body.source_config);
-      if (srcChanged && existing.firehose_rule_id && existing.firehose_token) {
+      if (srcChanged) {
         try {
           var { buildLuceneQuery } = require('../utils/lucene-builder');
           var firehoseAdmin = require('../utils/firehose-admin');
           var newLucene = buildLuceneQuery(body.source_config || {});
           if (!newLucene) {
             logger.warn('api', 'Feed ' + feedId + ' updated source_config has no filters — rule unchanged');
-          } else {
+          } else if (existing.firehose_rule_id && existing.firehose_token) {
+            // Branch 1 — update existing rule.
             var upd = await firehoseAdmin.updateRule(existing.firehose_token, existing.firehose_rule_id, { value: newLucene });
-            if (!upd.ok) {
-              logger.warn('api', 'Feed ' + feedId + ' rule update failed: ' + upd.error);
+            if (!upd.ok) logger.warn('api', 'Feed ' + feedId + ' rule update failed: ' + upd.error);
+            else        logger.info('api', 'Feed ' + feedId + ' rule ' + existing.firehose_rule_id + ' updated to: ' + newLucene.substring(0, 80));
+          } else if (existing.firehose_token) {
+            // Branch 2 — install a rule on the existing tap.
+            var installed = await firehoseAdmin.createRule(existing.firehose_token, newLucene, 'feed-' + feedId, { quality: true });
+            if (!installed.ok) {
+              logger.warn('api', 'Feed ' + feedId + ' retroactive rule install failed: ' + installed.error);
             } else {
-              logger.info('api', 'Feed ' + feedId + ' rule ' + existing.firehose_rule_id + ' updated to: ' + newLucene.substring(0, 80));
+              db.prepare('UPDATE feeds SET firehose_rule_id = ?, updated_at = datetime(\'now\') WHERE id = ?')
+                .run(String(installed.data.id), feedId);
+              logger.info('api', 'Feed ' + feedId + ' retroactively installed rule ' + installed.data.id);
+            }
+          } else {
+            // Branch 3 — auto-provision from scratch using the org mgmt key.
+            var mgmtKeyPut = cfgGet('FIREHOSE_MANAGEMENT_KEY');
+            if (mgmtKeyPut) {
+              var tapRes = await firehoseAdmin.createTap(mgmtKeyPut, existing.name);
+              if (!tapRes.ok) {
+                logger.warn('api', 'Feed ' + feedId + ' retroactive tap create failed: ' + tapRes.error);
+              } else {
+                var ruleRes = await firehoseAdmin.createRule(tapRes.data.token, newLucene, 'feed-' + feedId, { quality: true });
+                if (!ruleRes.ok) {
+                  // Roll back the tap we just made, same as in POST.
+                  logger.warn('api', 'Feed ' + feedId + ' retroactive rule create failed after tap: ' + ruleRes.error + ' — rolling back tap ' + tapRes.data.tap_id);
+                  firehoseAdmin.deleteTap(mgmtKeyPut, tapRes.data.tap_id).catch(function (e) {
+                    logger.warn('api', 'Feed ' + feedId + ' rollback deleteTap also failed: ' + (e && e.message) + ' — orphan tap ' + tapRes.data.tap_id + ' on Ahrefs');
+                  });
+                } else {
+                  db.prepare(
+                    'UPDATE feeds SET firehose_token = ?, firehose_tap_id = ?, firehose_rule_id = ?, auto_provisioned = 1, updated_at = datetime(\'now\') WHERE id = ?'
+                  ).run(tapRes.data.token, String(tapRes.data.tap_id), String(ruleRes.data.id), feedId);
+                  logger.info('api', 'Feed ' + feedId + ' retroactively auto-provisioned tap ' + tapRes.data.tap_id + ' + rule ' + ruleRes.data.id);
+                }
+              }
+            } else {
+              logger.warn('api', 'Feed ' + feedId + ' has no firehose_token or mgmt key — rule cannot be installed until admin supplies one');
             }
           }
         } catch (ruleErr) {
-          logger.warn('api', 'Rule update threw for feed ' + feedId + ': ' + ruleErr.message);
+          logger.warn('api', 'Rule sync threw for feed ' + feedId + ': ' + ruleErr.message);
         }
       }
 
@@ -7700,43 +7739,73 @@ function createApiRouter(deps) {
     }
   });
 
-  // DELETE /api/feeds/:id — soft delete (is_active=0) to preserve historical
-  // linkage for existing clusters/drafts/published rows. On auto-provisioned
-  // feeds also tears down the tap + rule in Ahrefs so it stops consuming
-  // quota against the org's 25-rule cap.
-  router.delete('/feeds/:id', async function (req, res) {
+  // DELETE /api/feeds/:id — SOFT PAUSE. Sets is_active=0 and stops the
+  // SSE listener, but leaves the Ahrefs tap + rule intact so a subsequent
+  // activate call resumes immediately without re-provisioning.
+  //
+  // Reason: the old behavior also tore down the tap on Ahrefs and NULL'd
+  // firehose_rule_id. That made Resume silently broken (activate started
+  // an SSE listener against a tap that no longer existed) and meant every
+  // Pause/Resume cycle burned a fresh slot of the 25-rule org cap on the
+  // next create. Now Pause is truly reversible; admins wanting to reclaim
+  // quota call POST /feeds/:id/destroy.
+  router.delete('/feeds/:id', function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var existing = db.prepare('SELECT id FROM feeds WHERE id = ?').get(feedId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
+
+      db.prepare(
+        'UPDATE feeds SET is_active = 0, updated_at = datetime(\'now\') WHERE id = ?'
+      ).run(feedId);
+
+      var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
+      if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
+      res.json({ ok: true, message: 'Feed paused', feedId: feedId });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/feeds/:id/destroy — HARD DELETE. Tears down the Ahrefs tap
+  // (freeing its rule from the org's 25 cap) and removes the feed row
+  // entirely. Use when admin wants the quota back or is sure they never
+  // need this feed again. Historical clusters/drafts/published rows keep
+  // their feed_id foreign-key (it becomes orphan — that's fine, it's a
+  // nullable int, not an enforced FK).
+  router.post('/feeds/:id/destroy', async function (req, res) {
     try {
       var feedId = parseInt(req.params.id, 10);
       var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
       if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
 
-      // Ahrefs cleanup (best-effort — never fail the delete on upstream issues).
       var firehoseAdmin = require('../utils/firehose-admin');
       var mgmtKey = cfgGet('FIREHOSE_MANAGEMENT_KEY');
+
+      // Ahrefs teardown — best effort. Tap delete also removes its rules,
+      // so we don't need a separate rule delete when we own the tap.
       if (existing.auto_provisioned && existing.firehose_tap_id && mgmtKey) {
         try {
           var delTap = await firehoseAdmin.deleteTap(mgmtKey, existing.firehose_tap_id);
           if (!delTap.ok) {
-            logger.warn('api', 'deleteTap for feed ' + feedId + ' failed: ' + delTap.error);
+            logger.warn('api', 'destroy: deleteTap for feed ' + feedId + ' (tap ' + existing.firehose_tap_id + ') failed: ' + delTap.error + ' — tap may be orphaned on Ahrefs; clean up manually from the dashboard');
           } else {
-            logger.info('api', 'Feed ' + feedId + ' deleted tap ' + existing.firehose_tap_id);
+            logger.info('api', 'Feed ' + feedId + ' destroyed: removed tap ' + existing.firehose_tap_id);
           }
-        } catch (e) { logger.warn('api', 'deleteTap threw: ' + e.message); }
+        } catch (e) {
+          logger.warn('api', 'destroy: deleteTap threw for feed ' + feedId + ' (tap ' + existing.firehose_tap_id + '): ' + e.message + ' — tap may be orphaned on Ahrefs');
+        }
       } else if (existing.firehose_rule_id && existing.firehose_token) {
-        // Admin-supplied tap: delete just the rule we installed.
         try {
           var delRule = await firehoseAdmin.deleteRule(existing.firehose_token, existing.firehose_rule_id);
-          if (!delRule.ok) logger.warn('api', 'deleteRule for feed ' + feedId + ' failed: ' + delRule.error);
-        } catch (e) { logger.warn('api', 'deleteRule threw: ' + e.message); }
+          if (!delRule.ok) logger.warn('api', 'destroy: deleteRule for feed ' + feedId + ' (rule ' + existing.firehose_rule_id + ') failed: ' + delRule.error);
+        } catch (e) { logger.warn('api', 'destroy: deleteRule threw: ' + e.message); }
       }
-
-      db.prepare(
-        'UPDATE feeds SET is_active = 0, firehose_rule_id = NULL, updated_at = datetime(\'now\') WHERE id = ?'
-      ).run(feedId);
 
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
-      res.json({ ok: true, message: 'Feed deactivated', feedId: feedId });
+      db.prepare('DELETE FROM feeds WHERE id = ?').run(feedId);
+      res.json({ ok: true, message: 'Feed destroyed', feedId: feedId });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -7887,6 +7956,75 @@ function createApiRouter(deps) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
+
+  // GET /api/feeds/:id/rule — fetch the live Lucene rule from Ahrefs so
+  // the admin can see exactly what filter is running upstream, right now.
+  // Hits /v1/rules against the feed's tap token, finds the rule matching
+  // feed.firehose_rule_id, and returns its value + tap state. Catches the
+  // "DB says rule_id=42 but Ahrefs returned 404" case (e.g. admin manually
+  // deleted the rule from the Ahrefs dashboard) so we can show a clear
+  // "rule missing upstream" banner instead of pretending it's fine.
+  router.get('/feeds/:id/rule', async function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var row = db.prepare('SELECT firehose_token, firehose_tap_id, firehose_rule_id FROM feeds WHERE id = ?').get(feedId);
+      if (!row) return res.status(404).json({ ok: false, error: 'Feed not found' });
+      if (!row.firehose_token) {
+        return res.json({ ok: true, state: 'no_token', message: 'Feed has no firehose token yet.' });
+      }
+
+      var firehoseAdmin = require('../utils/firehose-admin');
+      var list = await firehoseAdmin.listRules(row.firehose_token);
+      if (!list.ok) {
+        return res.status(list.status || 500).json({ ok: false, error: 'Ahrefs listRules failed: ' + list.error });
+      }
+      var rules = Array.isArray(list.data) ? list.data : [];
+
+      if (!row.firehose_rule_id) {
+        // Feed's DB says no rule — give the admin visibility into what rules
+        // the tap does have (useful when the admin managed the tap themselves).
+        return res.json({
+          ok: true,
+          state: 'no_rule_on_file',
+          tap_rules_count: rules.length,
+          tap_rules: rules.map(_safeRuleShape),
+        });
+      }
+
+      var match = null;
+      for (var i = 0; i < rules.length; i++) {
+        if (String(rules[i].id) === String(row.firehose_rule_id)) { match = rules[i]; break; }
+      }
+      if (!match) {
+        return res.json({
+          ok: true,
+          state: 'rule_missing_upstream',
+          rule_id_on_file: row.firehose_rule_id,
+          tap_rules_count: rules.length,
+          tap_rules: rules.map(_safeRuleShape),
+          message: 'Feed expects rule ' + row.firehose_rule_id + ' but Ahrefs returned ' + rules.length + ' rules, none matching. Edit the feed to reinstall.',
+        });
+      }
+
+      res.json({
+        ok: true,
+        state: 'active',
+        rule: _safeRuleShape(match),
+        tap_rules_count: rules.length,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  function _safeRuleShape(r) {
+    return {
+      id: r.id,
+      value: r.value,
+      tag: r.tag || null,
+      quality: typeof r.quality === 'boolean' ? r.quality : null,
+      nsfw: typeof r.nsfw === 'boolean' ? r.nsfw : null,
+    };
+  }
 
   // GET /api/feeds/:id/stats — live activity snapshot (today + total + last).
   router.get('/feeds/:id/stats', function (req, res) {

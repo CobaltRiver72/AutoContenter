@@ -44,24 +44,32 @@ function buildLuceneQuery(src) {
   var clauses = [];
 
   // ── Keyword terms ────────────────────────────────────────────────────────
-  // Split on whitespace. Each term becomes a bare token in the default field.
-  // AND together so ALL terms must appear in inserted content. Phrases can be
-  // supplied by the admin quoting them ("elon musk") — we preserve quotes.
+  // Split on whitespace; each term becomes a token. We broaden each term
+  // to match BOTH `title:term` and bare `term` (which targets the default
+  // `added` field, i.e. inserted diff chunks). Without the title fallback,
+  // a news story about "cars" whose diff no longer includes the word "cars"
+  // (e.g. the crawler caught a later update that didn't re-insert the
+  // headline keyword) would silently fail to match — a common failure mode
+  // seen in the wild.
+  //
+  // Phrase queries (admin wrapped a substring in "double quotes") are
+  // passed through verbatim — the admin explicitly asked for a phrase.
   if (src.query && typeof src.query === 'string') {
     var q = src.query.trim();
     if (q) {
-      // Crude phrase preservation: if quotes present, drop bare AND splitting
-      // and pass the whole thing through. Admins who want structured queries
-      // can write them directly; the form only splits simple space-separated
-      // terms.
       if (q.indexOf('"') !== -1) {
-        clauses.push(q);
+        // Phrase: search title and default (added) for the phrase.
+        clauses.push('(title:' + q + ' OR ' + q + ')');
       } else {
         var terms = q.split(/\s+/).filter(Boolean);
         if (terms.length === 1) {
-          clauses.push(terms[0]);
+          clauses.push('(title:' + terms[0] + ' OR ' + terms[0] + ')');
         } else {
-          clauses.push('(' + terms.join(' AND ') + ')');
+          // Match when all terms appear in title OR all terms appear in added.
+          // (title:A AND title:B) OR (A AND B)
+          var titleAnd = terms.map(function (t) { return 'title:' + t; }).join(' AND ');
+          var bareAnd  = terms.join(' AND ');
+          clauses.push('((' + titleAnd + ') OR (' + bareAnd + '))');
         }
       }
     }

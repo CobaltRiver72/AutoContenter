@@ -314,7 +314,7 @@ class Pipeline {
       // Find clusters where ALL drafts are extracted (status = 'draft')
       // and the primary draft is not locked, with quality pre-filters
       var readyClustersSql =
-        "SELECT d.cluster_id, c.topic, c.trends_boosted, COUNT(*) as draft_count " +
+        "SELECT d.cluster_id, c.topic, c.trends_boosted, c.article_count, c.feed_id, COUNT(*) as draft_count " +
         "FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
         "WHERE d.mode IN ('auto', 'manual_import') AND d.cluster_id IS NOT NULL AND d.status = 'draft' " +
@@ -376,6 +376,81 @@ class Pipeline {
       // ─── End language gate ────────────────────────────────────────────────────
 
       if (readyClusters.length === 0) return;
+
+      // ─── Per-feed quality gates (B3) ────────────────────────────────────────
+      // Legacy clusters (feed_id NULL) stay on the global gates already
+      // applied above. Feed-mode clusters also need to respect the admin's
+      // per-feed overrides (quality_config): min_sources, daily_limit, and
+      // blocked_keywords. Cluster admin set iPhone feed with min_sources=5
+      // shouldn't have 2-source clusters rewritten; legacy clusters on the
+      // same tick aren't affected.
+      var feedQualityMap = {}; // feedId → parsed quality_config (cache per tick)
+      var feedPublishedTodayMap = {}; // feedId → count of today's published
+      var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
+      var feedIdsToCheck = readyClusters.map(function (c) { return c.feed_id; }).filter(Boolean);
+      if (feedIdsToCheck.length) {
+        // Fetch all the feed quality configs in one shot so each cluster
+        // doesn't re-query.
+        var uniqFeedIds = Array.from(new Set(feedIdsToCheck));
+        var fqStmt = this.db.prepare(
+          'SELECT id, quality_config FROM feeds WHERE id IN (' +
+          uniqFeedIds.map(function () { return '?'; }).join(',') + ')'
+        );
+        var feedRows = fqStmt.all.apply(fqStmt, uniqFeedIds);
+        for (var fqi = 0; fqi < feedRows.length; fqi++) {
+          var fqr = feedRows[fqi];
+          var qc = {};
+          try { qc = JSON.parse(fqr.quality_config || '{}'); } catch (_e) { qc = {}; }
+          feedQualityMap[fqr.id] = qc;
+        }
+        // Daily-limit needs today's publish counts. One query per feed (cheap
+        // with the idx_published_feed index added in the Phase 1 migration).
+        for (var fdi = 0; fdi < uniqFeedIds.length; fdi++) {
+          var fdId = uniqFeedIds[fdi];
+          try {
+            var cnt = this.db.prepare(
+              "SELECT COUNT(*) AS n FROM published WHERE feed_id = ? AND published_at >= ?"
+            ).get(fdId, todayStart);
+            feedPublishedTodayMap[fdId] = (cnt && cnt.n) || 0;
+          } catch (_dce) { feedPublishedTodayMap[fdId] = 0; }
+        }
+      }
+
+      var gatedClusters = [];
+      for (var fci = 0; fci < readyClusters.length; fci++) {
+        var c = readyClusters[fci];
+        var cFeedId = c.feed_id;
+        if (!cFeedId) { gatedClusters.push(c); continue; }
+        var q = feedQualityMap[cFeedId] || {};
+
+        // min_sources override (feed-specific; global minSources already gated at SQL)
+        if (q.min_sources && c.article_count < q.min_sources) {
+          this.logger.info(MODULE, 'Rewrite skip (feed min_sources): cluster #' + c.cluster_id + ' has ' + c.article_count + ' < feed=' + cFeedId + ' min=' + q.min_sources);
+          continue;
+        }
+        // daily_limit — cap auto-publishes per feed per UTC day. Hit = stop.
+        if (q.daily_limit && (feedPublishedTodayMap[cFeedId] || 0) >= q.daily_limit) {
+          this.logger.info(MODULE, 'Rewrite skip (feed daily_limit): cluster #' + c.cluster_id + ' feed=' + cFeedId + ' already at ' + feedPublishedTodayMap[cFeedId] + '/' + q.daily_limit);
+          continue;
+        }
+        // blocked_keywords — case-insensitive substring match on cluster topic.
+        if (Array.isArray(q.blocked_keywords) && q.blocked_keywords.length && c.topic) {
+          var topicLower = String(c.topic).toLowerCase();
+          var blocked = null;
+          for (var bki = 0; bki < q.blocked_keywords.length; bki++) {
+            var kw = String(q.blocked_keywords[bki] || '').trim().toLowerCase();
+            if (kw && topicLower.indexOf(kw) !== -1) { blocked = kw; break; }
+          }
+          if (blocked) {
+            this.logger.info(MODULE, 'Rewrite skip (feed blocked_kw): cluster #' + c.cluster_id + ' feed=' + cFeedId + ' topic matched "' + blocked + '"');
+            continue;
+          }
+        }
+        gatedClusters.push(c);
+      }
+      readyClusters = gatedClusters;
+      if (readyClusters.length === 0) return;
+      // ─── End per-feed quality gates ─────────────────────────────────────────
 
       this.logger.info(MODULE, 'Auto-rewrite: ' + readyClusters.length + ' clusters ready (daily:' + rewrittenToday + '/' + dailyLimit + ' hourly:' + rewrittenThisHour + '/' + hourlyLimit + ')');
 

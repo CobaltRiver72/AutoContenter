@@ -8164,8 +8164,18 @@
     'feedsAddDomain':          function (el) { _feedsAddDomain(el.dataset.list); },
     'feedsRemoveDomain':       function (el) { if (el.parentElement) el.parentElement.remove(); },
     'feedsTestToken':          function (el) { _feedsTestToken(Number(el.dataset.feedId)); },
-    'feedsDeactivate':         function (el) { _feedsDeactivate(Number(el.dataset.feedId)); },
-    'feedsReactivate':         function (el) { _feedsReactivate(Number(el.dataset.feedId)); },
+    'feedsDeactivate':         function (el, e) { if (e) e.stopPropagation(); _feedsDeactivate(Number(el.dataset.feedId)); },
+    'feedsReactivate':         function (el, e) { if (e) e.stopPropagation(); _feedsReactivate(Number(el.dataset.feedId)); },
+    'feedsDestroy':            function (el, e) { if (e) e.stopPropagation(); _feedsDestroy(Number(el.dataset.feedId), el.dataset.feedName || ''); },
+    'feedsRowEdit':            function (el, e) {
+      if (e) e.stopPropagation();
+      var id = Number(el.dataset.feedId);
+      // Fetch the full feed then open the edit modal — row data alone
+      // doesn't include source_config/dest_config/quality_config shapes.
+      fetchApi('/api/feeds/' + id, { bypassCache: true }).then(function (r) {
+        if (r && r.feed) { _feedsCurrentFeed = r.feed; _feedsOpenNewsForm(r.feed); }
+      });
+    },
 
     // ─── Sites page (existing onclick handlers migrated to delegation) ────
     'sitesAdd':                function () { _sitesShowForm(null); },
@@ -8785,6 +8795,18 @@
         var status = f.dest_config && f.dest_config.post_status === 'publish'
           ? '<span style="background:var(--accent-soft,var(--success-soft));color:var(--accent,var(--success));padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Auto-publish</span>'
           : '<span style="background:var(--bg-surface-2);color:var(--text-tertiary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Draft only</span>';
+        var safeName = escapeHtml(f.name).replace(/"/g, '&quot;');
+        // Actions: pause/resume toggle, edit, destroy. e.stopPropagation()
+        // in the handler keeps the row-open-detail click from firing when
+        // the admin clicks a button inside the row.
+        var pauseResume = f.is_active
+          ? '<button class="btn btn-sm" data-click="feedsDeactivate" data-feed-id="' + f.id + '" title="Pause this feed">Pause</button>'
+          : '<button class="btn btn-sm btn-primary" data-click="feedsReactivate" data-feed-id="' + f.id + '" title="Resume this feed">Resume</button>';
+        var actions =
+          pauseResume +
+          ' <button class="btn btn-sm" data-click="feedsRowEdit" data-feed-id="' + f.id + '" title="Edit">Edit</button>' +
+          ' <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" data-click="feedsDestroy" data-feed-id="' + f.id + '" data-feed-name="' + safeName + '" title="Delete permanently (frees an Ahrefs rule slot)">Destroy</button>';
+
         return '<tr data-feed-id="' + f.id + '" data-click="feedsOpenDetail" style="border-top:1px solid var(--border-subtle);cursor:pointer">' +
           '<td style="padding:10px">' + kindIcon + '</td>' +
           '<td style="padding:10px"><strong>' + escapeHtml(f.name) + '</strong>' +
@@ -8796,6 +8818,7 @@
           '<td class="fs-stories" style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
           '<td class="fs-published" style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
           '<td class="fs-last" style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
+          '<td style="padding:10px;white-space:nowrap;text-align:right">' + actions + '</td>' +
           '</tr>';
       }).join('');
       el.innerHTML =
@@ -8808,6 +8831,7 @@
             '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">STORIES</th>' +
             '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">PUBLISHED</th>' +
             '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">LAST FETCH</th>' +
+            '<th style="padding:10px;text-align:right;font-size:var(--text-xs);color:var(--text-tertiary)">ACTIONS</th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>';
@@ -9133,8 +9157,9 @@
         '<div style="display:flex;gap:var(--space-2)">',
           '<button class="btn btn-sm" data-click="feedsTestToken" data-feed-id="' + feedId + '">Test token</button>',
           f.is_active
-            ? '<button class="btn btn-sm" data-click="feedsDeactivate" data-feed-id="' + feedId + '" style="color:var(--danger);border-color:var(--danger)">Pause</button>'
+            ? '<button class="btn btn-sm" data-click="feedsDeactivate" data-feed-id="' + feedId + '">Pause</button>'
             : '<button class="btn btn-sm btn-primary" data-click="feedsReactivate" data-feed-id="' + feedId + '">Resume</button>',
+          '<button class="btn btn-sm" data-click="feedsDestroy" data-feed-id="' + feedId + '" data-feed-name="' + escapeHtml(f.name).replace(/"/g,'&quot;') + '" style="color:var(--danger);border-color:var(--danger)">Destroy</button>',
         '</div>',
         '</div>',
         '<div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-5)">',
@@ -9193,35 +9218,39 @@
         body.innerHTML = '<p style="color:var(--danger)">' + escapeHtml(e.message) + '</p>';
       });
     } else if (tab === 'configuration') {
-      // Ahrefs-side status: tap and rule ids let the admin verify that a
-      // Firehose tap was provisioned for this feed and that a Lucene rule
-      // is installed. Without a rule_id the SSE stream will error with
-      // "No rules configured" and the feed won't produce anything.
-      var provisionStatus;
-      if (feed.firehose_rule_id) {
-        provisionStatus =
-          '<div style="background:var(--success-soft);color:var(--success);padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
-          '<strong>✓ Firehose rule active.</strong> ' +
-          'Tap ' + (feed.firehose_tap_id ? '<code>' + escapeHtml(feed.firehose_tap_id) + '</code>' : '(admin-managed)') +
-          ' · Rule <code>' + escapeHtml(feed.firehose_rule_id) + '</code>' +
-          (feed.auto_provisioned ? ' · auto-provisioned' : ' · installed on admin-supplied tap') +
+      // Render the skeleton immediately. Live Firehose rule state is fetched
+      // asynchronously from Ahrefs; we surface a skeleton while that loads.
+      var stateBanner = feed.firehose_rule_id
+        ? '<div id="ff-rule-banner" style="padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4);background:var(--bg-surface-2);color:var(--text-tertiary)">Checking live rule on Ahrefs…</div>'
+        : '<div style="background:var(--danger-soft);color:var(--danger);padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
+          '<strong>⚠ No Firehose rule installed.</strong> The SSE stream will return <em>"No rules configured"</em> until a rule is attached. Edit the feed to install one.' +
           '</div>';
-      } else {
-        provisionStatus =
-          '<div style="background:var(--danger-soft);color:var(--danger);padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4)">' +
-          '<strong>⚠ No Firehose rule installed.</strong> The SSE stream will return ' +
-          '<em>"No rules configured"</em> until a Lucene rule is attached to this feed\'s tap. ' +
-          'Edit the feed so the server can install one.' +
-          '</div>';
-      }
+
       body.innerHTML = [
-        provisionStatus,
-        '<p style="color:var(--text-tertiary);margin-bottom:var(--space-4)">Edit the search query and source filters.</p>',
-        '<button class="btn btn-primary" data-click="feedsEditCurrent">Edit feed</button>',
-        '<pre style="background:var(--bg-surface-2);padding:var(--space-4);border-radius:var(--radius-md);overflow:auto;margin-top:var(--space-4);font-size:var(--text-xs)">' +
+        stateBanner,
+        '<h4 style="font-size:var(--text-sm);font-weight:var(--weight-semibold);margin:var(--space-4) 0 var(--space-2) 0">Installed on Firehose</h4>',
+        '<div id="ff-live-rule" style="background:var(--bg-surface-2);padding:var(--space-4);border-radius:var(--radius-md);font-size:var(--text-xs);color:var(--text-tertiary);min-height:60px">',
+        feed.firehose_rule_id ? 'Loading…' : '<em>No rule on file. Edit the feed to install one.</em>',
+        '</div>',
+        '<h4 style="font-size:var(--text-sm);font-weight:var(--weight-semibold);margin:var(--space-5) 0 var(--space-2) 0">Your source_config</h4>',
+        '<pre style="background:var(--bg-surface-2);padding:var(--space-4);border-radius:var(--radius-md);overflow:auto;font-size:var(--text-xs);margin:0">' +
           escapeHtml(JSON.stringify(feed.source_config, null, 2)) +
-        '</pre>'
+        '</pre>',
+        '<div style="margin-top:var(--space-5)"><button class="btn btn-primary" data-click="feedsEditCurrent">Edit feed</button></div>',
       ].join('');
+
+      // Fetch live rule content from Ahrefs. Gives admin ground truth:
+      // what Lucene string is actually filtering the stream right now.
+      if (feed.firehose_rule_id || feed.firehose_token) {
+        fetchApi('/api/feeds/' + feed.id + '/rule', { bypassCache: true })
+          .then(function (r) { _feedsRenderLiveRule(feed, r); })
+          .catch(function (err) {
+            var box = document.getElementById('ff-live-rule');
+            var banner = document.getElementById('ff-rule-banner');
+            if (banner) { banner.style.background = 'var(--danger-soft)'; banner.style.color = 'var(--danger)'; banner.innerHTML = '<strong>⚠ Could not reach Ahrefs:</strong> ' + escapeHtml(err.message); }
+            if (box)    box.innerHTML = '<em style="color:var(--danger)">Live rule fetch failed: ' + escapeHtml(err.message) + '</em>';
+          });
+      }
     } else if (tab === 'settings') {
       body.innerHTML = [
         '<p style="color:var(--text-tertiary);margin-bottom:var(--space-4)">Where this feed publishes to, and its quality gates.</p>',
@@ -9231,6 +9260,82 @@
         '<div><strong>Quality gates</strong><pre style="background:var(--bg-surface-2);padding:var(--space-3);border-radius:var(--radius-md);overflow:auto;font-size:var(--text-xs)">' + escapeHtml(JSON.stringify(feed.quality_config, null, 2)) + '</pre></div>',
         '</div>'
       ].join('');
+    }
+  }
+
+  // Paint the "Installed on Firehose" panel from a /feeds/:id/rule response.
+  // Four states:
+  //   • active                — our rule_id matches one on Ahrefs. Show its Lucene value.
+  //   • rule_missing_upstream — DB says rule X, Ahrefs doesn't have it. Admin action required.
+  //   • no_rule_on_file       — feed has a tap but no rule_id. Show what rules the tap has.
+  //   • no_token              — feed has no tap token at all.
+  function _feedsRenderLiveRule(feed, r) {
+    var box = document.getElementById('ff-live-rule');
+    var banner = document.getElementById('ff-rule-banner');
+    if (!box) return;
+
+    if (!r || !r.ok) {
+      box.innerHTML = '<em style="color:var(--danger)">Could not read rule from Ahrefs.</em>';
+      if (banner) { banner.style.background = 'var(--danger-soft)'; banner.style.color = 'var(--danger)'; banner.textContent = '⚠ Ahrefs request failed.'; }
+      return;
+    }
+
+    if (r.state === 'active') {
+      if (banner) {
+        banner.style.background = 'var(--success-soft)';
+        banner.style.color = 'var(--success)';
+        banner.innerHTML = '<strong>✓ Firehose rule active.</strong> ' +
+          'Tap ' + (feed.firehose_tap_id ? '<code>' + escapeHtml(feed.firehose_tap_id) + '</code>' : '(admin-managed)') +
+          ' · Rule <code>' + escapeHtml(r.rule.id) + '</code>' +
+          (feed.auto_provisioned ? ' · auto-provisioned' : ' · installed on admin-supplied tap');
+      }
+      box.innerHTML =
+        '<div style="margin-bottom:6px;color:var(--text-secondary)">Lucene query Ahrefs is using right now:</div>' +
+        '<pre style="margin:0;white-space:pre-wrap;word-break:break-word;color:var(--text-primary);font-family:var(--font-mono,monospace)">' + escapeHtml(r.rule.value) + '</pre>' +
+        '<div style="margin-top:8px;color:var(--text-tertiary)">Tag: ' + escapeHtml(r.rule.tag || '—') +
+        ' · Quality filter: ' + (r.rule.quality === false ? 'off' : 'on') +
+        ' · NSFW: ' + (r.rule.nsfw ? 'included' : 'excluded') + '</div>';
+      return;
+    }
+
+    if (r.state === 'rule_missing_upstream') {
+      if (banner) {
+        banner.style.background = 'var(--danger-soft)';
+        banner.style.color = 'var(--danger)';
+        banner.innerHTML = '<strong>⚠ Rule out of sync.</strong> ' + escapeHtml(r.message || 'The rule ID on file does not exist on Ahrefs. Edit the feed to reinstall.');
+      }
+      box.innerHTML = '<em>Rule ' + escapeHtml(r.rule_id_on_file || '') + ' not found on Ahrefs. The tap has ' +
+        (r.tap_rules_count || 0) + ' other rule(s).</em>';
+      return;
+    }
+
+    if (r.state === 'no_rule_on_file') {
+      if (banner) {
+        banner.style.background = 'var(--warn-soft,var(--danger-soft))';
+        banner.style.color = 'var(--warn,var(--danger))';
+        banner.innerHTML = '<strong>No rule tracked for this feed.</strong> ' +
+          'The tap has ' + (r.tap_rules_count || 0) + ' rule(s). Edit the feed to install one that matches its source_config.';
+      }
+      if (r.tap_rules && r.tap_rules.length) {
+        box.innerHTML =
+          '<div style="margin-bottom:6px;color:var(--text-secondary)">Rules currently on this tap:</div>' +
+          r.tap_rules.map(function (tr) {
+            return '<div style="padding:6px 0;border-bottom:1px solid var(--border-subtle)"><strong>' + escapeHtml(String(tr.id)) + '</strong>: ' + escapeHtml(tr.value) + (tr.tag ? ' <span style="color:var(--text-tertiary)">(tag: ' + escapeHtml(tr.tag) + ')</span>' : '') + '</div>';
+          }).join('');
+      } else {
+        box.innerHTML = '<em>No rules on this tap. Edit the feed to install one.</em>';
+      }
+      return;
+    }
+
+    if (r.state === 'no_token') {
+      if (banner) {
+        banner.style.background = 'var(--warn-soft,var(--danger-soft))';
+        banner.style.color = 'var(--warn,var(--danger))';
+        banner.innerHTML = '<strong>No firehose token.</strong> ' + escapeHtml(r.message || '');
+      }
+      box.innerHTML = '<em>No tap token — nothing to query.</em>';
+      return;
     }
   }
 
@@ -9249,8 +9354,22 @@
   function _feedsReactivate(feedId) {
     fetchApi('/api/feeds/' + feedId + '/activate', { method: 'POST' }).then(function () {
       showToast('Feed resumed', 'success');
-      _feedsSwitch({ view: 'detail', feedId: feedId, tab: 'stories' });
+      // Stay on list when called from the inline row button; stay on detail
+      // when called from the detail-page header button (currentPage is 'feeds'
+      // either way; we use the current view to decide).
+      if (_feedsViewState.view === 'detail' && _feedsViewState.feedId === feedId) {
+        _feedsSwitch({ view: 'detail', feedId: feedId, tab: 'stories' });
+      } else {
+        _feedsLoadList();
+      }
     }).catch(function (e) { showToast('Resume failed: ' + e.message, 'error'); });
+  }
+  function _feedsDestroy(feedId, name) {
+    if (!confirm('Permanently delete "' + name + '"?\n\nThis tears down the Ahrefs tap and frees its slot of the 25-rule cap. Historical clusters/drafts stay but become orphaned. This cannot be undone.')) return;
+    fetchApi('/api/feeds/' + feedId + '/destroy', { method: 'POST' }).then(function () {
+      showToast('Feed destroyed', 'success');
+      _feedsSwitch({ view: 'list' });
+    }).catch(function (e) { showToast('Destroy failed: ' + e.message, 'error'); });
   }
 
   // ─── Fuel Page ──────────────────────────────────────────────────────────
