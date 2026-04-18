@@ -7291,7 +7291,7 @@ function createApiRouter(deps) {
       var site = siteConfigMod.getSite(siteId);
       if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
 
-      var now = 'datetime("now")';
+      var now = 'datetime(\'now\')';
       var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
 
       var articlesToday = db.prepare(
@@ -7579,7 +7579,7 @@ function createApiRouter(deps) {
         }
 
         db.prepare(
-          'UPDATE feeds SET firehose_token = ?, firehose_tap_id = ?, firehose_rule_id = ?, auto_provisioned = 1, updated_at = datetime("now") WHERE id = ?'
+          'UPDATE feeds SET firehose_token = ?, firehose_tap_id = ?, firehose_rule_id = ?, auto_provisioned = 1, updated_at = datetime(\'now\') WHERE id = ?'
         ).run(tapToken, String(tapId), String(ruleResult.data.id), feedId);
 
         logger.info('api', 'Feed ' + feedId + ' auto-provisioned tap ' + tapId + ' + rule ' + ruleResult.data.id + ' (query: ' + luceneQuery.substring(0, 80) + ')');
@@ -7593,7 +7593,7 @@ function createApiRouter(deps) {
             var ruleRes = await firehoseAdmin.createRule(providedToken, luceneQuery, 'feed-' + feedId, { quality: true });
             if (ruleRes.ok) {
               db.prepare(
-                'UPDATE feeds SET firehose_rule_id = ?, updated_at = datetime("now") WHERE id = ?'
+                'UPDATE feeds SET firehose_rule_id = ?, updated_at = datetime(\'now\') WHERE id = ?'
               ).run(String(ruleRes.data.id), feedId);
               logger.info('api', 'Feed ' + feedId + ' installed rule ' + ruleRes.data.id + ' on admin-supplied tap');
             } else {
@@ -7649,7 +7649,7 @@ function createApiRouter(deps) {
       db.prepare(
         'UPDATE feeds SET name = ?, kind = ?, is_active = ?, firehose_token = ?, ' +
         '  source_config = ?, dest_config = ?, quality_config = ?, ' +
-        '  updated_at = datetime("now") ' +
+        '  updated_at = datetime(\'now\') ' +
         'WHERE id = ?'
       ).run(
         next.name, next.kind, next.is_active, next.firehose_token,
@@ -7731,7 +7731,7 @@ function createApiRouter(deps) {
       }
 
       db.prepare(
-        'UPDATE feeds SET is_active = 0, firehose_rule_id = NULL, updated_at = datetime("now") WHERE id = ?'
+        'UPDATE feeds SET is_active = 0, firehose_rule_id = NULL, updated_at = datetime(\'now\') WHERE id = ?'
       ).run(feedId);
 
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
@@ -7748,7 +7748,7 @@ function createApiRouter(deps) {
       var feedId = parseInt(req.params.id, 10);
       var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
       if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
-      db.prepare('UPDATE feeds SET is_active = 1, updated_at = datetime("now") WHERE id = ?').run(feedId);
+      db.prepare('UPDATE feeds SET is_active = 1, updated_at = datetime(\'now\') WHERE id = ?').run(feedId);
       var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool && row.firehose_token) {
