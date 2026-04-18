@@ -944,7 +944,9 @@ function createApiRouter(deps) {
   router.get('/stats', function (req, res) {
     try {
       var today = new Date().toISOString().slice(0, 10);
-      var todayStart = today + 'T00:00:00';
+      // Space, not T — SQLite datetime('now') uses "YYYY-MM-DD HH:MM:SS"
+      // so lexicographic comparisons only work with the same separator.
+      var todayStart = today + ' 00:00:00';
       var statsSid = req.siteId || 0;
 
       // Articles are scoped by source_site_id (which firehose brought it in).
@@ -7291,7 +7293,9 @@ function createApiRouter(deps) {
       var site = siteConfigMod.getSite(siteId);
       if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
 
-      var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
+      // Match SQLite's datetime('now') format (space, not T) so string
+// comparisons against received_at / published_at work correctly.
+var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
 
       var articlesToday = db.prepare(
         "SELECT COUNT(*) AS n FROM articles WHERE source_site_id = ? AND received_at >= ?"
@@ -7478,6 +7482,92 @@ function createApiRouter(deps) {
       });
     } catch (err) {
       logger.error('api', 'Failed to list feeds: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/feeds/stats?ids=1,2,3 — batched variant. Returns activity
+  // snapshots for multiple feeds in a single call so the Feeds list page
+  // doesn't fan out one request per row when rendering. Registered BEFORE
+  // /feeds/:id so Express doesn't match "stats" as an id parameter.
+  // Missing feeds are simply omitted (no error — the admin may have
+  // destroyed one between the list fetch and the stats fetch).
+  router.get('/feeds/stats', function (req, res) {
+    try {
+      var raw = String(req.query.ids || '').split(',').map(function (s) { return parseInt(s, 10); }).filter(function (n) { return !isNaN(n) && n > 0; });
+      if (!raw.length) return res.json({ ok: true, stats: {} });
+      // Cap to a sane upper bound so an adversarial ?ids= can't DoS the DB.
+      var ids = raw.slice(0, 100);
+      var placeholders = ids.map(function () { return '?'; }).join(',');
+      // Match SQLite's datetime('now') format (space, not T) so string
+// comparisons against received_at / published_at work correctly.
+var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
+
+      function _rowMap(rows, keyField, valueField) {
+        var out = {};
+        for (var i = 0; i < rows.length; i++) out[rows[i][keyField]] = rows[i][valueField];
+        return out;
+      }
+
+      // One SQL per metric, GROUPed by feed_id, then merged in JS. Cheaper
+      // than N round-trips even at small N; dominant cost is JSON serial-
+      // isation, not the queries.
+      var artTodayStmt = db.prepare(
+        "SELECT feed_id, COUNT(*) AS n FROM articles  WHERE feed_id IN (" + placeholders + ") AND received_at  >= ? GROUP BY feed_id"
+      );
+      var articlesTodayMap  = _rowMap(artTodayStmt.all.apply(artTodayStmt, ids.concat([todayStart])), 'feed_id', 'n');
+
+      var artTotalStmt = db.prepare(
+        "SELECT feed_id, COUNT(*) AS n FROM articles  WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+      );
+      var articlesTotalMap = _rowMap(artTotalStmt.all.apply(artTotalStmt, ids), 'feed_id', 'n');
+
+      var clustersStmt = db.prepare(
+        "SELECT feed_id, COUNT(*) AS n FROM clusters  WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+      );
+      var clustersMap  = _rowMap(clustersStmt.all.apply(clustersStmt, ids), 'feed_id', 'n');
+
+      var draftsStmt = db.prepare(
+        "SELECT feed_id, COUNT(*) AS n FROM drafts    WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+      );
+      var draftsMap  = _rowMap(draftsStmt.all.apply(draftsStmt, ids), 'feed_id', 'n');
+
+      var pubTodayStmt = db.prepare(
+        "SELECT feed_id, COUNT(*) AS n FROM published WHERE feed_id IN (" + placeholders + ") AND published_at >= ? GROUP BY feed_id"
+      );
+      var publishedTodayMap = _rowMap(pubTodayStmt.all.apply(pubTodayStmt, ids.concat([todayStart])), 'feed_id', 'n');
+
+      var pubTotalStmt = db.prepare(
+        "SELECT feed_id, COUNT(*) AS n FROM published WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+      );
+      var publishedTotalMap = _rowMap(pubTotalStmt.all.apply(pubTotalStmt, ids), 'feed_id', 'n');
+
+      var lastArtStmt = db.prepare(
+        "SELECT feed_id, MAX(received_at)  AS t FROM articles  WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+      );
+      var lastArticleAtMap  = _rowMap(lastArtStmt.all.apply(lastArtStmt, ids), 'feed_id', 't');
+
+      var lastPubStmt = db.prepare(
+        "SELECT feed_id, MAX(published_at) AS t FROM published WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+      );
+      var lastPublishedAtMap = _rowMap(lastPubStmt.all.apply(lastPubStmt, ids), 'feed_id', 't');
+
+      var stats = {};
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        stats[id] = {
+          articlesToday:   articlesTodayMap[id]    || 0,
+          articlesTotal:   articlesTotalMap[id]    || 0,
+          clustersTotal:   clustersMap[id]         || 0,
+          draftsTotal:     draftsMap[id]           || 0,
+          publishedToday:  publishedTodayMap[id]   || 0,
+          publishedTotal:  publishedTotalMap[id]   || 0,
+          lastArticleAt:   lastArticleAtMap[id]    || null,
+          lastPublishedAt: lastPublishedAtMap[id]  || null,
+        };
+      }
+      res.json({ ok: true, stats: stats });
+    } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -8033,7 +8123,9 @@ function createApiRouter(deps) {
       var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
       if (!row) return res.status(404).json({ ok: false, error: 'Feed not found' });
 
-      var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
+      // Match SQLite's datetime('now') format (space, not T) so string
+// comparisons against received_at / published_at work correctly.
+var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       var articlesToday   = (db.prepare("SELECT COUNT(*) AS n FROM articles WHERE feed_id = ? AND received_at >= ?").get(feedId, todayStart) || {}).n || 0;
       var articlesTotal   = (db.prepare("SELECT COUNT(*) AS n FROM articles WHERE feed_id = ?").get(feedId) || {}).n || 0;
       var clustersTotal   = (db.prepare("SELECT COUNT(*) AS n FROM clusters WHERE feed_id = ?").get(feedId) || {}).n || 0;
