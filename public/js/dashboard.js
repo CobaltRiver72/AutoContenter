@@ -8835,16 +8835,23 @@
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>';
-      feeds.forEach(function (f) {
-        fetchApi('/api/feeds/' + f.id + '/stats', { bypassCache: true }).then(function (st) {
-          if (!st || !st.ok) return;
-          var tr = document.querySelector('tr[data-feed-id="' + f.id + '"]');
-          if (!tr) return;
-          var s = tr.querySelector('.fs-stories');    if (s) s.textContent = (st.clustersTotal || 0) + ' clusters';
-          var p = tr.querySelector('.fs-published');  if (p) p.textContent = (st.publishedToday || 0) + ' / ' + (st.publishedTotal || 0);
-          var l = tr.querySelector('.fs-last');       if (l) l.textContent = st.lastArticleAt ? timeAgo(st.lastArticleAt) : '—';
-        }).catch(function () {});
-      });
+      // Batched stats — one request for every feed on the page instead of N.
+      // Gracefully falls back to placeholder dashes if the request fails;
+      // individual rows still show but without live numbers.
+      if (feeds.length) {
+        var ids = feeds.map(function (f) { return f.id; }).join(',');
+        fetchApi('/api/feeds/stats?ids=' + encodeURIComponent(ids), { bypassCache: true }).then(function (batched) {
+          var stats = (batched && batched.stats) || {};
+          feeds.forEach(function (f) {
+            var st = stats[f.id] || {};
+            var tr = document.querySelector('tr[data-feed-id="' + f.id + '"]');
+            if (!tr) return;
+            var s = tr.querySelector('.fs-stories');    if (s) s.textContent = (st.clustersTotal || 0) + ' clusters';
+            var p = tr.querySelector('.fs-published');  if (p) p.textContent = (st.publishedToday || 0) + ' / ' + (st.publishedTotal || 0);
+            var l = tr.querySelector('.fs-last');       if (l) l.textContent = st.lastArticleAt ? timeAgo(st.lastArticleAt) : '—';
+          });
+        }).catch(function () { /* non-fatal — list renders fine without stats */ });
+      }
     }).catch(function (err) {
       var el = document.getElementById('feeds-list');
       if (el) el.innerHTML = '<p style="color:var(--danger)">' + escapeHtml(err.message) + '</p>';
@@ -8933,8 +8940,8 @@
         _feedsField('Target Site *', '<select class="settings-input" id="ff-site">' + sitesOptions + '</select>',
           'Every story this feed ingests is published to this site.'),
 
-        _feedsField('Search Query', '<div style="display:flex;gap:var(--space-2)"><input class="settings-input" id="ff-query" type="text" value="' + escapeHtml(src.query || '') + '" placeholder="iphone launch" style="flex:1"><button class="btn" type="button" data-click="feedsPreviewStories">Preview</button></div>',
-          'ALL terms must appear in the article title/body. Leave blank to accept everything through the other filters.'),
+        _feedsField('Search Query', '<div style="display:flex;gap:var(--space-2)"><input class="settings-input" id="ff-query" type="text" value="' + escapeHtml(src.query || '') + '" placeholder="iphone launch" style="flex:1"><button class="btn" type="button" data-click="feedsPreviewStories" title="Sample matches from the last 14 days already in our buffer">Preview recent</button></div>',
+          'ALL terms must appear in the article title OR body. Leave blank to accept everything through the other filters. <em>Preview samples from articles we\'ve already ingested in the last 14 days — it doesn\'t query Ahrefs live.</em>'),
 
         '<div id="ff-preview" style="font-size:var(--text-sm);color:var(--text-tertiary);display:none"></div>',
 

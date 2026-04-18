@@ -386,7 +386,9 @@ class Pipeline {
       // same tick aren't affected.
       var feedQualityMap = {}; // feedId → parsed quality_config (cache per tick)
       var feedPublishedTodayMap = {}; // feedId → count of today's published
-      var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
+      // Match SQLite datetime('now') format (space separator, not ISO 'T')
+      // so the per-feed daily_limit check actually finds today's rows.
+      var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       var feedIdsToCheck = readyClusters.map(function (c) { return c.feed_id; }).filter(Boolean);
       if (feedIdsToCheck.length) {
         // Fetch all the feed quality configs in one shot so each cluster
