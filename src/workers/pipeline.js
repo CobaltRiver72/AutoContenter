@@ -1048,6 +1048,31 @@ class Pipeline {
 
       // Build the objects the publisher expects
       var taxonomy = resolveTaxonomy(readyPrimary, this.db, require('../utils/config').getConfig());
+
+      // Feed-mode: override classifier/publish-rules taxonomy with the Feed's
+      // explicit dest_config. A Feed already decided category/author/tags/status
+      // at creation time — we respect that without letting the AI classifier
+      // second-guess it.
+      if (readyPrimary.feed_id) {
+        try {
+          var feedRow = this.db.prepare('SELECT dest_config FROM feeds WHERE id = ?').get(readyPrimary.feed_id);
+          if (feedRow && feedRow.dest_config) {
+            var dest = JSON.parse(feedRow.dest_config || '{}');
+            if (Array.isArray(dest.wp_category_ids) && dest.wp_category_ids.length) {
+              taxonomy.categoryIds = dest.wp_category_ids;
+            } else if (dest.wp_category_id) {
+              taxonomy.categoryIds = [dest.wp_category_id];
+            }
+            if (dest.wp_category_id) taxonomy.primaryCategoryId = dest.wp_category_id;
+            if (Array.isArray(dest.wp_tag_ids) && dest.wp_tag_ids.length) taxonomy.tagIds = dest.wp_tag_ids;
+            if (dest.wp_author_id) taxonomy.authorId = dest.wp_author_id;
+            if (dest.post_status)  taxonomy.postStatus = dest.post_status;
+          }
+        } catch (feedDestErr) {
+          this.logger.warn(MODULE, 'Feed dest_config parse failed for feed ' + readyPrimary.feed_id + ': ' + feedDestErr.message);
+        }
+      }
+
       var rewrittenArticle = {
         title: readyPrimary.rewritten_title || readyPrimary.source_title,
         content: readyPrimary.rewritten_html,
@@ -1067,6 +1092,7 @@ class Pipeline {
         wpTags:         taxonomy.tagIds,
         wpAuthorId:     taxonomy.authorId,
         wpPostStatus:   taxonomy.postStatus || null,
+        feedId:         readyPrimary.feed_id || null,
       };
 
       // Find featured image from any cluster draft
@@ -1465,9 +1491,12 @@ class Pipeline {
   // or scheduler.processQueue() still works.
 
   enqueue(cluster) {
-    // The old scheduler.enqueue() created drafts. Keep that behavior.
-    // Multi-site: fan-out — create drafts for EACH active site whose
-    // PUBLISH_LANGUAGE filter matches the cluster's primary language.
+    // Create drafts from a cluster's articles. Two modes:
+    //   • Feed-mode (cluster.feed_id set)    → one target: the feed's site.
+    //     Drafts stamped with feed_id and site_id. No language fan-out — the
+    //     feed's own filter already handled language selection at SSE ingest.
+    //   • Legacy multi-site mode (feed_id NULL) → fan-out to every active site
+    //     whose PUBLISH_LANGUAGE matches the cluster's primary language.
     try {
       if (!cluster || !cluster.id) return;
 
@@ -1476,26 +1505,21 @@ class Pipeline {
       ).all(cluster.id);
       if (articles.length === 0) return;
 
-      // Detect primary article language for site matching
       var primaryArt = articles[0];
       var primaryLang = primaryArt.language ||
         (/[\u0900-\u097F]{3,}/.test((primaryArt.title || '') + ' ' + (primaryArt.content_markdown || '').slice(0, 300)) ? 'hi' : 'en');
 
-      // Get all active sites; fall back to synthetic site 1 if no sites table yet
-      var sites;
-      try {
-        sites = siteConfig.getAllActiveSites();
-      } catch (_e) {
-        sites = [{ id: 1 }];
-      }
-      if (!sites || sites.length === 0) sites = [{ id: 1 }];
+      // Fresh-read the cluster so we pick up feed_id after similarity.js
+      // stamped it (enqueue is called after createOrUpdateCluster resolves).
+      var clusterRow = this.db.prepare('SELECT feed_id FROM clusters WHERE id = ?').get(cluster.id);
+      var feedId = clusterRow && clusterRow.feed_id ? clusterRow.feed_id : null;
 
       var insertDraft = this.db.prepare(
         "INSERT OR IGNORE INTO drafts (" +
         "  source_article_id, source_url, source_domain, source_title," +
         "  source_content_markdown, source_language, target_platform, status, mode," +
-        "  cluster_id, cluster_role, extraction_status, site_id" +
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "  cluster_id, cluster_role, extraction_status, site_id, feed_id" +
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
 
       var existingCheck = this.db.prepare(
@@ -1506,23 +1530,46 @@ class Pipeline {
       var totalDrafts = 0;
       var matchedSites = 0;
 
+      // Resolve the target-site list. Feed-mode = 1 site (the feed owns it).
+      // Legacy multi-site = every active site.
+      var targetSites;
+      if (feedId) {
+        var feedRow = this.db.prepare('SELECT site_id FROM feeds WHERE id = ?').get(feedId);
+        if (!feedRow) {
+          this.logger.warn(MODULE, 'Enqueue: cluster ' + cluster.id + ' references feed ' + feedId + ' but the feed row is gone; skipping');
+          return;
+        }
+        targetSites = [{ id: feedRow.site_id, _feedMode: true }];
+      } else {
+        try {
+          targetSites = siteConfig.getAllActiveSites();
+        } catch (_e) {
+          targetSites = [{ id: 1 }];
+        }
+        if (!targetSites || targetSites.length === 0) targetSites = [{ id: 1 }];
+      }
+
       var createDrafts = this.db.transaction(function () {
-        for (var si = 0; si < sites.length; si++) {
-          var site = sites[si];
+        for (var si = 0; si < targetSites.length; si++) {
+          var site = targetSites[si];
           var siteId = site.id;
 
-          // Skip if drafts already exist for this cluster + site
           var existing = existingCheck.get(cluster.id, siteId);
           if (existing && existing.count > 0) continue;
 
-          // Language filter: check per-site PUBLISH_LANGUAGE
-          var siteLangPref;
-          try {
-            siteLangPref = (siteConfig.getSiteConfig(siteId, 'PUBLISH_LANGUAGE') || 'en').toLowerCase().trim();
-          } catch (_e) {
-            siteLangPref = 'en';
+          // Language filter is ONLY applied in legacy multi-site mode. In
+          // feed-mode the feed's own filter already gated on ALLOWED_LANGUAGES
+          // at ingest — re-applying PUBLISH_LANGUAGE here would double-filter
+          // and drop valid feed articles.
+          if (!site._feedMode) {
+            var siteLangPref;
+            try {
+              siteLangPref = (siteConfig.getSiteConfig(siteId, 'PUBLISH_LANGUAGE') || 'en').toLowerCase().trim();
+            } catch (_e) {
+              siteLangPref = 'en';
+            }
+            if (siteLangPref !== 'both' && siteLangPref !== primaryLang) continue;
           }
-          if (siteLangPref !== 'both' && siteLangPref !== primaryLang) continue;
 
           matchedSites++;
 
@@ -1534,7 +1581,7 @@ class Pipeline {
               a.content_markdown || '', artLang, 'wordpress',
               'fetching', 'auto',
               cluster.id, i === 0 ? 'primary' : 'source', 'pending',
-              siteId
+              siteId, feedId
             );
             totalDrafts++;
           }
@@ -1543,7 +1590,9 @@ class Pipeline {
       });
 
       createDrafts();
-      this.logger.info(MODULE, 'Enqueued cluster ' + cluster.id + ' -> ' + totalDrafts + ' drafts across ' + matchedSites + ' site(s)');
+      this.logger.info(MODULE, 'Enqueued cluster ' + cluster.id +
+        (feedId ? ' (feed=' + feedId + ')' : '') +
+        ' -> ' + totalDrafts + ' drafts across ' + matchedSites + ' site(s)');
 
     } catch (err) {
       this.logger.error(MODULE, 'Enqueue failed: ' + err.message);

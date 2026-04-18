@@ -584,7 +584,7 @@
     var pageTitleEl = document.getElementById('page-title');
     if (pageTitleEl) {
       var PAGE_TITLES = {
-        overview: 'Overview', feed: 'Live Feed', rules: 'Firehose Rules',
+        overview: 'Overview', feed: 'Live Feed', feeds: 'Feeds', rules: 'Firehose Rules',
         trends: 'Trends', clusters: 'Clusters', failed: 'Failed Drafts',
         published: 'Published', settings: 'Settings',
         'wp-settings': 'WordPress Settings', sites: 'Sites', logs: 'Logs',
@@ -625,6 +625,7 @@
       case 'settings': loadSettings(); loadAISettings(); loadFuelMetalsSettings(); loadPipelineEngineSettings(); break;
       case 'wp-settings': loadWPPublishingSettings(); loadWPTaxonomy(); loadPublishRules(); initBulkImport(); loadActiveConfigViewer(); break;
       case 'sites': loadSitesPage(); break;
+      case 'feeds': loadFeedsPage(); break;
       case 'logs': loadLogs(); break;
       case 'sources': loadSourcesPage(); break;
       case 'fuel': loadFuelPage(); break;
@@ -8668,6 +8669,521 @@
       alert('Failed: ' + err.message);
     });
   }
+
+  // ─── Feeds Page ─────────────────────────────────────────────────────────
+  // The Feeds page replaces the scattered AutoPilot + Firehose Rules + Publish
+  // Rules controls with a single object: "fetch X → publish to site Y as
+  // author Z with category W." Each feed owns its own SSE stream and routes
+  // every cluster it produces to one WordPress site.
+  //
+  // The page supports two views:
+  //   • List view        — table of feeds + "+ Create Feed" button
+  //   • Detail view      — Stories / Configuration / Settings tabs for one feed
+  //
+  // Both live inside #page-feeds; the helper _feedsSwitch() toggles between
+  // them so the admin doesn't need a full-page navigation to drill in.
+
+  var _feedsViewState = { view: 'list', feedId: null, tab: 'stories' };
+
+  function loadFeedsPage() {
+    _feedsSwitch({ view: 'list' });
+  }
+
+  function _feedsSwitch(next) {
+    _feedsViewState = Object.assign({ view: 'list', feedId: null, tab: 'stories' }, next);
+    var section = document.getElementById('page-feeds');
+    if (!section) return;
+    if (_feedsViewState.view === 'list') {
+      _feedsRenderList(section);
+    } else if (_feedsViewState.view === 'detail') {
+      _feedsRenderDetail(section, _feedsViewState.feedId, _feedsViewState.tab);
+    }
+  }
+
+  function _feedsRenderList(section) {
+    section.innerHTML = [
+      '<div class="content-area">',
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-6)">',
+      '<div>',
+        '<h2 style="font-size:var(--text-xl);font-weight:var(--weight-semibold);margin:0">Feeds</h2>',
+        '<p style="color:var(--text-tertiary);font-size:var(--text-sm);margin:4px 0 0 0">Each feed pulls content from one source and publishes it to one WordPress site.</p>',
+      '</div>',
+      '<button class="btn btn-primary" id="feeds-add-btn">+ Create Feed</button>',
+      '</div>',
+      '<div id="feeds-list"><p style="color:var(--text-tertiary)">Loading…</p></div>',
+      '</div>'
+    ].join('');
+    document.getElementById('feeds-add-btn').addEventListener('click', _feedsOpenKindPicker);
+    _feedsLoadList();
+  }
+
+  function _feedsLoadList() {
+    fetchApi('/api/feeds', { bypassCache: true }).then(function (data) {
+      var feeds = (data && data.feeds) || [];
+      var el = document.getElementById('feeds-list');
+      if (!el) return;
+      if (feeds.length === 0) {
+        el.innerHTML = [
+          '<div style="padding:var(--space-8);border:1px dashed var(--border-default);border-radius:var(--radius-lg);text-align:center">',
+          '<p style="color:var(--text-tertiary);margin:0 0 var(--space-4) 0">No feeds yet. Create one to start pulling content.</p>',
+          '<button class="btn btn-primary" onclick="_feedsOpenKindPicker()">+ Create Feed</button>',
+          '</div>'
+        ].join('');
+        return;
+      }
+      var rows = feeds.map(function (f) {
+        var kindIcon = ({
+          firehose: '📰', rss: '📡', youtube: '▶️', keyword: '🔎'
+        })[f.kind] || '•';
+        var active = f.is_active
+          ? '<span style="background:var(--success-soft);color:var(--success);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Active</span>'
+          : '<span style="background:var(--danger-soft);color:var(--danger);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Paused</span>';
+        var status = f.dest_config && f.dest_config.post_status === 'publish'
+          ? '<span style="background:var(--accent-soft,var(--success-soft));color:var(--accent,var(--success));padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Auto-publish</span>'
+          : '<span style="background:var(--bg-surface-2);color:var(--text-tertiary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--text-xs)">Draft only</span>';
+        return '<tr data-feed-id="' + f.id + '" style="border-top:1px solid var(--border-subtle);cursor:pointer" onclick="_feedsOpenDetail(' + f.id + ')">' +
+          '<td style="padding:10px">' + kindIcon + '</td>' +
+          '<td style="padding:10px"><strong>' + escapeHtml(f.name) + '</strong>' +
+          '<br><span style="color:var(--text-tertiary);font-size:var(--text-xs)">' +
+            escapeHtml((f.source_config && f.source_config.query) ? f.source_config.query : '(no query)') +
+          '</span></td>' +
+          '<td style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">' + escapeHtml(f.kind) + '</td>' +
+          '<td style="padding:10px">' + active + ' ' + status + '</td>' +
+          '<td class="fs-stories" style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
+          '<td class="fs-published" style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
+          '<td class="fs-last" style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">…</td>' +
+          '</tr>';
+      }).join('');
+      el.innerHTML =
+        '<table style="width:100%;border-collapse:collapse">' +
+          '<thead><tr style="border-bottom:1px solid var(--border-default)">' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary);width:40px"></th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">NAME / QUERY</th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">KIND</th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">STATUS</th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">STORIES</th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">PUBLISHED</th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">LAST FETCH</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>';
+      feeds.forEach(function (f) {
+        fetchApi('/api/feeds/' + f.id + '/stats', { bypassCache: true }).then(function (st) {
+          if (!st || !st.ok) return;
+          var tr = document.querySelector('tr[data-feed-id="' + f.id + '"]');
+          if (!tr) return;
+          var s = tr.querySelector('.fs-stories');    if (s) s.textContent = (st.clustersTotal || 0) + ' clusters';
+          var p = tr.querySelector('.fs-published');  if (p) p.textContent = (st.publishedToday || 0) + ' / ' + (st.publishedTotal || 0);
+          var l = tr.querySelector('.fs-last');       if (l) l.textContent = st.lastArticleAt ? timeAgo(st.lastArticleAt) : '—';
+        }).catch(function () {});
+      });
+    }).catch(function (err) {
+      var el = document.getElementById('feeds-list');
+      if (el) el.innerHTML = '<p style="color:var(--danger)">' + escapeHtml(err.message) + '</p>';
+    });
+  }
+
+  function _feedsOpenDetail(feedId) {
+    _feedsSwitch({ view: 'detail', feedId: feedId, tab: 'stories' });
+  }
+  window._feedsOpenDetail = _feedsOpenDetail;
+
+  // ─── Kind-picker modal — four cards (News / YouTube / RSS / Keyword) ─────
+  // Only the News Feed (Firehose) is live in Phase 1. The other three show a
+  // "coming soon" label to set expectations.
+  function _feedsOpenKindPicker() {
+    var modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000';
+    modal.innerHTML = [
+      '<div style="background:var(--bg-surface);max-width:560px;width:92%;border-radius:var(--radius-lg);padding:var(--space-6);box-shadow:var(--shadow-lg,0 10px 40px rgba(0,0,0,.3))">',
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-5)">',
+        '<div>',
+          '<h3 style="margin:0;font-size:var(--text-lg);font-weight:var(--weight-semibold)">Create Feed</h3>',
+          '<p style="margin:4px 0 0 0;color:var(--text-tertiary);font-size:var(--text-sm)">Set up a content feed to get content from external sources.</p>',
+        '</div>',
+        '<button class="btn btn-sm" onclick="_feedsCloseModal()">✕</button>',
+      '</div>',
+      '<div style="display:flex;flex-direction:column;gap:var(--space-3)">',
+        _feedsKindCard('keyword',  '🔎', 'Setup a Keyword Feed',     'Track high-ranking keywords with a personalized feed.',    true),
+        _feedsKindCard('firehose', '📰', 'Create a News Feed',        'Curated updates from your preferred news sources.',         false),
+        _feedsKindCard('rss',      '📡', 'Connect an RSS Feed',       'Pull in fresh content from your favorite websites.',        true),
+        _feedsKindCard('youtube',  '▶️',  'Add a YouTube Channel Feed','Repurpose content from your favorite YouTube channels.',    true),
+      '</div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(modal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) _feedsCloseModal(); });
+  }
+  window._feedsOpenKindPicker = _feedsOpenKindPicker;
+
+  function _feedsKindCard(kind, icon, title, desc, disabled) {
+    var onclick = disabled
+      ? 'onclick="showToast(\'' + escapeHtml(title).replace(/'/g,"\\'") + ' — coming soon\', \'info\')"'
+      : 'onclick="_feedsCloseModal(); _feedsOpenNewsForm()"';
+    var style = 'border:1px solid var(--border-default);border-radius:var(--radius-md);padding:var(--space-4);cursor:' + (disabled ? 'not-allowed' : 'pointer') + ';opacity:' + (disabled ? '.55' : '1') + ';display:flex;gap:var(--space-4);align-items:center;background:var(--bg-surface)';
+    return '<div style="' + style + '" ' + onclick + '>' +
+      '<div style="font-size:24px;width:40px;text-align:center">' + icon + '</div>' +
+      '<div style="flex:1">' +
+        '<div style="font-weight:var(--weight-semibold)">' + escapeHtml(title) + (disabled ? ' <span style="font-size:var(--text-xs);color:var(--text-tertiary);font-weight:normal">— Coming soon</span>' : '') + '</div>' +
+        '<div style="font-size:var(--text-sm);color:var(--text-tertiary);margin-top:2px">' + escapeHtml(desc) + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _feedsCloseModal() {
+    var modals = document.querySelectorAll('.modal-backdrop');
+    modals.forEach(function (m) { m.remove(); });
+  }
+  window._feedsCloseModal = _feedsCloseModal;
+
+  // ─── News Feed form — the real config form ──────────────────────────────
+  function _feedsOpenNewsForm(existingFeed) {
+    var editing = !!existingFeed;
+    var sitesOptions = (state.sites || []).map(function (s) {
+      return '<option value="' + s.id + '"' + (existingFeed && existingFeed.site_id === s.id ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>';
+    }).join('');
+
+    var src  = (existingFeed && existingFeed.source_config)  || {};
+    var dest = (existingFeed && existingFeed.dest_config)    || {};
+    var qc   = (existingFeed && existingFeed.quality_config) || {};
+
+    var modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:1000;overflow-y:auto;padding:var(--space-6) 0';
+    modal.innerHTML = [
+      '<div style="background:var(--bg-surface);max-width:720px;width:92%;border-radius:var(--radius-lg);padding:var(--space-6);box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">',
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-5)">',
+        '<div>',
+          '<h3 style="margin:0;font-size:var(--text-lg);font-weight:var(--weight-semibold)">' + (editing ? 'Edit News Feed' : 'Create a News Feed') + '</h3>',
+          '<p style="margin:4px 0 0 0;color:var(--text-tertiary);font-size:var(--text-sm)">Curated updates from your preferred news sources.</p>',
+        '</div>',
+        '<button class="btn btn-sm" onclick="_feedsCloseModal()">✕</button>',
+      '</div>',
+
+      '<div style="display:flex;flex-direction:column;gap:var(--space-5)">',
+
+        _feedsField('Feed Name *', '<input class="settings-input" id="ff-name" type="text" value="' + escapeHtml(existingFeed && existingFeed.name || '') + '" placeholder="Tech News — Site A">',
+          'Used to identify the feed in the dashboard.'),
+
+        _feedsField('Target Site *', '<select class="settings-input" id="ff-site">' + sitesOptions + '</select>',
+          'Every story this feed ingests is published to this site.'),
+
+        _feedsField('Search Query', '<div style="display:flex;gap:var(--space-2)"><input class="settings-input" id="ff-query" type="text" value="' + escapeHtml(src.query || '') + '" placeholder="iphone launch" style="flex:1"><button class="btn" type="button" onclick="_feedsPreviewStories()">Preview</button></div>',
+          'ALL terms must appear in the article title/body. Leave blank to accept everything through the other filters.'),
+
+        '<div id="ff-preview" style="font-size:var(--text-sm);color:var(--text-tertiary);display:none"></div>',
+
+        _feedsField('Firehose Token *', '<input class="settings-input" id="ff-token" type="text" value="' + escapeHtml(existingFeed && existingFeed.has_firehose_token ? '••••••••' : '') + '" placeholder="fh_... (per-feed Ahrefs tap)">',
+          'Each feed opens its own SSE connection. Tap tokens start <code>fh_</code>, management keys <code>fhm_</code>.'),
+
+        _feedsField('Target Country', _feedsCountrySelect(src.country || 'US'),
+          'Used as a hint. Exact geo filtering via Include Websites below.'),
+
+        _feedsField('Time Range', _feedsTimeRangeSelect(src.time_range || 'past-month'),
+          'How far back the feed looks when backfilling on first connect.'),
+
+        _feedsField('Include Websites', _feedsDomainList('ff-include', src.include_domains || []),
+          'Pull only from these. Blank = all sites pass. Wildcards: <code>*.example.com</code>.'),
+
+        _feedsField('Exclude Websites', _feedsDomainList('ff-exclude', src.exclude_domains || []),
+          'Block these sources. Wildcards supported.'),
+
+        '<hr style="border:none;border-top:1px solid var(--border-subtle)">',
+        '<div style="font-weight:var(--weight-semibold);font-size:var(--text-md)">WordPress Destination</div>',
+
+        _feedsField('Category ID', '<input class="settings-input" id="ff-category" type="number" value="' + escapeHtml(String(dest.wp_category_id || '')) + '" placeholder="e.g. 5">',
+          'WordPress category numeric ID. Look it up in WP admin → Categories.'),
+
+        _feedsField('Author ID', '<input class="settings-input" id="ff-author" type="number" value="' + escapeHtml(String(dest.wp_author_id || '')) + '" placeholder="e.g. 3">',
+          'WordPress user numeric ID.'),
+
+        _feedsField('Tags (comma-separated IDs)', '<input class="settings-input" id="ff-tags" type="text" value="' + escapeHtml((dest.wp_tag_ids || []).join(',')) + '" placeholder="12,14,19">',
+          'Pre-created tag IDs that every post from this feed will get.'),
+
+        _feedsField('Post Status', '<select class="settings-input" id="ff-status">' +
+          ['draft','publish','pending','private'].map(function (s) {
+            return '<option value="' + s + '"' + ((dest.post_status||'draft') === s ? ' selected' : '') + '>' + s + '</option>';
+          }).join('') + '</select>',
+          'Draft routes content to review. Publish auto-posts.'),
+
+        '<details style="margin-top:var(--space-3)">',
+        '<summary style="cursor:pointer;color:var(--accent,var(--text-secondary));font-weight:var(--weight-semibold)">Advanced · Quality gates</summary>',
+        '<div style="display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-4)">',
+          _feedsField('Minimum sources per cluster', '<input class="settings-input" id="ff-min-sources" type="number" value="' + escapeHtml(String(qc.min_sources || '')) + '" placeholder="2">', 'Feed waits for at least N different publishers before rewriting.'),
+          _feedsField('Daily publish limit', '<input class="settings-input" id="ff-daily" type="number" value="' + escapeHtml(String(qc.daily_limit || '')) + '" placeholder="50">', 'Cap on posts per 24h. Leave empty for unlimited.'),
+          _feedsField('Blocked keywords (comma-separated)', '<input class="settings-input" id="ff-blocked" type="text" value="' + escapeHtml((qc.blocked_keywords || []).join(',')) + '" placeholder="rumor, leak">', 'Clusters whose topic contains any of these are skipped.'),
+        '</div>',
+        '</details>',
+
+        '<div id="ff-error" style="color:var(--danger);font-size:var(--text-sm);display:none"></div>',
+
+        '<div style="display:flex;gap:var(--space-3);margin-top:var(--space-3)">',
+          '<button class="btn btn-primary" onclick="_feedsSave(' + (existingFeed && existingFeed.id ? existingFeed.id : 'null') + ')">' + (editing ? 'Save' : 'Create Feed') + '</button>',
+          '<button class="btn" onclick="_feedsCloseModal()">Cancel</button>',
+        '</div>',
+      '</div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(modal);
+  }
+  window._feedsOpenNewsForm = _feedsOpenNewsForm;
+
+  function _feedsField(label, inputHtml, help) {
+    return '<div>' +
+      '<label style="font-size:var(--text-sm);color:var(--text-secondary);display:block;margin-bottom:6px;font-weight:var(--weight-semibold)">' + label + '</label>' +
+      inputHtml +
+      (help ? '<div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:4px">' + help + '</div>' : '') +
+    '</div>';
+  }
+
+  function _feedsCountrySelect(selected) {
+    var countries = [
+      ['US','United States'],['GB','United Kingdom'],['IN','India'],['CA','Canada'],
+      ['AU','Australia'],['DE','Germany'],['FR','France'],['JP','Japan'],['GLOBAL','Global / Any']
+    ];
+    return '<select class="settings-input" id="ff-country">' +
+      countries.map(function (c) {
+        return '<option value="' + c[0] + '"' + (c[0] === selected ? ' selected' : '') + '>' + c[1] + '</option>';
+      }).join('') +
+    '</select>';
+  }
+
+  function _feedsTimeRangeSelect(selected) {
+    var ranges = [['past-day','Past day'],['past-week','Past week'],['past-month','Past month'],['past-year','Past year'],['any','Any time']];
+    return '<select class="settings-input" id="ff-time">' +
+      ranges.map(function (r) {
+        return '<option value="' + r[0] + '"' + (r[0] === selected ? ' selected' : '') + '>' + r[1] + '</option>';
+      }).join('') +
+    '</select>';
+  }
+
+  function _feedsDomainList(id, initial) {
+    var rows = (initial || []).map(function (d, i) {
+      return '<div style="display:flex;gap:6px;margin-bottom:4px"><input class="settings-input" data-domain-for="' + id + '" type="text" value="' + escapeHtml(d) + '" style="flex:1"><button class="btn btn-sm" type="button" onclick="this.parentElement.remove()">−</button></div>';
+    }).join('');
+    return '<div id="' + id + '-wrap">' + rows + '</div>' +
+      '<button class="btn btn-sm" type="button" onclick="_feedsAddDomain(\'' + id + '\')">+ Add website</button>';
+  }
+  window._feedsAddDomain = function (id) {
+    var wrap = document.getElementById(id + '-wrap');
+    if (!wrap) return;
+    var div = document.createElement('div');
+    div.style.cssText = 'display:flex;gap:6px;margin-bottom:4px';
+    div.innerHTML = '<input class="settings-input" data-domain-for="' + id + '" type="text" placeholder="example.com or *.example.com" style="flex:1"><button class="btn btn-sm" type="button" onclick="this.parentElement.remove()">−</button>';
+    wrap.appendChild(div);
+    var inp = div.querySelector('input');
+    if (inp) inp.focus();
+  };
+
+  function _feedsReadDomainList(id) {
+    var inputs = document.querySelectorAll('input[data-domain-for="' + id + '"]');
+    var out = [];
+    for (var i = 0; i < inputs.length; i++) {
+      var v = (inputs[i].value || '').trim();
+      if (v) out.push(v);
+    }
+    return out;
+  }
+
+  function _feedsSave(feedId) {
+    var errEl = document.getElementById('ff-error');
+    function fail(msg) { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } }
+
+    var name = ($('ff-name').value || '').trim();
+    var siteId = parseInt($('ff-site').value, 10);
+    var token = ($('ff-token').value || '').trim();
+
+    if (!name)   return fail('Feed Name is required.');
+    if (!siteId) return fail('Target Site is required.');
+    if (!feedId && !token) return fail('Firehose Token is required to create the feed.');
+    if (token.indexOf('••') === 0) token = null; // unchanged placeholder
+
+    var body = {
+      name: name,
+      kind: 'firehose',
+      site_id: siteId,
+      source_config: {
+        query:           ($('ff-query').value || '').trim(),
+        country:         $('ff-country').value,
+        time_range:      $('ff-time').value,
+        include_domains: _feedsReadDomainList('ff-include'),
+        exclude_domains: _feedsReadDomainList('ff-exclude'),
+      },
+      dest_config: {
+        wp_category_id: parseInt($('ff-category').value, 10) || null,
+        wp_author_id:   parseInt($('ff-author').value, 10) || null,
+        wp_tag_ids:     ($('ff-tags').value || '').split(',').map(function (s) { return parseInt(s.trim(), 10); }).filter(Boolean),
+        post_status:    $('ff-status').value,
+      },
+      quality_config: {
+        min_sources:      parseInt($('ff-min-sources').value, 10) || null,
+        daily_limit:      parseInt($('ff-daily').value, 10) || null,
+        blocked_keywords: ($('ff-blocked').value || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean),
+      },
+    };
+    if (token) body.firehose_token = token;
+
+    var url = feedId ? '/api/feeds/' + feedId : '/api/feeds';
+    var method = feedId ? 'PUT' : 'POST';
+    fetchApi(url, { method: method, body: body }).then(function (r) {
+      if (!r || !r.ok) throw new Error((r && r.error) || 'Save failed');
+      _feedsCloseModal();
+      showToast(feedId ? 'Feed updated' : 'Feed created — SSE will connect within seconds', 'success');
+      _feedsLoadList();
+    }).catch(function (e) { fail(e.message); });
+  }
+  window._feedsSave = _feedsSave;
+
+  function _feedsPreviewStories() {
+    var q = ($('ff-query').value || '').trim();
+    var sid = parseInt($('ff-site').value, 10) || 0;
+    var out = document.getElementById('ff-preview');
+    if (!out) return;
+    if (!q) { out.style.display = 'block'; out.textContent = 'Enter a search query first, then click Preview.'; return; }
+    out.style.display = 'block'; out.textContent = 'Loading recent matches…';
+    fetchApi('/api/feeds/preview', {
+      method: 'POST',
+      body: {
+        source_config: {
+          query: q,
+          include_domains: _feedsReadDomainList('ff-include'),
+          exclude_domains: _feedsReadDomainList('ff-exclude'),
+          site_id: sid,
+        },
+      },
+    }).then(function (r) {
+      if (!r || !r.ok) { out.textContent = (r && r.error) || 'Preview failed'; return; }
+      if (!r.matches || !r.matches.length) {
+        out.innerHTML = '<em>No matches in the recent article buffer. Once the feed is live, new ingests that match will appear.</em>';
+        return;
+      }
+      var list = r.matches.slice(0, 8).map(function (m) {
+        return '<li><strong>' + escapeHtml(m.domain || '?') + '</strong> — ' + escapeHtml(m.title || m.url) + '</li>';
+      }).join('');
+      out.innerHTML = '<strong>Showing ' + r.matches.length + ' recent match(es) from the article buffer:</strong><ul style="margin:6px 0 0 20px">' + list + '</ul>';
+    }).catch(function (e) {
+      out.textContent = 'Preview failed: ' + e.message;
+    });
+  }
+  window._feedsPreviewStories = _feedsPreviewStories;
+
+  // ─── Feed detail page (Stories / Configuration / Settings tabs) ─────────
+  function _feedsRenderDetail(section, feedId, activeTab) {
+    section.innerHTML = '<div class="content-area"><p style="color:var(--text-tertiary)">Loading feed…</p></div>';
+    fetchApi('/api/feeds/' + feedId, { bypassCache: true }).then(function (r) {
+      if (!r || !r.ok) {
+        section.innerHTML = '<p style="color:var(--danger)">Feed not found.</p>';
+        return;
+      }
+      var f = r.feed;
+      var lastUpd = f.updated_at ? formatDateTime(f.updated_at) : '—';
+      section.innerHTML = [
+        '<div class="content-area">',
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-5)">',
+        '<div><button class="btn btn-sm" onclick="_feedsSwitch({view:\'list\'})">← Back to feeds</button></div>',
+        '<div style="display:flex;gap:var(--space-2)">',
+          '<button class="btn btn-sm" onclick="_feedsTestToken(' + feedId + ')">Test token</button>',
+          f.is_active
+            ? '<button class="btn btn-sm" onclick="_feedsDeactivate(' + feedId + ')" style="color:var(--danger);border-color:var(--danger)">Pause</button>'
+            : '<button class="btn btn-sm btn-primary" onclick="_feedsReactivate(' + feedId + ')">Resume</button>',
+        '</div>',
+        '</div>',
+        '<div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-5)">',
+          '<div style="font-size:24px">📰</div>',
+          '<div>',
+            '<h2 style="margin:0;font-size:var(--text-xl);font-weight:var(--weight-semibold)">' + escapeHtml(f.name) + '</h2>',
+            '<div style="color:var(--text-tertiary);font-size:var(--text-sm)">' + escapeHtml(f.kind) + ' feed · last updated ' + escapeHtml(lastUpd) + '</div>',
+          '</div>',
+        '</div>',
+        '<div style="display:flex;gap:var(--space-5);border-bottom:1px solid var(--border-default);margin-bottom:var(--space-5)">',
+          _feedsTab('stories',       'Stories',       activeTab),
+          _feedsTab('configuration', 'Configuration', activeTab),
+          _feedsTab('settings',      'Settings',      activeTab),
+        '</div>',
+        '<div id="feeds-detail-body"></div>',
+        '</div>'
+      ].join('');
+      _feedsRenderDetailTab(f, activeTab);
+    });
+  }
+  window._feedsSwitch = _feedsSwitch;
+
+  function _feedsTab(key, label, active) {
+    var isActive = key === active;
+    return '<div onclick="_feedsSwitchTab(\'' + key + '\')" style="padding:10px 0;cursor:pointer;color:' + (isActive ? 'var(--text-primary)' : 'var(--text-tertiary)') + ';font-weight:' + (isActive ? 'var(--weight-semibold)' : 'normal') + ';border-bottom:2px solid ' + (isActive ? 'var(--accent,var(--text-primary))' : 'transparent') + '">' + label + '</div>';
+  }
+
+  function _feedsSwitchTab(tab) {
+    _feedsSwitch({ view: 'detail', feedId: _feedsViewState.feedId, tab: tab });
+  }
+  window._feedsSwitchTab = _feedsSwitchTab;
+
+  function _feedsRenderDetailTab(feed, tab) {
+    var body = document.getElementById('feeds-detail-body');
+    if (!body) return;
+    if (tab === 'stories') {
+      body.innerHTML = '<p style="color:var(--text-tertiary)">Loading stories…</p>';
+      fetchApi('/api/clusters?feed_id=' + feed.id, { bypassCache: true }).then(function (r) {
+        var clusters = (r && r.clusters) || r.data || [];
+        if (!clusters.length) {
+          body.innerHTML = '<div style="padding:var(--space-8);text-align:center;color:var(--text-tertiary)"><p>We\'re gathering news for you.</p><p style="font-size:var(--text-sm)">Come back in a few minutes.</p></div>';
+          return;
+        }
+        var rows = clusters.map(function (c) {
+          return '<tr style="border-top:1px solid var(--border-subtle)">' +
+            '<td style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary);white-space:nowrap">' + escapeHtml(formatDateTime(c.detected_at)) + '</td>' +
+            '<td style="padding:10px"><strong>' + escapeHtml(c.topic || '(no topic)') + '</strong></td>' +
+            '<td style="padding:10px;font-size:var(--text-xs);color:var(--text-tertiary)">' + (c.article_count || 0) + ' sources</td>' +
+          '</tr>';
+        }).join('');
+        body.innerHTML = '<table style="width:100%;border-collapse:collapse">' +
+          '<thead><tr style="border-bottom:1px solid var(--border-default)">' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">ADDED ON</th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">STORY</th>' +
+            '<th style="padding:10px;text-align:left;font-size:var(--text-xs);color:var(--text-tertiary)">SOURCES</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      }).catch(function (e) {
+        body.innerHTML = '<p style="color:var(--danger)">' + escapeHtml(e.message) + '</p>';
+      });
+    } else if (tab === 'configuration') {
+      body.innerHTML = [
+        '<p style="color:var(--text-tertiary);margin-bottom:var(--space-4)">Edit the search query and source filters.</p>',
+        '<button class="btn btn-primary" onclick="_feedsOpenNewsForm(' + JSON.stringify(feed).replace(/"/g,'&quot;') + ')">Edit feed</button>',
+        '<pre style="background:var(--bg-surface-2);padding:var(--space-4);border-radius:var(--radius-md);overflow:auto;margin-top:var(--space-4);font-size:var(--text-xs)">' +
+          escapeHtml(JSON.stringify(feed.source_config, null, 2)) +
+        '</pre>'
+      ].join('');
+    } else if (tab === 'settings') {
+      body.innerHTML = [
+        '<p style="color:var(--text-tertiary);margin-bottom:var(--space-4)">Where this feed publishes to, and its quality gates.</p>',
+        '<button class="btn btn-primary" onclick="_feedsOpenNewsForm(' + JSON.stringify(feed).replace(/"/g,'&quot;') + ')">Edit feed</button>',
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);margin-top:var(--space-4)">',
+        '<div><strong>Destination (WordPress)</strong><pre style="background:var(--bg-surface-2);padding:var(--space-3);border-radius:var(--radius-md);overflow:auto;font-size:var(--text-xs)">' + escapeHtml(JSON.stringify(feed.dest_config, null, 2)) + '</pre></div>',
+        '<div><strong>Quality gates</strong><pre style="background:var(--bg-surface-2);padding:var(--space-3);border-radius:var(--radius-md);overflow:auto;font-size:var(--text-xs)">' + escapeHtml(JSON.stringify(feed.quality_config, null, 2)) + '</pre></div>',
+        '</div>'
+      ].join('');
+    }
+  }
+
+  window._feedsTestToken = function (feedId) {
+    fetchApi('/api/feeds/' + feedId + '/test-firehose', { method: 'POST' })
+      .then(function (r) { showToast(r.message || 'OK', r.ok ? 'success' : 'error'); })
+      .catch(function (e) { showToast('Test failed: ' + e.message, 'error'); });
+  };
+  window._feedsDeactivate = function (feedId) {
+    if (!confirm('Pause this feed? Its SSE connection will close. You can resume later.')) return;
+    fetchApi('/api/feeds/' + feedId, { method: 'DELETE' }).then(function () {
+      showToast('Feed paused', 'success');
+      _feedsSwitch({ view: 'list' });
+    }).catch(function (e) { showToast('Pause failed: ' + e.message, 'error'); });
+  };
+  window._feedsReactivate = function (feedId) {
+    fetchApi('/api/feeds/' + feedId + '/activate', { method: 'POST' }).then(function () {
+      showToast('Feed resumed', 'success');
+      _feedsSwitch({ view: 'detail', feedId: feedId, tab: 'stories' });
+    }).catch(function (e) { showToast('Resume failed: ' + e.message, 'error'); });
+  };
 
   // ─── Fuel Page ──────────────────────────────────────────────────────────
 

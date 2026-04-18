@@ -153,7 +153,7 @@ function createApiRouter(deps) {
   });
   var { parseId, sanitizeForClient } = require('../utils/api-helpers');
   var { validateAndNormalizeUrl } = require('../utils/draft-helpers');
-  var { firehose, firehosePool, publisherPool, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
+  var { firehose, firehosePool, feedsPool, publisherPool, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
 
   // ─── Multi-site: extract req.siteId on every API request ─────────────────
   router.use(siteScope);
@@ -814,16 +814,23 @@ function createApiRouter(deps) {
     try {
       var p = parsePageParam(req, 20);
       var statusFilter = req.query.status || null;
+      var feedFilter = parseInt(req.query.feed_id, 10) || null;
 
       var clusterSiteSw = _siteWhere(req.siteId);
       var clusterSiteClause = clusterSiteSw.params.length
         ? ' AND EXISTS (SELECT 1 FROM drafts WHERE drafts.cluster_id = clusters.id AND drafts.site_id = @site_id)'
         : '';
+      // Feed filter short-circuits site scoping: when feed_id is supplied the
+      // Feed detail page wants exactly that feed's clusters regardless of the
+      // active site in the topbar. Clusters are stamped with feed_id when
+      // they originate from a Feed (see similarity.js).
+      var feedClause = feedFilter ? ' AND feed_id = @feed_id' : '';
       var whereClause = statusFilter
-        ? 'WHERE status = @status' + clusterSiteClause
-        : (clusterSiteClause ? 'WHERE 1=1' + clusterSiteClause : '');
+        ? 'WHERE status = @status' + clusterSiteClause + feedClause
+        : (clusterSiteClause || feedClause ? 'WHERE 1=1' + clusterSiteClause + feedClause : '');
       var params = statusFilter ? { status: statusFilter } : {};
       if (clusterSiteSw.params.length) params.site_id = req.siteId;
+      if (feedFilter) params.feed_id = feedFilter;
 
       var countStmt = db.prepare('SELECT COUNT(*) as total FROM clusters ' + whereClause);
       var dataStmt = db.prepare(
@@ -832,6 +839,8 @@ function createApiRouter(deps) {
       );
 
       var result = paginate(dataStmt, countStmt, params, p.page, p.perPage);
+      // The Feeds page expects `clusters` alongside the paginate shape.
+      result.clusters = result.data;
       res.json(result);
     } catch (err) {
       logger.error('api', 'Failed to fetch clusters', err.message);
@@ -7374,6 +7383,388 @@ function createApiRouter(deps) {
         });
       }
       res.json({ ok: true, siteId: siteId, message: 'Site re-activated' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Feeds CRUD API — Phase 1
+  //
+  // A Feed bundles source (where articles come from), destination (how they get
+  // published), and quality gates into one config record. The goal is to replace
+  // the scattered AutoPilot + Firehose + Publish Rules pages with a single
+  // "Feeds" page. Coexistence: legacy paths keep working; new rows created via
+  // a Feed get feed_id tagged throughout the pipeline.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Shape helpers — kept in-file rather than a new module while the Feed schema
+  // is still evolving. Validators are deliberately lax: unknown keys are kept
+  // so future Feed kinds (youtube/rss/keyword) can extend the shape without a
+  // DB migration.
+  function _parseFeedRow(row) {
+    if (!row) return null;
+    var out = {
+      id:                      row.id,
+      site_id:                 row.site_id,
+      name:                    row.name,
+      kind:                    row.kind,
+      is_active:               !!row.is_active,
+      source_config:           _safeJsonParse(row.source_config, {}),
+      dest_config:             _safeJsonParse(row.dest_config,   {}),
+      quality_config:          _safeJsonParse(row.quality_config, {}),
+      has_firehose_token:      !!row.firehose_token,
+      last_fetched_at:         row.last_fetched_at,
+      stories_count:           row.stories_count || 0,
+      drafts_count:            row.drafts_count  || 0,
+      published_count:         row.published_count || 0,
+      created_at:              row.created_at,
+      updated_at:              row.updated_at,
+    };
+    return out;
+  }
+  function _safeJsonParse(s, fallback) {
+    if (!s) return fallback;
+    try { return JSON.parse(s); } catch (_e) { return fallback; }
+  }
+
+  // Validate basics. Returns { ok, error }.
+  function _validateFeedBody(body, isCreate) {
+    if (!body || typeof body !== 'object') return { ok: false, error: 'body required' };
+    if (isCreate) {
+      if (!body.site_id) return { ok: false, error: 'site_id is required' };
+      if (!body.name)    return { ok: false, error: 'name is required' };
+    }
+    if (body.kind && ['firehose', 'rss', 'youtube', 'keyword'].indexOf(body.kind) === -1) {
+      return { ok: false, error: 'unknown kind "' + body.kind + '"' };
+    }
+    // Phase 1 ships only firehose. Block others with a clear message so the UI
+    // can show "coming soon" instead of silently failing later in the pipeline.
+    if (body.kind && body.kind !== 'firehose') {
+      return { ok: false, error: 'Only firehose feeds are available in Phase 1; ' + body.kind + ' is coming soon' };
+    }
+    return { ok: true };
+  }
+
+  // GET /api/feeds — list, filtered by active site (or All Sites when siteId=0).
+  router.get('/feeds', function (req, res) {
+    try {
+      var sid = req.siteId || 0;
+      var sql = 'SELECT * FROM feeds';
+      var params = [];
+      if (sid) {
+        sql += ' WHERE site_id = ?';
+        params.push(sid);
+      }
+      sql += ' ORDER BY created_at DESC';
+      var stmt = db.prepare(sql);
+      var rows = params.length ? stmt.all.apply(stmt, params) : stmt.all();
+      res.json({ ok: true, feeds: rows.map(_parseFeedRow) });
+    } catch (err) {
+      logger.error('api', 'Failed to list feeds: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/feeds/:id — full detail including counts.
+  router.get('/feeds/:id', function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      if (!row) return res.status(404).json({ ok: false, error: 'Feed not found' });
+      res.json({ ok: true, feed: _parseFeedRow(row) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/feeds — create.
+  router.post('/feeds', function (req, res) {
+    try {
+      var body = req.body || {};
+      var v = _validateFeedBody(body, true);
+      if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
+
+      var site = siteConfigMod.getSite(body.site_id);
+      if (!site) return res.status(400).json({ ok: false, error: 'site_id does not exist' });
+
+      var insert = db.prepare(
+        'INSERT INTO feeds ' +
+        '  (site_id, name, kind, is_active, source_config, dest_config, quality_config, firehose_token) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      );
+      var info = insert.run(
+        body.site_id,
+        body.name,
+        body.kind || 'firehose',
+        body.is_active === false ? 0 : 1,
+        JSON.stringify(body.source_config  || {}),
+        JSON.stringify(body.dest_config    || {}),
+        JSON.stringify(body.quality_config || {}),
+        body.firehose_token || null
+      );
+      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(info.lastInsertRowid);
+
+      // Hot-start the feed's SSE listener when feeds-pool is wired.
+      var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
+      if (feedsPool && row.is_active && row.firehose_token) {
+        feedsPool.addFeed(row.id).catch(function (e) {
+          logger.warn('api', 'feedsPool.addFeed failed: ' + e.message);
+        });
+      }
+      res.json({ ok: true, feed: _parseFeedRow(row) });
+    } catch (err) {
+      logger.error('api', 'Failed to create feed: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // PUT /api/feeds/:id — update. Merges JSON configs so callers can PATCH
+  // individual keys without resending the whole blob.
+  router.put('/feeds/:id', function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
+
+      var body = req.body || {};
+      var v = _validateFeedBody(body, false);
+      if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
+
+      var next = {
+        name:      body.name      !== undefined ? body.name      : existing.name,
+        kind:      body.kind      !== undefined ? body.kind      : existing.kind,
+        is_active: body.is_active !== undefined ? (body.is_active ? 1 : 0) : existing.is_active,
+        firehose_token: (body.firehose_token && body.firehose_token.indexOf('••') === -1)
+          ? body.firehose_token
+          : existing.firehose_token,
+      };
+
+      // JSON configs are replaced whole when supplied (client sends the full
+      // object). Partial merges happen client-side where they're more natural.
+      next.source_config  = body.source_config  ? JSON.stringify(body.source_config)  : existing.source_config;
+      next.dest_config    = body.dest_config    ? JSON.stringify(body.dest_config)    : existing.dest_config;
+      next.quality_config = body.quality_config ? JSON.stringify(body.quality_config) : existing.quality_config;
+
+      db.prepare(
+        'UPDATE feeds SET name = ?, kind = ?, is_active = ?, firehose_token = ?, ' +
+        '  source_config = ?, dest_config = ?, quality_config = ?, ' +
+        '  updated_at = datetime("now") ' +
+        'WHERE id = ?'
+      ).run(
+        next.name, next.kind, next.is_active, next.firehose_token,
+        next.source_config, next.dest_config, next.quality_config,
+        feedId
+      );
+      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+
+      // Hot-reload the SSE listener when config/token/activation changed.
+      var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
+      if (feedsPool) {
+        feedsPool.removeFeed(feedId).catch(function () {});
+        if (row.is_active && row.firehose_token) {
+          feedsPool.addFeed(feedId).catch(function (e) {
+            logger.warn('api', 'feedsPool.addFeed failed on update: ' + e.message);
+          });
+        }
+      }
+      res.json({ ok: true, feed: _parseFeedRow(row) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/feeds/:id — soft delete (is_active=0) to preserve historical
+  // linkage for existing clusters/drafts/published rows.
+  router.delete('/feeds/:id', function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
+      db.prepare('UPDATE feeds SET is_active = 0, updated_at = datetime("now") WHERE id = ?').run(feedId);
+      var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
+      if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
+      res.json({ ok: true, message: 'Feed deactivated', feedId: feedId });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/feeds/:id/activate — re-enable a deactivated feed.
+  router.post('/feeds/:id/activate', function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
+      db.prepare('UPDATE feeds SET is_active = 1, updated_at = datetime("now") WHERE id = ?').run(feedId);
+      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
+      if (feedsPool && row.firehose_token) {
+        feedsPool.addFeed(feedId).catch(function (e) {
+          logger.warn('api', 'feedsPool.addFeed failed on activate: ' + e.message);
+        });
+      }
+      res.json({ ok: true, feed: _parseFeedRow(row) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/feeds/:id/test-firehose — validate this feed's Ahrefs token.
+  // Mirrors /api/sites/:id/test-firehose but reads the token from the feed row.
+  router.post('/feeds/:id/test-firehose', function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      if (!row) return res.status(404).json({ ok: false, error: 'Feed not found' });
+      var token = row.firehose_token;
+      if (!token) return res.status(400).json({ ok: false, error: 'No firehose token set for this feed' });
+      token = String(token).trim();
+      var kind = token.indexOf('fhm_') === 0 ? 'management' : 'tap';
+
+      if (kind === 'management') {
+        axios.get('https://api.firehose.com/v1/taps', {
+          headers: { 'Authorization': 'Bearer ' + token },
+          timeout: 10000,
+        })
+          .then(function (r) {
+            var taps = r.data;
+            if (!Array.isArray(taps)) taps = taps.taps || taps.data || [];
+            res.json({ ok: true, kind: 'management', message: 'Management key valid. ' + taps.length + ' tap(s) available.', tapCount: taps.length });
+          })
+          .catch(function (err) {
+            var safe = sanitizeAxiosError(err);
+            res.status(safe.status || 500).json({
+              ok: false, kind: 'management',
+              error: safe.status === 401
+                ? 'Management key rejected (401). Regenerate it in the Ahrefs dashboard.'
+                : 'Could not validate key: ' + (safe.data || safe.message || 'unknown error'),
+            });
+          });
+      } else {
+        axios.get('https://api.firehose.com/v1/stream', {
+          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'text/event-stream' },
+          timeout: 8000, responseType: 'stream',
+        })
+          .then(function (streamRes) {
+            var ok = streamRes.status >= 200 && streamRes.status < 300;
+            try { streamRes.data.destroy(); } catch (_ignore) {}
+            if (ok) res.json({ ok: true, kind: 'tap', message: 'Tap token accepted. Stream is reachable.' });
+            else    res.status(streamRes.status).json({ ok: false, kind: 'tap', error: 'Stream returned HTTP ' + streamRes.status });
+          })
+          .catch(function (err) {
+            var safe = sanitizeAxiosError(err);
+            res.status(safe.status || 500).json({
+              ok: false, kind: 'tap',
+              error: safe.status === 401
+                ? 'Tap token rejected (401). Check it was copied cleanly and has not been revoked.'
+                : 'Could not reach Ahrefs stream: ' + (safe.data || safe.message || err.message),
+            });
+          });
+      }
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/feeds/preview — dry-run: given a draft source_config, return
+  // up to 10 recent articles from our own buffer that match the filters.
+  // Admin uses this to sanity-check a query before saving a feed. DB-backed
+  // (not Ahrefs) so it's free and instant; the preview only shows articles
+  // we've already ingested, which is the best we can offer without an extra
+  // Ahrefs round-trip.
+  router.post('/feeds/preview', function (req, res) {
+    try {
+      var src = (req.body && req.body.source_config) || {};
+      var query = String(src.query || '').trim().toLowerCase();
+      var include = Array.isArray(src.include_domains) ? src.include_domains : [];
+      var exclude = Array.isArray(src.exclude_domains) ? src.exclude_domains : [];
+      var siteId = parseInt(src.site_id, 10) || 0;
+
+      var where = [];
+      var params = [];
+      if (siteId) {
+        where.push('source_site_id = ?');
+        params.push(siteId);
+      }
+      // Look back at most 14 days so the preview is actually a PREVIEW, not
+      // "everything ever". Matches the Ahrefs-style "past month" intent.
+      where.push("received_at >= datetime('now', '-14 days')");
+
+      if (query) {
+        var terms = query.split(/\s+/).filter(Boolean).slice(0, 5);
+        // AND across terms: every term must appear in title OR content slice.
+        for (var ti = 0; ti < terms.length; ti++) {
+          where.push('(LOWER(title) LIKE ? OR LOWER(substr(content_markdown, 1, 800)) LIKE ?)');
+          params.push('%' + terms[ti] + '%', '%' + terms[ti] + '%');
+        }
+      }
+
+      var sql = 'SELECT id, url, domain, title, received_at, language, source_site_id, feed_id FROM articles ' +
+                (where.length ? 'WHERE ' + where.join(' AND ') : '') +
+                ' ORDER BY received_at DESC LIMIT 200'; // post-filter for domains below
+      var stmt = db.prepare(sql);
+      var rows = params.length ? stmt.all.apply(stmt, params) : stmt.all();
+
+      // Apply include/exclude domain wildcards in JS (SQLite LIKE doesn't
+      // understand our "*.example.com" pattern cheaply). Small list → fine.
+      function matchesAny(domain, list) {
+        if (!domain || !list || !list.length) return false;
+        var d = String(domain).toLowerCase();
+        for (var i = 0; i < list.length; i++) {
+          var p = String(list[i] || '').toLowerCase();
+          if (!p) continue;
+          if (p.indexOf('*.') === 0) {
+            var base = p.slice(2);
+            if (d === base || d.endsWith('.' + base)) return true;
+          } else if (d === p) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      var matches = rows.filter(function (r) {
+        if (exclude.length && matchesAny(r.domain, exclude)) return false;
+        if (include.length && !matchesAny(r.domain, include)) return false;
+        return true;
+      }).slice(0, 10);
+
+      res.json({ ok: true, matches: matches, total: matches.length, windowDays: 14 });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/feeds/:id/stats — live activity snapshot (today + total + last).
+  router.get('/feeds/:id/stats', function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var row = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      if (!row) return res.status(404).json({ ok: false, error: 'Feed not found' });
+
+      var todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00';
+      var articlesToday   = (db.prepare("SELECT COUNT(*) AS n FROM articles WHERE feed_id = ? AND received_at >= ?").get(feedId, todayStart) || {}).n || 0;
+      var articlesTotal   = (db.prepare("SELECT COUNT(*) AS n FROM articles WHERE feed_id = ?").get(feedId) || {}).n || 0;
+      var clustersTotal   = (db.prepare("SELECT COUNT(*) AS n FROM clusters WHERE feed_id = ?").get(feedId) || {}).n || 0;
+      var draftsTotal     = (db.prepare("SELECT COUNT(*) AS n FROM drafts   WHERE feed_id = ?").get(feedId) || {}).n || 0;
+      var publishedToday  = (db.prepare("SELECT COUNT(*) AS n FROM published WHERE feed_id = ? AND published_at >= ?").get(feedId, todayStart) || {}).n || 0;
+      var publishedTotal  = (db.prepare("SELECT COUNT(*) AS n FROM published WHERE feed_id = ?").get(feedId) || {}).n || 0;
+      var lastArticleAt   = (db.prepare("SELECT MAX(received_at)  AS t FROM articles  WHERE feed_id = ?").get(feedId) || {}).t || null;
+      var lastPublishedAt = (db.prepare("SELECT MAX(published_at) AS t FROM published WHERE feed_id = ?").get(feedId) || {}).t || null;
+
+      res.json({
+        ok: true,
+        feedId: feedId,
+        articlesToday: articlesToday,
+        articlesTotal: articlesTotal,
+        clustersTotal: clustersTotal,
+        draftsTotal: draftsTotal,
+        publishedToday: publishedToday,
+        publishedTotal: publishedTotal,
+        lastArticleAt: lastArticleAt,
+        lastPublishedAt: lastPublishedAt,
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

@@ -1017,6 +1017,56 @@ function runMigrations() {
     } catch (_e) { /* column already exists — safe to ignore */ }
     db.exec('CREATE INDEX IF NOT EXISTS idx_logs_site ON logs(site_id)');
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Feeds — Phase 1 of the "replace AutoPilot + Firehose pages with a single
+    // Feeds page" migration. A Feed is a single config record that bundles:
+    //   • source  — where articles come from (query, country, filters)
+    //   • dest    — where they go on WP (category, author, tags, status)
+    //   • quality — per-feed gates (daily limit, blocked keywords, min sources)
+    //
+    // Decisions (locked in with the user):
+    //   • Feed → Site is 1:1 (FK site_id NOT NULL)
+    //   • One SSE connection per feed — every Feed has its own firehose_token
+    //   • Per-feed clusters (no fan-out) — articles carry feed_id from ingest
+    //   • Per-feed quality gates with site defaults as fallback
+    // ═══════════════════════════════════════════════════════════════════════════
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS feeds (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        site_id                 INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+        name                    TEXT NOT NULL,
+        kind                    TEXT NOT NULL DEFAULT 'firehose',
+        is_active               INTEGER DEFAULT 1,
+        source_config           TEXT NOT NULL DEFAULT '{}',
+        dest_config             TEXT NOT NULL DEFAULT '{}',
+        quality_config          TEXT NOT NULL DEFAULT '{}',
+        firehose_token          TEXT DEFAULT NULL,
+        firehose_last_event_id  TEXT DEFAULT NULL,
+        last_fetched_at         TEXT DEFAULT NULL,
+        stories_count           INTEGER DEFAULT 0,
+        drafts_count            INTEGER DEFAULT 0,
+        published_count         INTEGER DEFAULT 0,
+        created_at              TEXT DEFAULT (datetime('now')),
+        updated_at              TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_feeds_site   ON feeds(site_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_feeds_active ON feeds(is_active)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_feeds_kind   ON feeds(kind)');
+
+    // Tag every row in the per-feed pipeline with the originating feed. NULL
+    // means "came in via the legacy AutoPilot/Firehose path" — coexistence is
+    // allowed until the legacy pages are removed. Every new row created via
+    // a Feed stamps feed_id so the Feed detail page can filter cleanly.
+    var _feedIdTables = ['articles', 'clusters', 'drafts', 'published'];
+    for (var _fti = 0; _fti < _feedIdTables.length; _fti++) {
+      var _ftbl = _feedIdTables[_fti];
+      try {
+        db.exec('ALTER TABLE ' + _ftbl + ' ADD COLUMN feed_id INTEGER DEFAULT NULL');
+      } catch (_e) { /* column already exists — safe to ignore */ }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_' + _ftbl + '_feed ON ' + _ftbl + '(feed_id)');
+    }
+
     // ─── 4. Fix drafts unique index: UNIQUE(source_url) → UNIQUE(source_url, site_id)
     //        Same URL can exist as drafts for different sites in multi-site mode.
     //        Drop both the old non-unique and UNIQUE indexes — the new composite
