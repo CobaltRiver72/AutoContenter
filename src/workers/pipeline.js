@@ -299,6 +299,18 @@ class Pipeline {
         siteParams = [siteFilter];
       }
 
+      // Per-site opt-out: drop drafts whose site has explicitly set
+      // AUTO_REWRITE_ENABLED='false' in site_config. Drafts for sites
+      // with no per-site override fall back to the global flag (already
+      // checked at line 250 above). Sites that explicitly set 'true'
+      // match nothing here and are included. This lets an admin keep the
+      // global rewriter on while pausing a single site without touching
+      // the master switch.
+      var SITE_OPT_OUT = " AND NOT EXISTS (" +
+        "  SELECT 1 FROM site_config sc WHERE sc.site_id = d.site_id " +
+        "    AND sc.key = 'AUTO_REWRITE_ENABLED' " +
+        "    AND LOWER(sc.value) IN ('false', '0'))";
+
       // Find clusters where ALL drafts are extracted (status = 'draft')
       // and the primary draft is not locked, with quality pre-filters
       var readyClustersSql =
@@ -314,7 +326,7 @@ class Pipeline {
         "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
         "    AND d2.status = 'fetching' AND d2.mode IN ('auto', 'manual_import')" +
         "  )" +
-        kwWhere + siteWhere + " " +
+        kwWhere + siteWhere + SITE_OPT_OUT + " " +
         "GROUP BY d.cluster_id " +
         "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
@@ -915,6 +927,16 @@ class Pipeline {
         pubSiteParams = [siteFilter];
       }
 
+      // Per-site opt-out for publish: drafts whose site set AUTOPILOT_ENABLED='false'
+      // in site_config are skipped here so they don't starve siblings. The
+      // per-site AutopilotEngine.isActive() gate below is still the source of
+      // truth on a successful pick — this SQL filter is a pre-emptive fairness
+      // tweak so one disabled site doesn't hog the single-candidate LIMIT 1.
+      var PUB_SITE_OPT_OUT = " AND NOT EXISTS (" +
+        "  SELECT 1 FROM site_config sc WHERE sc.site_id = d.site_id " +
+        "    AND sc.key = 'AUTOPILOT_ENABLED' " +
+        "    AND LOWER(sc.value) IN ('false', '0'))";
+
       // Find a cluster with primary draft in 'ready' status.
       // c.article_count and c.avg_similarity MUST be in the SELECT — the
       // autopilot gate below reads them from readyPrimary; if they're missing
@@ -927,7 +949,7 @@ class Pipeline {
         "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100 " +
         "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
         "  AND c.status = 'queued'" +
-        pubSiteWhere + " " +
+        pubSiteWhere + PUB_SITE_OPT_OUT + " " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, d.created_at ASC " +
         "LIMIT 1";
       var readyPrimaryStmt = this.db.prepare(readyPrimarySql);

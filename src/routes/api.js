@@ -889,6 +889,12 @@ function createApiRouter(deps) {
       var p = parsePageParam(req, 100);
       var moduleFilter = req.query.module || null;
       var levelFilter = req.query.level || null;
+      // ?site=system returns only system-wide (site_id IS NULL) logs.
+      // Otherwise: All Sites (req.siteId=0) returns everything; a specific
+      // site returns logs for that site PLUS system-wide NULL-tagged logs
+      // (startup, scheduler tick, etc.) so they never disappear from view.
+      var wantSystemOnly = req.query.site === 'system';
+      var logSid = wantSystemOnly ? -1 : (req.siteId || 0);
 
       var conditions = [];
       var params = {};
@@ -901,6 +907,12 @@ function createApiRouter(deps) {
         conditions.push('level = @level');
         params.level = levelFilter;
       }
+      if (wantSystemOnly) {
+        conditions.push('site_id IS NULL');
+      } else if (logSid > 0) {
+        conditions.push('(site_id = @site_id OR site_id IS NULL)');
+        params.site_id = logSid;
+      }
 
       var whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
       var countStmt = db.prepare('SELECT COUNT(*) as total FROM logs ' + whereClause);
@@ -910,6 +922,7 @@ function createApiRouter(deps) {
       );
 
       var result = paginate(dataStmt, countStmt, params, p.page, p.perPage);
+      result.scope = wantSystemOnly ? 'system' : (logSid > 0 ? 'site:' + logSid + '+system' : 'all');
       res.json(result);
     } catch (err) {
       logger.error('api', 'Failed to fetch logs', err.message);
@@ -2021,6 +2034,57 @@ function createApiRouter(deps) {
       res.json(result);
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/ai/fallback-status ──────────────────────────────────────────
+  // Dry-run report of the fallback chain for the currently configured primary
+  // provider. Tells the admin whether fallback will actually engage if the
+  // primary fails. Previously admins got "All providers failed" with no way
+  // to know that the other providers had no key configured.
+  router.get('/ai/fallback-status', function (req, res) {
+    try {
+      var settings = rewriter.getSettings();
+      var primary = settings.provider || '';
+      var enableFallback = settings.enableFallback !== false;
+
+      var chain = {
+        openrouter: ['anthropic', 'openai'],
+        openai: ['anthropic'],
+        anthropic: ['openai'],
+      };
+
+      function keyStatus(provider, keyMasked, model) {
+        if (!keyMasked) return { provider: provider, ready: false, reason: 'not_configured', model: model || null };
+        if (!model) return { provider: provider, ready: false, reason: 'no_model_selected', keyMasked: keyMasked };
+        return { provider: provider, ready: true, model: model, keyMasked: keyMasked };
+      }
+
+      var providerKey = {
+        anthropic: keyStatus('anthropic', settings.anthropicKey, settings.anthropicModel),
+        openai:    keyStatus('openai',    settings.openaiKey,    settings.openaiModel),
+        openrouter:keyStatus('openrouter',settings.openrouterKey,settings.openrouterModel),
+      };
+
+      var fallbackList = (chain[primary] || []).map(function (p) { return providerKey[p]; });
+      var willEngage = enableFallback && fallbackList.some(function (f) { return f.ready; });
+
+      res.json({
+        ok: true,
+        primary: primary ? providerKey[primary] : { provider: '', ready: false, reason: 'no_primary_provider' },
+        enableFallback: enableFallback,
+        fallbackChain: fallbackList,
+        willEngage: willEngage,
+        hint: willEngage
+          ? null
+          : enableFallback
+            ? 'Fallback is enabled but no fallback provider is ready. Configure ' +
+              (fallbackList.length ? fallbackList.map(function (f) { return f.provider; }).join(' or ') : 'a second provider') +
+              ' in Settings to activate fallback.'
+            : 'Fallback is disabled. Turn it on in Settings → AI Rewrite Models if you want auto-retry.',
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 

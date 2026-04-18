@@ -15,8 +15,11 @@ class WPPublisher {
   constructor(config, db, logger, siteId, siteCredentials) {
     this.config = config;
     this.db = db;
-    this.logger = logger;
     this.siteId = siteId || 1;
+    // Per-site log tagging.
+    this.logger = (logger && typeof logger.forSite === 'function')
+      ? logger.forSite(this.siteId)
+      : logger;
     this._siteCredentials = siteCredentials || null;
     this.siteUrl = null;
     this.username = null;
