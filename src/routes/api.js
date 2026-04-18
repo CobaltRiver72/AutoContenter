@@ -7722,6 +7722,13 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       var v = _validateFeedBody(body, false);
       if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
 
+      // Observability: log the quality_config the client sent so the
+      // "my saved values vanished" case (placeholder-as-value confusion)
+      // can be debugged from the logs alone without attaching a browser.
+      if (body.quality_config) {
+        logger.info('api', 'Feed ' + feedId + ' PUT quality_config: ' + JSON.stringify(body.quality_config), { site_id: existing.site_id });
+      }
+
       var next = {
         name:      body.name      !== undefined ? body.name      : existing.name,
         kind:      body.kind      !== undefined ? body.kind      : existing.kind,
@@ -7746,19 +7753,23 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         feedId
       );
 
-      // Rule sync. Three branches when the query-affecting source_config
-      // changed on PUT:
-      //   1. Existing rule on file → updateRule in place (keeps same rule id
-      //      so orphan detection via tag=feed-<id> stays stable).
+      // Rule sync. Three branches when we have a reason to touch Ahrefs:
+      //   1. Existing rule on file + source_config changed → updateRule in
+      //      place (keeps same rule id so orphan detection via tag=feed-<id>
+      //      stays stable).
       //   2. No rule id yet but we have a tap token → create a rule on that
       //      tap. Fixes legacy/pre-auto-provision feeds that never had one.
       //   3. No rule id AND no tap token AND mgmt key on file → full
       //      auto-provision (createTap + createRule), persist both ids.
-      // The latter two let admins fix feeds that predated auto-provisioning
-      // without having to delete + recreate from scratch.
+      //
+      // Branches 2/3 fire REGARDLESS of srcChanged, so admin healing a
+      // legacy feed by clicking Save-without-edits installs a rule. Branch
+      // 1 only runs when src actually changed — we don't churn Ahrefs on
+      // no-op saves.
       var srcChanged = body.source_config
         && existing.source_config !== JSON.stringify(body.source_config);
-      if (srcChanged) {
+      var shouldSyncRule = srcChanged || (!existing.firehose_rule_id && body.source_config);
+      if (shouldSyncRule) {
         try {
           var { buildLuceneQuery } = require('../utils/lucene-builder');
           var firehoseAdmin = require('../utils/firehose-admin');
@@ -7896,6 +7907,103 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
       db.prepare('DELETE FROM feeds WHERE id = ?').run(feedId);
       res.json({ ok: true, message: 'Feed destroyed', feedId: feedId });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/feeds/:id/install-rule — idempotent rule-install trigger.
+  //
+  // Used by the "Install rule now" button on the Configuration tab. Reads
+  // the feed's CURRENT source_config from the DB and runs the same three
+  // branches as PUT's rule-sync path — no body needed, no source_config
+  // edit required. Handy for:
+  //   • Legacy feeds that predate auto-provisioning (no rule_id on file)
+  //   • Feeds whose rule got deleted manually on Ahrefs (rule_missing_upstream)
+  //   • Feeds that failed to provision on create because the mgmt key was
+  //     added afterwards
+  router.post('/feeds/:id/install-rule', async function (req, res) {
+    try {
+      var feedId = parseInt(req.params.id, 10);
+      var existing = db.prepare('SELECT * FROM feeds WHERE id = ?').get(feedId);
+      if (!existing) return res.status(404).json({ ok: false, error: 'Feed not found' });
+
+      var firehoseAdmin = require('../utils/firehose-admin');
+      var { buildLuceneQuery } = require('../utils/lucene-builder');
+      var sourceConfig = _safeJsonParse(existing.source_config, {});
+      var lucene = buildLuceneQuery(sourceConfig);
+      if (!lucene) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Feed has no filters to install (empty query, no domains, no time range). Edit the feed first.',
+        });
+      }
+
+      // Branch A — rule already installed and live: do nothing (idempotent).
+      // We verify against Ahrefs so a manually-deleted upstream rule triggers
+      // a reinstall instead of reporting a false success.
+      if (existing.firehose_rule_id && existing.firehose_token) {
+        var live = await firehoseAdmin.listRules(existing.firehose_token);
+        if (live.ok) {
+          var exists = (live.data || []).some(function (r) { return String(r.id) === String(existing.firehose_rule_id); });
+          if (exists) {
+            // Rule is healthy upstream — updateRule to sync current source_config
+            // (in case the admin edited then clicked Install instead of Save).
+            var upd = await firehoseAdmin.updateRule(existing.firehose_token, existing.firehose_rule_id, { value: lucene });
+            if (upd.ok) {
+              return res.json({ ok: true, action: 'updated', rule_id: existing.firehose_rule_id, value: lucene });
+            }
+            return res.status(upd.status || 500).json({ ok: false, error: 'Rule update failed: ' + upd.error });
+          }
+          // Fallthrough: rule id on file but not on Ahrefs → reinstall.
+        }
+      }
+
+      // Branch B — have tap token, no valid rule id: install new rule.
+      if (existing.firehose_token) {
+        var installed = await firehoseAdmin.createRule(existing.firehose_token, lucene, 'feed-' + feedId, { quality: true });
+        if (!installed.ok) {
+          return res.status(installed.status || 500).json({ ok: false, error: 'Rule install failed: ' + installed.error });
+        }
+        db.prepare(
+          'UPDATE feeds SET firehose_rule_id = ?, updated_at = datetime(\'now\') WHERE id = ?'
+        ).run(String(installed.data.id), feedId);
+        logger.info('api', 'Feed ' + feedId + ' install-rule: created rule ' + installed.data.id);
+        return res.json({ ok: true, action: 'installed', rule_id: installed.data.id, value: lucene });
+      }
+
+      // Branch C — no tap at all: auto-provision from mgmt key.
+      var mgmtKey = cfgGet('FIREHOSE_MANAGEMENT_KEY');
+      if (!mgmtKey) {
+        return res.status(400).json({
+          ok: false,
+          error: 'No firehose token on this feed and no management key on file. Paste a tap token in Edit, or connect a management key via Firehose Rules first.',
+        });
+      }
+
+      var tapRes = await firehoseAdmin.createTap(mgmtKey, existing.name);
+      if (!tapRes.ok) {
+        return res.status(tapRes.status || 500).json({ ok: false, error: 'Tap create failed: ' + tapRes.error });
+      }
+      var ruleRes = await firehoseAdmin.createRule(tapRes.data.token, lucene, 'feed-' + feedId, { quality: true });
+      if (!ruleRes.ok) {
+        logger.warn('api', 'Feed ' + feedId + ' install-rule: rule create failed after tap ' + tapRes.data.tap_id + ' — rolling back tap');
+        firehoseAdmin.deleteTap(mgmtKey, tapRes.data.tap_id).catch(function (e) {
+          logger.warn('api', 'rollback deleteTap failed for tap ' + tapRes.data.tap_id + ': ' + (e && e.message) + ' — orphan on Ahrefs');
+        });
+        return res.status(ruleRes.status || 500).json({ ok: false, error: 'Tap created but rule install failed: ' + ruleRes.error });
+      }
+      db.prepare(
+        'UPDATE feeds SET firehose_token = ?, firehose_tap_id = ?, firehose_rule_id = ?, auto_provisioned = 1, updated_at = datetime(\'now\') WHERE id = ?'
+      ).run(tapRes.data.token, String(tapRes.data.tap_id), String(ruleRes.data.id), feedId);
+
+      // Hot-start the listener now that credentials are in place.
+      var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
+      if (feedsPool) feedsPool.addFeed(feedId).catch(function (e) {
+        logger.warn('api', 'feedsPool.addFeed failed after install-rule: ' + e.message);
+      });
+      logger.info('api', 'Feed ' + feedId + ' install-rule: auto-provisioned tap ' + tapRes.data.tap_id + ' + rule ' + ruleRes.data.id);
+      res.json({ ok: true, action: 'auto_provisioned', tap_id: tapRes.data.tap_id, rule_id: ruleRes.data.id, value: lucene });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
