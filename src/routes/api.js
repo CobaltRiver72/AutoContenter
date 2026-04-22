@@ -816,20 +816,22 @@ function createApiRouter(deps) {
       var statusFilter = req.query.status || null;
       var feedFilter = parseInt(req.query.feed_id, 10) || null;
 
+      // Feed filter short-circuits site scoping: when feed_id is supplied
+      // the feed's own site_id transitively scopes the data (feeds.site_id
+      // is the source of truth), so we skip the drafts EXISTS check. Before
+      // this fix the EXISTS clause was still applied, which hid detected-
+      // but-not-yet-extracted clusters on the Feed Detail page.
       var clusterSiteSw = _siteWhere(req.siteId);
-      var clusterSiteClause = clusterSiteSw.params.length
+      var applySiteScope = clusterSiteSw.params.length > 0 && !feedFilter;
+      var clusterSiteClause = applySiteScope
         ? ' AND EXISTS (SELECT 1 FROM drafts WHERE drafts.cluster_id = clusters.id AND drafts.site_id = @site_id)'
         : '';
-      // Feed filter short-circuits site scoping: when feed_id is supplied the
-      // Feed detail page wants exactly that feed's clusters regardless of the
-      // active site in the topbar. Clusters are stamped with feed_id when
-      // they originate from a Feed (see similarity.js).
       var feedClause = feedFilter ? ' AND feed_id = @feed_id' : '';
       var whereClause = statusFilter
         ? 'WHERE status = @status' + clusterSiteClause + feedClause
         : (clusterSiteClause || feedClause ? 'WHERE 1=1' + clusterSiteClause + feedClause : '');
       var params = statusFilter ? { status: statusFilter } : {};
-      if (clusterSiteSw.params.length) params.site_id = req.siteId;
+      if (applySiteScope) params.site_id = req.siteId;
       if (feedFilter) params.feed_id = feedFilter;
 
       var countStmt = db.prepare('SELECT COUNT(*) as total FROM clusters ' + whereClause);
@@ -839,6 +841,51 @@ function createApiRouter(deps) {
       );
 
       var result = paginate(dataStmt, countStmt, params, p.page, p.perPage);
+
+      // Enrich each cluster on the page with its source domains and a cover
+      // image. Both come from the underlying articles in one batch query
+      // (avoids N+1). The feed-detail preview pane renders these directly,
+      // so the old "Loading sources..." placeholder can go away.
+      if (result.data && result.data.length) {
+        var clusterIds = result.data.map(function (c) { return c.id; });
+        var csv = clusterIds.join(',');
+        // Domains per cluster — GROUP_CONCAT is fine at our scale (≤ per_page
+        // clusters × ≤ handful of sources each).
+        var domainRows = db.prepare(
+          "SELECT cluster_id, GROUP_CONCAT(DISTINCT domain) AS domains FROM articles " +
+          "WHERE cluster_id IN (" + csv + ") AND domain IS NOT NULL AND domain != '' " +
+          "GROUP BY cluster_id"
+        ).all();
+        var domainsByCid = {};
+        for (var _di = 0; _di < domainRows.length; _di++) {
+          domainsByCid[domainRows[_di].cluster_id] = String(domainRows[_di].domains || '').split(',').filter(Boolean).slice(0, 8);
+        }
+        // Cover image per cluster — prefer an extracted draft's featured_image
+        // (already curated by the extractor) over the raw Firehose image, and
+        // fall back to the earliest article's image_url.
+        var draftImgRows = db.prepare(
+          "SELECT cluster_id, featured_image FROM drafts " +
+          "WHERE cluster_id IN (" + csv + ") AND featured_image IS NOT NULL AND featured_image != '' " +
+          "GROUP BY cluster_id"
+        ).all();
+        var imgByCid = {};
+        for (var _ii = 0; _ii < draftImgRows.length; _ii++) imgByCid[draftImgRows[_ii].cluster_id] = draftImgRows[_ii].featured_image;
+        var articleImgRows = db.prepare(
+          "SELECT cluster_id, image_url FROM articles " +
+          "WHERE cluster_id IN (" + csv + ") AND image_url IS NOT NULL AND image_url != '' " +
+          "GROUP BY cluster_id"
+        ).all();
+        for (var _ai = 0; _ai < articleImgRows.length; _ai++) {
+          var r = articleImgRows[_ai];
+          if (!imgByCid[r.cluster_id]) imgByCid[r.cluster_id] = r.image_url;
+        }
+        for (var _ci = 0; _ci < result.data.length; _ci++) {
+          var c = result.data[_ci];
+          c.source_domains = domainsByCid[c.id] || [];
+          c.source_image   = imgByCid[c.id]   || null;
+        }
+      }
+
       // The Feeds page expects `clusters` alongside the paginate shape.
       result.clusters = result.data;
       res.json(result);
