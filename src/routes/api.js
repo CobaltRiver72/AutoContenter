@@ -7414,6 +7414,14 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         return out;
       }
 
+      // Resolve the site's feed IDs once. The "cluster belongs to this site"
+      // check collapses to `clusters.feed_id IN (<feedIds>)` which hits the
+      // composite idx_clusters_feed_status / idx_clusters_feed_detected
+      // indexes — instead of the old correlated EXISTS subquery against
+      // drafts that forced a full scan with a per-row lookup.
+      var feedIds = db.prepare('SELECT id FROM feeds WHERE site_id = ?').all(siteId).map(function (r) { return r.id; });
+      var feedIdCsv = feedIds.length ? feedIds.join(',') : '-1'; // -1 = match nothing
+
       var pubTrendRows = db.prepare(
         "SELECT strftime('%Y-%m-%d %H:00:00', published_at) AS bucket, COUNT(*) AS n " +
         "FROM published WHERE site_id = ? AND published_at >= datetime('now','-12 hours') " +
@@ -7421,29 +7429,23 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       ).all(siteId);
       var publishedTrend12h = fill12h(pubTrendRows);
 
-      var clustersInQueue = db.prepare(
-        "SELECT COUNT(DISTINCT c.id) AS n FROM clusters c " +
-        "WHERE c.status IN ('detected','queued') " +
-        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
-        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?))"
-      ).get(siteId, siteId).n || 0;
+      // No params bound — feedIdCsv is assembled from integer ids only (parseInt
+      // from the feeds.id column), so injection-safe.
+      var clustersInQueue = feedIds.length ? (db.prepare(
+        "SELECT COUNT(*) AS n FROM clusters WHERE status IN ('detected','queued') AND feed_id IN (" + feedIdCsv + ")"
+      ).get().n || 0) : 0;
 
-      var queueTrendRows = db.prepare(
+      var queueTrendRows = feedIds.length ? db.prepare(
         "SELECT strftime('%Y-%m-%d %H:00:00', detected_at) AS bucket, COUNT(*) AS n " +
-        "FROM clusters c WHERE c.detected_at >= datetime('now','-12 hours') " +
-        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
-        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?)) " +
+        "FROM clusters WHERE detected_at >= datetime('now','-12 hours') AND feed_id IN (" + feedIdCsv + ") " +
         "GROUP BY bucket ORDER BY bucket"
-      ).all(siteId, siteId);
+      ).all() : [];
       var clustersInQueueTrend12h = fill12h(queueTrendRows);
 
-      var clustersNeedingReview = db.prepare(
-        "SELECT COUNT(*) AS n FROM clusters c " +
-        "WHERE c.status = 'detected' " +
-        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
-        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?)) " +
-        "AND (c.avg_similarity < 0.8 OR NOT EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id))"
-      ).get(siteId, siteId).n || 0;
+      var clustersNeedingReview = feedIds.length ? (db.prepare(
+        "SELECT COUNT(*) AS n FROM clusters " +
+        "WHERE status = 'detected' AND feed_id IN (" + feedIdCsv + ") AND avg_similarity < 0.8"
+      ).get().n || 0) : 0;
 
       var feedHealth = db.prepare(
         "SELECT " +
@@ -7453,22 +7455,22 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         "FROM feeds WHERE site_id = ?"
       ).get(siteId) || { active: 0, healthy: 0, stale: 0 };
 
-      var qualityRow = db.prepare(
+      // Quality avg over the last 50 clusters for this site's feeds.
+      var qualityRow = feedIds.length ? db.prepare(
         "SELECT AVG(avg_similarity) AS q FROM (" +
-        "  SELECT c.id, c.avg_similarity FROM clusters c " +
-        "  JOIN drafts d ON d.cluster_id = c.id " +
-        "  WHERE d.site_id = ? AND c.avg_similarity > 0 " +
-        "  GROUP BY c.id ORDER BY c.detected_at DESC LIMIT 50" +
+        "  SELECT id, avg_similarity FROM clusters " +
+        "  WHERE feed_id IN (" + feedIdCsv + ") AND avg_similarity > 0 " +
+        "  ORDER BY detected_at DESC LIMIT 50" +
         ")"
-      ).get(siteId);
+      ).get() : null;
       var qualityAvg = qualityRow && qualityRow.q ? Math.round(qualityRow.q * 100) / 100 : null;
 
-      var qualityTrendRows = db.prepare(
-        "SELECT strftime('%Y-%m-%d %H:00:00', c.detected_at) AS bucket, AVG(c.avg_similarity) AS n " +
-        "FROM clusters c JOIN drafts d ON d.cluster_id = c.id " +
-        "WHERE d.site_id = ? AND c.detected_at >= datetime('now','-12 hours') AND c.avg_similarity > 0 " +
+      var qualityTrendRows = feedIds.length ? db.prepare(
+        "SELECT strftime('%Y-%m-%d %H:00:00', detected_at) AS bucket, AVG(avg_similarity) AS n " +
+        "FROM clusters " +
+        "WHERE feed_id IN (" + feedIdCsv + ") AND detected_at >= datetime('now','-12 hours') AND avg_similarity > 0 " +
         "GROUP BY bucket ORDER BY bucket"
-      ).all(siteId);
+      ).all() : [];
       var qualityTrend12h = fill12h(qualityTrendRows).map(function (v) { return v ? Math.round(v * 100) / 100 : 0; });
 
       res.json({
@@ -7542,29 +7544,34 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       var limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
       var kind = (req.query.kind || 'all').toString();
 
-      var whereKind = '';
-      if (kind === 'publishes') whereKind = " AND message LIKE 'Published cluster #%'";
-      else if (kind === 'failures') whereKind = " AND (level = 'error' OR message LIKE '%ailed%cluster%')";
-
+      // Pull a widened slice ordered by the (site_id, created_at) index so
+      // SQLite never sorts the whole logs table. No LIKE branches in SQL —
+      // those forced a full scan. Pattern-match in JS on the small slice.
+      // scanCap = how far back we're willing to look for matching events;
+      // higher for the narrow filters so we don't return a near-empty card.
+      var scanCap = (kind === 'all') ? Math.max(limit * 4, 200) : 2000;
       var rows = db.prepare(
         "SELECT id, level, module, message, details, created_at FROM logs " +
-        "WHERE (site_id = ? OR site_id IS NULL) " +
-        "AND module IN ('pipeline','index','publisher','rewriter','extractor') " +
-        "AND (message LIKE 'Published cluster #%' OR message LIKE 'Publish failed for cluster #%' " +
-        "  OR message LIKE 'Rewrite failed for cluster #%' OR message LIKE 'Rewrite complete: cluster #%' " +
-        "  OR message LIKE 'Cluster % ready: %' OR message LIKE 'Extracted #%')" +
-        whereKind +
-        " ORDER BY created_at DESC LIMIT ?"
-      ).all(siteId, limit);
+        "WHERE site_id = ? AND module IN ('pipeline','index','publisher','rewriter','extractor') " +
+        "ORDER BY created_at DESC LIMIT ?"
+      ).all(siteId, scanCap);
+
+      // Preload a small batch of published.title + cluster.topic rows once so
+      // per-event enrichment doesn't hammer the DB with N serial queries.
+      var pubTitleStmt     = db.prepare("SELECT title FROM published WHERE cluster_id = ? LIMIT 1");
+      var clusterTopicStmt = db.prepare("SELECT topic FROM clusters WHERE id = ?");
 
       var events = [];
-      for (var i = 0; i < rows.length; i++) {
+      for (var i = 0; i < rows.length && events.length < limit; i++) {
         var r = rows[i]; var matched = null;
         for (var j = 0; j < _ACTIVITY_MATCHERS.length; j++) {
           var m = _ACTIVITY_MATCHERS[j].re.exec(r.message);
           if (m) { matched = { kind: _ACTIVITY_MATCHERS[j].kind, m: m }; break; }
         }
         if (!matched) continue;
+        if (kind === 'publishes' && matched.kind !== 'published') continue;
+        if (kind === 'failures'  && matched.kind !== 'failed')    continue;
+
         var clusterId = matched.m[1] ? parseInt(matched.m[1], 10) : null;
         var evt = {
           id: r.id,
@@ -7576,17 +7583,10 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         };
         if (matched.kind === 'published') {
           evt.wp_post_id = parseInt(matched.m[2], 10);
-          // Enrich with published.title if present.
-          try {
-            var pub = db.prepare("SELECT title FROM published WHERE cluster_id = ? LIMIT 1").get(clusterId);
-            if (pub && pub.title) evt.title = pub.title;
-          } catch (_e) {}
+          try { var pub = pubTitleStmt.get(clusterId); if (pub && pub.title) evt.title = pub.title; } catch (_e) {}
         }
         if (!evt.title && clusterId) {
-          try {
-            var cl = db.prepare("SELECT topic FROM clusters WHERE id = ?").get(clusterId);
-            if (cl && cl.topic) evt.title = cl.topic;
-          } catch (_e) {}
+          try { var cl = clusterTopicStmt.get(clusterId); if (cl && cl.topic) evt.title = cl.topic; } catch (_e) {}
         }
         events.push(evt);
       }
@@ -7602,19 +7602,21 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
     try {
       var siteId = parseInt(req.params.id, 10);
       var limit = Math.min(parseInt(req.query.limit, 10) || 3, 50);
+
+      var feedIds = db.prepare('SELECT id FROM feeds WHERE site_id = ?').all(siteId).map(function (r) { return r.id; });
+      if (!feedIds.length) {
+        return res.json({ ok: true, total: 0, clusters: [] });
+      }
+      var feedIdCsv = feedIds.join(',');
+
       var total = db.prepare(
-        "SELECT COUNT(*) AS n FROM clusters c " +
-        "WHERE c.status = 'detected' " +
-        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
-        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?))"
-      ).get(siteId, siteId).n || 0;
+        "SELECT COUNT(*) AS n FROM clusters WHERE status = 'detected' AND feed_id IN (" + feedIdCsv + ")"
+      ).get().n || 0;
       var clusters = db.prepare(
-        "SELECT c.id, c.topic, c.article_count, c.avg_similarity, c.detected_at " +
-        "FROM clusters c WHERE c.status = 'detected' " +
-        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
-        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?)) " +
-        "ORDER BY c.avg_similarity ASC, c.detected_at ASC LIMIT ?"
-      ).all(siteId, siteId, limit);
+        "SELECT id, topic, article_count, avg_similarity, detected_at " +
+        "FROM clusters WHERE status = 'detected' AND feed_id IN (" + feedIdCsv + ") " +
+        "ORDER BY avg_similarity ASC, detected_at ASC LIMIT ?"
+      ).all(limit);
       res.json({ ok: true, total: total, clusters: clusters });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
