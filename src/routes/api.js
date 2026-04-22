@@ -4513,8 +4513,17 @@ function createApiRouter(deps) {
         primaryDraftId: result.primaryDraftId
       });
     } catch (err) {
-      logger.error('api', 'Cluster rewrite failed: ' + sanitizeAxiosError(err).message);
-      res.status(500).json({ success: false, error: sanitizeForClient(err, 'Cluster rewrite failed') });
+      // Echo the real error message so the editor UI can show what to fix
+      // (un-extracted sources, no primary draft, no AI key, lock race, etc).
+      // sanitizeAxiosError strips secrets from HTTP-client errors; plain
+      // Error messages from the scheduler pass through unchanged. These
+      // are operator-facing diagnostics, not end-user data, so leaking
+      // them inside the admin dashboard is fine and saves a round-trip
+      // to the log viewer.
+      var cleaned = sanitizeAxiosError(err);
+      var msg = (cleaned && cleaned.message) || (err && err.message) || 'Cluster rewrite failed';
+      logger.error('api', 'Cluster rewrite failed: ' + msg);
+      res.status(500).json({ success: false, error: msg });
     } finally {
       aiGuard.release(lockName);
     }

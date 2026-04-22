@@ -29,6 +29,8 @@
     regenerating: false,
     loading: false,
     error: null,
+    regenerateError: null,   // last error from /api/clusters/:id/rewrite — shown in the AI edit pane
+    aiConfig: null,          // {provider, hasAnthropicKey, hasOpenaiKey, hasOpenrouterKey} — loaded once
   };
 
   // ─── Helpers ────────────────────────────────────────────────────────────
@@ -100,6 +102,24 @@
   function refresh() {
     if (!_state.clusterId) return Promise.resolve();
     _state.loading = true;
+
+    // Fetch AI config once per editor session — the write pane uses it to
+    // surface a "No AI key configured" warning instead of letting the user
+    // click Regenerate and get a cryptic failure from the server.
+    if (!_state.aiConfig) {
+      api('/api/ai/settings').then(function (c) {
+        if (c && c.success) {
+          _state.aiConfig = {
+            provider: c.provider || null,
+            hasAnthropicKey: !!c.hasAnthropicKey,
+            hasOpenaiKey:    !!c.hasOpenaiKey,
+            hasOpenrouterKey:!!c.hasOpenrouterKey,
+          };
+          render();
+        }
+      }).catch(function () { /* silent — warning just won't appear */ });
+    }
+
     return Promise.all([
       api('/api/clusters/' + _state.clusterId).catch(function () { return null; }),
       api('/api/drafts?cluster_id=' + _state.clusterId + '&per_page=20').catch(function () { return null; }),
@@ -439,7 +459,41 @@
       return '<button class="sh-btn sh-btn-sm' + (active ? ' sh-btn-active' : '') + '" data-click="editorSetLength" data-length="' + t + '">' + t + '</button>';
     }).join('');
 
-    return '<div class="sh-eyebrow" style="padding:0;margin-bottom:10px">Rewrite controls</div>' +
+    // Banner: AI keys missing. Shows once /api/ai/settings has reported
+    // which providers have saved keys; hidden while still loading.
+    var banner = '';
+    var cfg = _state.aiConfig;
+    if (cfg && !cfg.hasAnthropicKey && !cfg.hasOpenaiKey && !cfg.hasOpenrouterKey) {
+      banner +=
+        '<div style="padding:10px 12px;margin-bottom:12px;background:rgba(245,157,56,0.12);border:1px solid rgba(245,157,56,0.5);border-radius:8px;font-size:12.5px;line-height:1.4;color:var(--sh-text)">' +
+          '<b>No AI key configured.</b> Regenerate will fail until you add a key under <a href="#settings" style="color:var(--sh-accent-text);font-weight:500">Pipeline settings → AI Rewrite</a> (Anthropic, OpenAI, or OpenRouter).' +
+        '</div>';
+    } else if (cfg && cfg.provider) {
+      var hasActive = (cfg.provider === 'anthropic' && cfg.hasAnthropicKey) ||
+                      (cfg.provider === 'openai' && cfg.hasOpenaiKey) ||
+                      (cfg.provider === 'openrouter' && cfg.hasOpenrouterKey);
+      if (!hasActive) {
+        banner +=
+          '<div style="padding:10px 12px;margin-bottom:12px;background:rgba(245,157,56,0.12);border:1px solid rgba(245,157,56,0.5);border-radius:8px;font-size:12.5px;line-height:1.4;color:var(--sh-text)">' +
+            '<b>Primary provider (' + escapeHtml(cfg.provider) + ') has no key.</b> Configure it under <a href="#settings" style="color:var(--sh-accent-text);font-weight:500">Pipeline settings → AI Rewrite</a>, or switch the primary provider.' +
+          '</div>';
+      }
+    }
+
+    // Banner: most recent regenerate error. Stays visible until user
+    // dismisses or runs another regenerate.
+    if (_state.regenerateError) {
+      banner +=
+        '<div style="padding:10px 12px;margin-bottom:12px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.5);border-radius:8px;font-size:12.5px;line-height:1.4;color:var(--sh-text)">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">' +
+            '<div><b>Regenerate failed.</b><br>' + escapeHtml(_state.regenerateError) + '</div>' +
+            '<button class="sh-btn sh-btn-sm" data-click="editorDismissRegenerateError" style="flex-shrink:0">Dismiss</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    return banner +
+      '<div class="sh-eyebrow" style="padding:0;margin-bottom:10px">Rewrite controls</div>' +
       '<div style="font-size:12px;color:var(--sh-text-2);margin-bottom:6px">Tone</div>' +
       '<div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap">' + toneBtns + '</div>' +
       '<div style="font-size:12px;color:var(--sh-text-2);margin-bottom:6px">Length</div>' +
@@ -626,22 +680,30 @@
 
   function regenerate() {
     if (!_state.clusterId || _state.regenerating) return;
-    _state.regenerating = true; render();
+    _state.regenerating = true;
+    _state.regenerateError = null;
+    render();
     api('/api/clusters/' + _state.clusterId + '/rewrite', {
       method: 'POST',
       body: { tone: _state.tone.toLowerCase(), length: _state.length.toLowerCase(),
               add_citations: _state.addCitations, seo_focus: _state.seoFocus },
     }).then(function (r) {
       _state.regenerating = false;
-      if (r && r.success === false) { alert('Regenerate failed: ' + (r.error || 'unknown')); render(); return; }
-      // Refresh everything so the new draft body shows up.
+      if (r && r.success === false) {
+        _state.regenerateError = r.error || 'Unknown error from server';
+        render();
+        return;
+      }
+      // Server returned success — pull the new draft body in.
       return refresh();
     }).catch(function (err) {
       _state.regenerating = false;
-      alert('Regenerate failed: ' + (err && err.message));
+      _state.regenerateError = (err && err.message) || 'Request failed';
       render();
     });
   }
+
+  function dismissRegenerateError() { _state.regenerateError = null; render(); }
 
   function publish() {
     if (!_state.clusterId) return;
@@ -737,6 +799,7 @@
     showRewrite: showRewrite,
     saveDraft: saveDraft,
     regenerate: regenerate,
+    dismissRegenerateError: dismissRegenerateError,
     publish: publish,
     publishMenu: publishMenu,
     copyHtml: copyHtml,
