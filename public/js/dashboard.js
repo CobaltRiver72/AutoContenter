@@ -6685,6 +6685,8 @@
     'editorSetTone':           function (el) { if (window.__editorPage) window.__editorPage.setTone(el.dataset.tone); },
     'editorSetLength':         function (el) { if (window.__editorPage) window.__editorPage.setLength(el.dataset.length); },
     'editorSelectArticle':     function (el) { if (window.__editorPage) window.__editorPage.selectArticle(Number(el.dataset.articleId)); },
+    'editorShowRewrite':       function () { if (window.__editorPage) window.__editorPage.showRewrite(); },
+    'editorNoop':              function () { /* marker — stops the outer editorSelectArticle dispatch when a nested link is clicked */ },
     'editorSaveDraft':         function () { if (window.__editorPage) window.__editorPage.saveDraft(); },
     'editorRegenerate':        function () { if (window.__editorPage) window.__editorPage.regenerate(); },
     'editorPublish':           function () { if (window.__editorPage) window.__editorPage.publish(); },

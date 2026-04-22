@@ -15,6 +15,8 @@
     drafts: [],              // all drafts for this cluster
     draft: null,             // primary / selected draft
     activeArticleId: null,   // highlighted source
+    viewMode: 'rewrite',     // 'rewrite' | 'source' — what the middle pane shows
+    sourceContent: {},       // article_id -> { loading, content, title, byline, url, extracted }
     ctx: 'write',            // 'write' | 'preview' | 'coverage'
     tone: 'Neutral',
     length: 'Medium',
@@ -225,7 +227,7 @@
           favicon(a.domain, 14) +
           '<span style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(a.domain || '') + '</span>' +
           '<span style="flex:1"></span>' +
-          '<a href="' + escapeHtml(a.url || '#') + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--sh-text-4);display:inline-flex">' + icon('external-link', 11) + '</a>' +
+          '<a href="' + escapeHtml(a.url || '#') + '" target="_blank" rel="noopener" data-click="editorNoop" style="color:var(--sh-text-4);display:inline-flex">' + icon('external-link', 11) + '</a>' +
         '</div>' +
         '<div style="font-size:12.5px;line-height:1.4;color:var(--sh-text-2)">' + escapeHtml(a.title || 'Untitled') + '</div>' +
         (a.id ? '<div class="sh-mono" style="font-size:10.5px;color:var(--sh-text-4);margin-top:3px">#' + _state.cluster.id + '-' + _encodeRef(a.id) + '</div>' : '') +
@@ -243,6 +245,11 @@
   }
 
   function _renderArticlePane() {
+    if (_state.viewMode === 'source') return _renderSourceView();
+    return _renderRewriteView();
+  }
+
+  function _renderRewriteView() {
     var d = _state.draft;
     var title = (d && (d.rewritten_title || d.title)) || _state.cluster.topic || 'Untitled';
     var subtitle = (d && (d.rewritten_subtitle || d.subtitle)) || '';
@@ -269,6 +276,62 @@
         (subtitle ? '<div class="sh-ed-article-sub">' + escapeHtml(subtitle) + '</div>' : '') +
         '<div class="sh-ed-article-hero">' + icon('image', 32) + '</div>' +
         bodyHtml +
+      '</div>' +
+    '</div>';
+  }
+
+  // Middle pane when a source is clicked — shows the source's extracted body
+  // so the editor can verify what the AI had to work with before regenerating.
+  function _renderSourceView() {
+    var articleId = _state.activeArticleId;
+    var src = _state.sourceContent[articleId];
+    var article = _state.articles.find(function (a) { return a.id === articleId; });
+    if (!article) {
+      return '<div class="sh-ed-article"><div class="sh-ed-article-inner">' +
+        '<div class="sh-empty" style="padding:48px 0">No source selected.</div>' +
+      '</div></div>';
+    }
+
+    var header =
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">' +
+        '<button class="sh-btn sh-btn-sm" data-click="editorShowRewrite">' + icon('arrow-left', 13) + 'Back to rewrite</button>' +
+        '<span class="sh-eyebrow" style="padding:0">Source</span>' +
+        favicon(article.domain, 14) +
+        '<span style="font-size:12.5px;font-weight:500">' + escapeHtml(article.domain || '') + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<a class="sh-btn sh-btn-sm" href="' + escapeHtml(article.url || '#') + '" target="_blank" rel="noopener">' +
+          icon('external-link', 12) + 'Open original' +
+        '</a>' +
+      '</div>';
+
+    var body;
+    if (!src) {
+      body = '<div class="sh-empty" style="padding:32px 0">Loading source…</div>';
+    } else if (src.loading) {
+      body = '<div class="sh-empty" style="padding:32px 0">Loading extracted content…</div>';
+    } else if (!src.content) {
+      body = '<div class="sh-empty" style="padding:48px 20px;margin:24px 0;border:1px dashed var(--sh-border-2);border-radius:var(--sh-r-lg)">' +
+        'No content captured yet for this source.<br>' +
+        '<span style="font-size:12.5px;color:var(--sh-text-3)">The extractor runs when the cluster is picked up for rewrite. Open the original in a new tab to read it directly.</span>' +
+      '</div>';
+    } else {
+      // Extractor output is markdown; Firehose content is markdown or plain.
+      body = '<div class="sh-ed-article-body">' + renderMarkdown(src.content) + '</div>';
+    }
+
+    var stamp = src && !src.loading
+      ? '<div style="font-size:11.5px;color:var(--sh-text-4);margin-top:16px;padding-top:12px;border-top:1px solid var(--sh-border)">' +
+          (src.extracted ? 'Content extracted by pipeline.' : 'Raw snippet from Firehose — full extraction runs at rewrite time.') +
+        '</div>'
+      : '';
+
+    return '<div class="sh-ed-article">' +
+      '<div class="sh-ed-article-inner">' +
+        header +
+        '<h1 class="sh-ed-article-title">' + escapeHtml((src && src.title) || article.title || 'Untitled') + '</h1>' +
+        (src && src.byline ? '<div class="sh-ed-article-sub">By ' + escapeHtml(src.byline) + '</div>' : '') +
+        body +
+        stamp +
       '</div>' +
     '</div>';
   }
@@ -449,7 +512,76 @@
   function setLength(t) { _state.length = t; render(); }
   function toggleCitations(v) { _state.addCitations = !!v; }
   function toggleSeo(v) { _state.seoFocus = !!v; }
-  function selectArticle(id) { _state.activeArticleId = id; render(); }
+  // Clicking a source in the left pane flips the middle pane into "source"
+  // view showing the extracted content for that source. Click the
+  // "← Back to rewrite" button (wired via editorShowRewrite) to flip back.
+  function selectArticle(id) {
+    _state.activeArticleId = id;
+    _state.viewMode = 'source';
+    _loadSourceContent(id);
+    render();
+  }
+
+  function showRewrite() {
+    _state.viewMode = 'rewrite';
+    render();
+  }
+
+  // Lazy-load the extracted content for one source. Order of preference:
+  //   1. drafts[i].extracted_content when that source already has a draft
+  //      (richest — extractor-parsed article body)
+  //   2. article.content_markdown (raw Firehose snippet — always present)
+  //   3. "no content captured" empty state
+  // Cached per article id so re-selecting doesn't refetch.
+  function _loadSourceContent(articleId) {
+    if (!articleId || _state.sourceContent[articleId]) return;
+    var article = _state.articles.find(function (a) { return a.id === articleId; });
+    if (!article) return;
+
+    // Initial seed from what's already loaded in _state (the articles list
+    // has content_markdown from Firehose).
+    _state.sourceContent[articleId] = {
+      loading: false,
+      url: article.url,
+      title: article.title,
+      byline: null,
+      content: article.content_markdown || '',
+      extracted: false,
+    };
+
+    // If there's a matching draft, fetch its full record so we pick up the
+    // extractor's richer output (drafts.extracted_content, extracted_title,
+    // extracted_byline). Skip the fetch if we know no draft exists yet.
+    var draftRow = _state.drafts.find(function (d) {
+      return (d.source_article_id && d.source_article_id === articleId) ||
+             (d.source_url && d.source_url === article.url);
+    });
+    if (!draftRow) return;
+
+    _state.sourceContent[articleId].loading = true;
+    render();
+    api('/api/drafts/' + draftRow.id).then(function (r) {
+      var full = r && (r.draft || r);
+      if (full && (full.extracted_content || full.source_content_markdown)) {
+        _state.sourceContent[articleId] = {
+          loading: false,
+          url: full.source_url || article.url,
+          title: full.extracted_title || article.title,
+          byline: full.extracted_byline || null,
+          content: full.extracted_content || full.source_content_markdown || article.content_markdown || '',
+          extracted: !!full.extracted_content,
+        };
+      } else if (_state.sourceContent[articleId]) {
+        _state.sourceContent[articleId].loading = false;
+      }
+      render();
+    }).catch(function () {
+      if (_state.sourceContent[articleId]) {
+        _state.sourceContent[articleId].loading = false;
+        render();
+      }
+    });
+  }
 
   function saveDraft() {
     // The in-page draft is read-only for v1 — this is a placeholder that
@@ -568,6 +700,7 @@
     toggleCitations: toggleCitations,
     toggleSeo: toggleSeo,
     selectArticle: selectArticle,
+    showRewrite: showRewrite,
     saveDraft: saveDraft,
     regenerate: regenerate,
     publish: publish,
