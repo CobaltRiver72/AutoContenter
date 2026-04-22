@@ -1,9 +1,9 @@
 'use strict';
 
 var axios = require('axios');
-var { JSDOM } = require('jsdom');
 var { Readability } = require('@mozilla/readability');
 var { assertSafeUrl, safeAxiosOptions } = require('../utils/safe-http');
+var { createQuietJsdom } = require('../utils/jsdom-helpers');
 
 var MODULE = 'extractor';
 
@@ -164,7 +164,7 @@ class ContentExtractor {
 
     var dom;
     try {
-      dom = new JSDOM(html, { url: url });
+      dom = createQuietJsdom(html, { url: url });
     } catch (jsdomErr) {
       this.logger.warn(MODULE, 'JSDOM parsing failed for ' + url + ': ' + jsdomErr.message);
       return null;

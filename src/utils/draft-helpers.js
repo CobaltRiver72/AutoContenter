@@ -1,9 +1,9 @@
 'use strict';
 
 var axios = require('axios');
-var { JSDOM } = require('jsdom');
 var { Readability } = require('@mozilla/readability');
 var { assertSafeUrl, safeAxiosOptions, isBlockedIp } = require('./safe-http');
+var { createQuietJsdom } = require('./jsdom-helpers');
 var { fetchViaJina } = require('../modules/extractor-jina');
 var configModule = require('./config');
 var net = require('net');
@@ -243,7 +243,7 @@ async function fetchFromCache(url) {
 // ─── Parsing Helpers ────────────────────────────────────────────────────
 
 function parseWithReadability(rawHtml, sourceUrl) {
-  var dom = new JSDOM(rawHtml, { url: sourceUrl });
+  var dom = createQuietJsdom(rawHtml, { url: sourceUrl });
   try {
     var reader = new Readability(dom.window.document, { charThreshold: 100 });
     var result = reader.parse();
@@ -299,7 +299,7 @@ function parseWithReadability(rawHtml, sourceUrl) {
 }
 
 function extractImageFromHtml(rawHtml, sourceUrl) {
-  var dom = new JSDOM(rawHtml, { url: sourceUrl });
+  var dom = createQuietJsdom(rawHtml, { url: sourceUrl });
   try {
     var result = extractFeaturedImage(dom.window.document, sourceUrl);
     return result;
