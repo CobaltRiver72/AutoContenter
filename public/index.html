@@ -57,9 +57,6 @@
         <a href="#feed" class="nav-link" data-page="feed">
           <svg data-lucide="rss" class="icon"></svg> <span>Live feed</span>
         </a>
-        <a href="#clusters" class="nav-link" data-page="clusters">
-          <svg data-lucide="git-branch" class="icon"></svg> <span>Clusters</span>
-        </a>
         <a href="#trends" class="nav-link" data-page="trends">
           <svg data-lucide="trending-up" class="icon"></svg> <span>Trends</span>
         </a>
@@ -67,9 +64,6 @@
 
       <div class="nav-section">
         <span class="nav-section-label">Content</span>
-        <a href="#published" class="nav-link" data-page="published">
-          <svg data-lucide="check-circle" class="icon"></svg> <span>Published</span>
-        </a>
         <a href="#failed" class="nav-link" data-page="failed">
           <svg data-lucide="alert-triangle" class="icon"></svg> <span>Failed</span>
           <span class="nav-badge" id="failed-badge" style="display:none"></span>
@@ -191,53 +185,8 @@
     <!-- Page sections -->
     <main class="content">
 
-      <!-- Overview -->
-      <section class="page" id="page-overview">
-        <h2 class="page-title">Overview</h2>
-
-        <!-- Module Health Panel -->
-        <div class="health-panel" id="healthPanel">
-          <div class="health-card" id="health-firehose"><div class="health-dot"></div><div class="health-label">Firehose</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-trends"><div class="health-dot"></div><div class="health-label">Trends</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-buffer"><div class="health-dot"></div><div class="health-label">Buffer</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-extractor"><div class="health-dot"></div><div class="health-label">Extractor</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-rewriter"><div class="health-dot"></div><div class="health-label">Rewriter</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-publisher"><div class="health-dot"></div><div class="health-label">Publisher</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-scheduler"><div class="health-dot"></div><div class="health-label">Scheduler</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-infranodus"><div class="health-dot"></div><div class="health-label">InfraNodus</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-fuel"><div class="health-dot"></div><div class="health-label">Fuel</div><div class="health-detail">--</div></div>
-          <div class="health-card" id="health-metals"><div class="health-dot"></div><div class="health-label">Metals</div><div class="health-detail">--</div></div>
-        </div>
-
-        <div class="stats-grid" id="statsGrid">
-          <div class="stat-card">
-            <div class="stat-number" id="statArticlesToday">--</div>
-            <div class="stat-label">Articles Today</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number" id="statClustersToday">--</div>
-            <div class="stat-label">Clusters Today</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number" id="statPublishedToday">--</div>
-            <div class="stat-label">Published Today</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number" id="statTotalArticles">--</div>
-            <div class="stat-label">Total Articles</div>
-          </div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">Articles per Hour (Last 24h)</h3>
-          <div id="hourlyChart" class="chart-container"></div>
-        </div>
-        <div class="card">
-          <h3 class="card-title">System Status</h3>
-          <div id="systemStatus" class="status-table-wrap">
-            <p class="placeholder-text">Loading...</p>
-          </div>
-        </div>
-      </section>
+      <!-- Overview — rendered by public/js/site-home.js via innerHTML. -->
+      <section class="page" id="page-overview"></section>
 
       <!-- Live Feed -->
       <section class="page hidden" id="page-feed">
@@ -435,29 +384,6 @@
         </div>
       </section>
 
-      <!-- Clusters -->
-      <section class="page hidden" id="page-clusters">
-        <div class="page-header">
-          <h2 class="page-title">Clusters</h2>
-          <div class="page-actions">
-            <select id="clusterStatusFilter" class="filter-select">
-              <option value="">All Status</option>
-              <option value="detected">Detected</option>
-              <option value="queued">Queued</option>
-              <option value="publishing">Publishing</option>
-              <option value="published">Published</option>
-              <option value="skipped">Skipped</option>
-              <option value="failed">Failed</option>
-            </select>
-          </div>
-        </div>
-        <div id="clusterStats"></div>
-        <div id="clustersList" class="clusters-list">
-          <p class="placeholder-text">Loading...</p>
-        </div>
-        <div id="clustersPagination" class="pagination"></div>
-      </section>
-
       <!-- Failed Drafts -->
       <section class="page hidden" id="page-failed">
         <div class="page-header">
@@ -472,15 +398,6 @@
           <p class="placeholder-text">Loading...</p>
         </div>
         <div id="failedPagination" class="pagination"></div>
-      </section>
-
-      <!-- Published -->
-      <section class="page hidden" id="page-published">
-        <h2 class="page-title">Published Articles</h2>
-        <div id="publishedList" class="table-wrap">
-          <p class="placeholder-text">Loading...</p>
-        </div>
-        <div id="publishedPagination" class="pagination"></div>
       </section>
 
       <!-- Settings -->

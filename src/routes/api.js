@@ -7349,13 +7349,104 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         healthFirehose = 'no_data';
       }
 
+      // ── Site Home extension (WIRING §B.1) ────────────────────────────────
+      // Yesterday = 00:00 of (today - 1d) through 00:00 of today.
+      var yStart = new Date(Date.now() - 86400000).toISOString().slice(0,10) + ' 00:00:00';
+      var publishedYesterday = db.prepare(
+        "SELECT COUNT(*) AS n FROM published WHERE site_id = ? AND published_at >= ? AND published_at < ?"
+      ).get(siteId, yStart, todayStart).n || 0;
+
+      // Bucket fill helper: returns 12 ints, one per hour in the last 12h window.
+      function fill12h(rows) {
+        var out = [0,0,0,0,0,0,0,0,0,0,0,0];
+        var now = new Date();
+        var baseH = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
+        for (var i = 0; i < rows.length; i++) {
+          var b = rows[i].bucket; if (!b) continue;
+          var rowMs = new Date(b.replace(' ', 'T') + 'Z').getTime();
+          var hoursBack = Math.round((baseH - rowMs) / 3600000);
+          var idx = 11 - hoursBack;
+          if (idx >= 0 && idx < 12) out[idx] = rows[i].n || 0;
+        }
+        return out;
+      }
+
+      var pubTrendRows = db.prepare(
+        "SELECT strftime('%Y-%m-%d %H:00:00', published_at) AS bucket, COUNT(*) AS n " +
+        "FROM published WHERE site_id = ? AND published_at >= datetime('now','-12 hours') " +
+        "GROUP BY bucket ORDER BY bucket"
+      ).all(siteId);
+      var publishedTrend12h = fill12h(pubTrendRows);
+
+      var clustersInQueue = db.prepare(
+        "SELECT COUNT(DISTINCT c.id) AS n FROM clusters c " +
+        "WHERE c.status IN ('detected','queued') " +
+        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
+        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?))"
+      ).get(siteId, siteId).n || 0;
+
+      var queueTrendRows = db.prepare(
+        "SELECT strftime('%Y-%m-%d %H:00:00', detected_at) AS bucket, COUNT(*) AS n " +
+        "FROM clusters c WHERE c.detected_at >= datetime('now','-12 hours') " +
+        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
+        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?)) " +
+        "GROUP BY bucket ORDER BY bucket"
+      ).all(siteId, siteId);
+      var clustersInQueueTrend12h = fill12h(queueTrendRows);
+
+      var clustersNeedingReview = db.prepare(
+        "SELECT COUNT(*) AS n FROM clusters c " +
+        "WHERE c.status = 'detected' " +
+        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
+        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?)) " +
+        "AND (c.avg_similarity < 0.8 OR NOT EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id))"
+      ).get(siteId, siteId).n || 0;
+
+      var feedHealth = db.prepare(
+        "SELECT " +
+        "  COALESCE(SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END),0) AS active, " +
+        "  COALESCE(SUM(CASE WHEN is_active = 1 AND (last_fetched_at IS NULL OR last_fetched_at >= datetime('now','-2 hours')) THEN 1 ELSE 0 END),0) AS healthy, " +
+        "  COALESCE(SUM(CASE WHEN is_active = 1 AND last_fetched_at IS NOT NULL AND last_fetched_at < datetime('now','-2 hours') THEN 1 ELSE 0 END),0) AS stale " +
+        "FROM feeds WHERE site_id = ?"
+      ).get(siteId) || { active: 0, healthy: 0, stale: 0 };
+
+      var qualityRow = db.prepare(
+        "SELECT AVG(avg_similarity) AS q FROM (" +
+        "  SELECT c.id, c.avg_similarity FROM clusters c " +
+        "  JOIN drafts d ON d.cluster_id = c.id " +
+        "  WHERE d.site_id = ? AND c.avg_similarity > 0 " +
+        "  GROUP BY c.id ORDER BY c.detected_at DESC LIMIT 50" +
+        ")"
+      ).get(siteId);
+      var qualityAvg = qualityRow && qualityRow.q ? Math.round(qualityRow.q * 100) / 100 : null;
+
+      var qualityTrendRows = db.prepare(
+        "SELECT strftime('%Y-%m-%d %H:00:00', c.detected_at) AS bucket, AVG(c.avg_similarity) AS n " +
+        "FROM clusters c JOIN drafts d ON d.cluster_id = c.id " +
+        "WHERE d.site_id = ? AND c.detected_at >= datetime('now','-12 hours') AND c.avg_similarity > 0 " +
+        "GROUP BY bucket ORDER BY bucket"
+      ).all(siteId);
+      var qualityTrend12h = fill12h(qualityTrendRows).map(function (v) { return v ? Math.round(v * 100) / 100 : 0; });
+
       res.json({
         ok: true,
         siteId: siteId,
+        name: site.name,
+        wp_url: site.wp_url,
         articlesToday: articlesToday,
         articlesTotal: articlesTotal,
         publishedToday: publishedToday,
+        publishedYesterday: publishedYesterday,
         publishedTotal: publishedTotal,
+        publishedTrend12h: publishedTrend12h,
+        clustersInQueue: clustersInQueue,
+        clustersInQueueTrend12h: clustersInQueueTrend12h,
+        clustersNeedingReview: clustersNeedingReview,
+        activeFeeds: feedHealth.active,
+        feedsHealthyCount: feedHealth.healthy,
+        feedsStaleCount: feedHealth.stale,
+        qualityAvg: qualityAvg,
+        qualityTrend12h: qualityTrend12h,
         lastArticleAt: lastArticleAt,
         lastPublishedAt: lastPublishedAt,
         draftsPending: draftsPending,
@@ -7386,6 +7477,121 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         });
       }
       res.json({ ok: true, siteId: siteId, message: 'Site re-activated' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/sites/:id/activity ──────────────────────────────────────────
+  // Activity feed for the Site Home screen. Source: the `logs` table, filtered
+  // to pipeline-stage messages. No new table required (WIRING §B.2 Option A).
+  var _ACTIVITY_MATCHERS = [
+    { kind: 'published', re: /^Published cluster #(\d+) -> WP post #(\d+)$/ },
+    { kind: 'failed',    re: /^Publish failed for cluster #(\d+)/ },
+    { kind: 'failed',    re: /^Rewrite failed for cluster #(\d+)/ },
+    { kind: 'rewritten', re: /^Rewrite complete: cluster #(\d+) -> "(.+)"$/ },
+    { kind: 'clustered', re: /^Cluster (\d+) ready: "(.*?)" \((\d+) articles\)/ },
+    { kind: 'fetched',   re: /^Extracted #(\d+) -> / },
+  ];
+  router.get('/sites/:id/activity', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
+      var kind = (req.query.kind || 'all').toString();
+
+      var whereKind = '';
+      if (kind === 'publishes') whereKind = " AND message LIKE 'Published cluster #%'";
+      else if (kind === 'failures') whereKind = " AND (level = 'error' OR message LIKE '%ailed%cluster%')";
+
+      var rows = db.prepare(
+        "SELECT id, level, module, message, details, created_at FROM logs " +
+        "WHERE (site_id = ? OR site_id IS NULL) " +
+        "AND module IN ('pipeline','index','publisher','rewriter','extractor') " +
+        "AND (message LIKE 'Published cluster #%' OR message LIKE 'Publish failed for cluster #%' " +
+        "  OR message LIKE 'Rewrite failed for cluster #%' OR message LIKE 'Rewrite complete: cluster #%' " +
+        "  OR message LIKE 'Cluster % ready: %' OR message LIKE 'Extracted #%')" +
+        whereKind +
+        " ORDER BY created_at DESC LIMIT ?"
+      ).all(siteId, limit);
+
+      var events = [];
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i]; var matched = null;
+        for (var j = 0; j < _ACTIVITY_MATCHERS.length; j++) {
+          var m = _ACTIVITY_MATCHERS[j].re.exec(r.message);
+          if (m) { matched = { kind: _ACTIVITY_MATCHERS[j].kind, m: m }; break; }
+        }
+        if (!matched) continue;
+        var clusterId = matched.m[1] ? parseInt(matched.m[1], 10) : null;
+        var evt = {
+          id: r.id,
+          kind: matched.kind,
+          created_at: r.created_at,
+          cluster_id: clusterId,
+          title: matched.m[2] || null,
+          sub: null,
+        };
+        if (matched.kind === 'published') {
+          evt.wp_post_id = parseInt(matched.m[2], 10);
+          // Enrich with published.title if present.
+          try {
+            var pub = db.prepare("SELECT title FROM published WHERE cluster_id = ? LIMIT 1").get(clusterId);
+            if (pub && pub.title) evt.title = pub.title;
+          } catch (_e) {}
+        }
+        if (!evt.title && clusterId) {
+          try {
+            var cl = db.prepare("SELECT topic FROM clusters WHERE id = ?").get(clusterId);
+            if (cl && cl.topic) evt.title = cl.topic;
+          } catch (_e) {}
+        }
+        events.push(evt);
+      }
+      res.json({ ok: true, events: events });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/sites/:id/needs-review ──────────────────────────────────────
+  // Top N clusters awaiting review (low quality first, oldest second) + total.
+  router.get('/sites/:id/needs-review', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var limit = Math.min(parseInt(req.query.limit, 10) || 3, 50);
+      var total = db.prepare(
+        "SELECT COUNT(*) AS n FROM clusters c " +
+        "WHERE c.status = 'detected' " +
+        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
+        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?))"
+      ).get(siteId, siteId).n || 0;
+      var clusters = db.prepare(
+        "SELECT c.id, c.topic, c.article_count, c.avg_similarity, c.detected_at " +
+        "FROM clusters c WHERE c.status = 'detected' " +
+        "AND (c.feed_id IN (SELECT id FROM feeds WHERE site_id = ?) " +
+        "     OR EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id AND d.site_id = ?)) " +
+        "ORDER BY c.avg_similarity ASC, c.detected_at ASC LIMIT ?"
+      ).all(siteId, siteId, limit);
+      res.json({ ok: true, total: total, clusters: clusters });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/sites/:id/top-sources ───────────────────────────────────────
+  // Top domains by article count over the last N days for this site.
+  router.get('/sites/:id/top-sources', function (req, res) {
+    try {
+      var siteId = parseInt(req.params.id, 10);
+      var days = Math.min(parseInt(req.query.days, 10) || 7, 30);
+      var limit = Math.min(parseInt(req.query.limit, 10) || 4, 20);
+      var sources = db.prepare(
+        "SELECT domain, COUNT(*) AS count FROM articles " +
+        "WHERE source_site_id = ? AND received_at >= datetime('now', '-' || ? || ' days') " +
+        "AND domain IS NOT NULL AND domain != '' " +
+        "GROUP BY domain ORDER BY count DESC LIMIT ?"
+      ).all(siteId, days, limit);
+      res.json({ ok: true, sources: sources });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

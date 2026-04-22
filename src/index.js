@@ -2,6 +2,10 @@
 
 var path = require('path');
 var express = require('express');
+// Patches Express 4 so async handler throws/rejections reach the central
+// error middleware (app.use((err,req,res,next)=>…) below) instead of hanging
+// the request. Must be required before any routers are mounted.
+require('express-async-errors');
 var compression = require('compression');
 var helmet = require('helmet');
 var cors = require('cors');
@@ -328,6 +332,21 @@ async function boot() {
   // Response compression (gzip/brotli) — shrinks dashboard.js ~5x on the wire
   app.use(compression());
 
+  // Request correlation ID — assign once per request and bind via
+  // AsyncLocalStorage so every log line inside the request chain (route,
+  // module call, await callback) shares it. Reuses an incoming
+  // X-Request-Id if the upstream proxy supplied one; else randoms 6 bytes.
+  var requestCtx = require('./utils/request-context');
+  var crypto = require('crypto');
+  app.use(function (req, res, next) {
+    var incoming = req.headers['x-request-id'];
+    var rid = (typeof incoming === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(incoming))
+      ? incoming
+      : crypto.randomBytes(6).toString('hex');
+    res.setHeader('X-Request-Id', rid);
+    requestCtx.run({ requestId: rid }, next);
+  });
+
   // Security headers
   app.use(helmet({
     contentSecurityPolicy: {
@@ -374,6 +393,19 @@ async function boot() {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: false, limit: '256kb' }));
   app.use(setupSession(db));
+
+  // Public health check for uptime monitors and load balancers.
+  // Mounted BEFORE checkAuth so external probes don't need a session.
+  // Returns 200 OK if the Node process is alive and SQLite responds to a
+  // trivial query; 503 otherwise. No body leakage — just status.
+  app.get('/healthz', function (req, res) {
+    try {
+      db.prepare('SELECT 1 AS ok').get();
+      res.status(200).json({ ok: true, uptime: Math.round(process.uptime()) });
+    } catch (e) {
+      res.status(503).json({ ok: false });
+    }
+  });
 
   // Dashboard routes (/, /login, /logout)
   var dashboardRouter = createDashboardRouter();
