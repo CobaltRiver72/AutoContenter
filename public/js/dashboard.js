@@ -5506,10 +5506,18 @@
     fetchApi('/api/ai/settings')
       .then(function (data) {
         if (!data.success) return;
+        // Server returns a last-4 hint (e.g. "••••••••abc1") — never the
+        // raw key. Placeholder shows which key is saved without leaking
+        // the secret into the DOM; leave the input value empty so the
+        // admin types only when they want to replace.
+        function _keyPlaceholder(hint, typedHint) {
+          return hint ? 'Saved: ' + hint + ' — paste a new one to replace'
+                      : (typedHint || '');
+        }
         var el;
         el = $('ai-provider'); if (el) el.value = data.provider || 'openrouter';
         el = $('anthropic-key');
-        if (el && data.anthropicKey) el.placeholder = data.anthropicKey;
+        if (el) el.placeholder = _keyPlaceholder(data.anthropicKeyHint, 'sk-ant-api03-...');
         el = $('anthropic-model');
         if (el && data.anthropicModel) {
           el.value = data.anthropicModel;
@@ -5520,10 +5528,10 @@
           }
         }
         el = $('openai-key');
-        if (el && data.openaiKey) el.placeholder = data.openaiKey;
+        if (el) el.placeholder = _keyPlaceholder(data.openaiKeyHint, 'sk-...');
         el = $('openai-model'); if (el) el.value = data.openaiModel || '';
         el = $('openrouter-key');
-        if (el && data.openrouterKey) el.placeholder = data.openrouterKey;
+        if (el) el.placeholder = _keyPlaceholder(data.openrouterKeyHint, 'sk-or-v1-...');
         window.__lastSavedOpenrouterModel = data.openrouterModel || '';
         el = $('openrouter-model'); if (el) el.value = window.__lastSavedOpenrouterModel;
         el = $('ai-fallback'); if (el) el.checked = data.enableFallback !== false;

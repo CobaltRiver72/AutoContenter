@@ -2002,10 +2002,49 @@ function createApiRouter(deps) {
 
   // ─── AI Settings Routes ────────────────────────────────────────────────────
 
+  // Mask helper — matches the /api/settings convention: hide the secret body,
+  // keep the last 4 chars for recognition so the admin can tell *which* key is
+  // saved without the raw value ever reaching the browser. Handles three input
+  // shapes:
+  //   - raw key ("sk-ant-api03-…xyz1")  → "••••••••xyz1"
+  //   - pre-masked by rewriter.getSettings ("***xyz1") → "••••••••xyz1"
+  //   - already ours ("••••••••xyz1") → passed through
+  //   - empty/missing → "" so the client renders a clean placeholder.
+  function _maskKey(k) {
+    if (!k || typeof k !== 'string') return '';
+    if (k.indexOf('••') === 0) return k;
+    if (k.indexOf('***') === 0 && k.length >= 7) return '••••••••' + k.slice(-4);
+    if (k.length >= 8) return '••••••••' + k.slice(-4);
+    return '';
+  }
+  function _isMaskedOrEmpty(v) {
+    if (v == null || v === '') return true;
+    if (typeof v !== 'string') return false;
+    return v.indexOf('••') === 0 || v.indexOf('***') === 0;
+  }
+
   router.get('/ai/settings', function (req, res) {
     try {
       var settings = rewriter.getSettings();
-      res.json({ success: true, provider: settings.provider, anthropicKey: settings.anthropicKey, anthropicModel: settings.anthropicModel, openaiKey: settings.openaiKey, openaiModel: settings.openaiModel, openrouterKey: settings.openrouterKey, openrouterModel: settings.openrouterModel, enableFallback: settings.enableFallback, maxTokens: settings.maxTokens, temperature: settings.temperature, models: settings.models });
+      res.json({
+        success: true,
+        provider: settings.provider,
+        // Never return raw keys. Hints show last-4 so the admin can identify
+        // which key is saved without the secret ever crossing the wire.
+        anthropicKeyHint: _maskKey(settings.anthropicKey),
+        hasAnthropicKey: !!settings.anthropicKey,
+        anthropicModel: settings.anthropicModel,
+        openaiKeyHint: _maskKey(settings.openaiKey),
+        hasOpenaiKey: !!settings.openaiKey,
+        openaiModel: settings.openaiModel,
+        openrouterKeyHint: _maskKey(settings.openrouterKey),
+        hasOpenrouterKey: !!settings.openrouterKey,
+        openrouterModel: settings.openrouterModel,
+        enableFallback: settings.enableFallback,
+        maxTokens: settings.maxTokens,
+        temperature: settings.temperature,
+        models: settings.models,
+      });
     } catch (err) {
       logger.error('api', 'Get AI settings failed: ' + err.message);
       res.status(500).json({ success: false, error: err.message });
@@ -2015,18 +2054,22 @@ function createApiRouter(deps) {
   router.post('/ai/settings', function (req, res) {
     try {
       var body = req.body || {};
-      rewriter.updateSettings({
+      var patch = {
         provider: body.provider,
-        anthropicKey: body.anthropicKey,
         anthropicModel: body.anthropicModel,
-        openaiKey: body.openaiKey,
         openaiModel: body.openaiModel,
-        openrouterKey: body.openrouterKey,
         openrouterModel: body.openrouterModel,
         enableFallback: body.enableFallback === true || body.enableFallback === 'true',
         maxTokens: body.maxTokens ? parseInt(body.maxTokens, 10) : undefined,
         temperature: body.temperature !== undefined ? parseFloat(body.temperature) : undefined,
-      });
+      };
+      // Only overwrite a key when the client sent a real, non-masked value.
+      // Empty or masked values mean "leave stored key alone" — matches the
+      // /api/settings PUT pattern (see its placeholder-skip guard).
+      if (!_isMaskedOrEmpty(body.anthropicKey))  patch.anthropicKey  = body.anthropicKey;
+      if (!_isMaskedOrEmpty(body.openaiKey))     patch.openaiKey     = body.openaiKey;
+      if (!_isMaskedOrEmpty(body.openrouterKey)) patch.openrouterKey = body.openrouterKey;
+      rewriter.updateSettings(patch);
       res.json({ success: true, message: 'AI settings saved' });
     } catch (err) {
       logger.error('api', 'Save AI settings failed: ' + err.message);
