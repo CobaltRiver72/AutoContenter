@@ -152,44 +152,18 @@
   };
 
   // Classify a log row into an activity event. Mirrors §B.2 of WIRING-overview.md.
-  // STRICT patterns only — any unrecognised log (including generic errors like
-  // "Failed to fetch sources stats") is dropped so the feed stays focused on
-  // pipeline milestones, matching the JSX design's event set.
-  function _classifyLog(row) {
-    var msg = row.message || '';
-    var m;
-    if ((m = /^Published cluster #(\d+) -> WP post #(\d+)/.exec(msg))) {
-      return { kind: 'published', cluster_id: +m[1], wp_post_id: +m[2],
-               title: 'Cluster #' + m[1] + ' published', sub: 'WP post #' + m[2] };
-    }
-    if ((m = /^Publish failed for cluster #(\d+)(?::\s*(.+))?$/.exec(msg))) {
-      return { kind: 'failed', cluster_id: +m[1],
-               title: 'Publish failed: cluster #' + m[1], sub: m[2] || '' };
-    }
-    if ((m = /^Rewrite failed for cluster #(\d+)(?::\s*(.+))?$/.exec(msg))) {
-      return { kind: 'failed', cluster_id: +m[1],
-               title: 'Rewrite failed: cluster #' + m[1], sub: m[2] || '' };
-    }
-    if ((m = /^Rewrite complete: cluster #(\d+) -> "(.+)"$/.exec(msg))) {
-      return { kind: 'rewritten', cluster_id: +m[1], title: m[2] };
-    }
-    if ((m = /^Cluster (\d+) ready: "(.*?)" \((\d+) articles\)/.exec(msg))) {
-      return { kind: 'clustered', cluster_id: +m[1], title: m[2], sub: m[3] + ' sources' };
-    }
-    if ((m = /^Extracted #(\d+) -> (.+)$/.exec(msg))) {
-      return { kind: 'fetched', title: 'Article extracted', sub: m[2] };
-    }
-    return null;
-  }
-
   // ─── Module state ──────────────────────────────────────────────────────
+  // Activity classification happens server-side now
+  // (GET /api/sites/:id/activity emits pre-classified events); stats,
+  // needsReview and topSources are served by their own authoritative
+  // endpoints — see refreshAll() below.
   var _state = {
     loaded: false,
     stats: null,
-    feeds: null,
-    clusters: null,
-    sources: null,
     activity: null,
+    needsReview: null,
+    topSources: null,
+    activityFilter: 'all',
     pollTimer: null,
   };
 
@@ -227,9 +201,6 @@
 
     var site = _currentSite();
     var stats = _state.stats;
-    var feedsData = _state.feeds;
-    var clustersData = _state.clusters;
-    var sources = _state.sources;
     var activity = _state.activity;
 
     // ── Header ──────────────────────────────────────────────────────
@@ -272,39 +243,17 @@
       '</div>';
 
     // ── Stat cards ──────────────────────────────────────────────────
-    var publishedToday = stats ? stats.publishedToday : '—';
-    var draftsReady    = stats ? stats.draftsReady    : '—';
-    var draftsPending  = stats ? stats.draftsPending  : 0;
-    var draftsFailed   = stats ? stats.draftsFailed   : 0;
+    // All four card values come from /api/sites/:id/stats directly — no
+    // client-side derivation. Trends are 12-point hourly arrays.
+    var publishedToday     = stats ? stats.publishedToday : '—';
+    var publishedYesterday = stats ? (stats.publishedYesterday || 0) : 0;
+    var draftsFailed       = stats ? stats.draftsFailed : 0;
 
-    var activeFeeds = '—';
-    if (feedsData && Array.isArray(feedsData.feeds)) {
-      activeFeeds = feedsData.feeds.filter(function (f) { return f.is_active; }).length;
-    } else if (feedsData && Array.isArray(feedsData)) {
-      activeFeeds = feedsData.filter(function (f) { return f.is_active; }).length;
-    }
-
-    var clustersInQueue = '—';
-    var clustersNeedingReview = 0;
-    if (clustersData) {
-      clustersInQueue = clustersData.total || (clustersData.clusters || []).length;
-      clustersNeedingReview = (clustersData.clusters || []).filter(function (c) {
-        return (c.avg_similarity || 0) < 0.8;
-      }).length;
-    }
-
-    // Quality avg: compute from the clusters we have (best-effort).
-    var qualityAvg = '—';
-    if (clustersData && clustersData.clusters && clustersData.clusters.length) {
-      var vals = clustersData.clusters
-        .map(function (c) { return c.avg_similarity; })
-        .filter(function (v) { return typeof v === 'number' && v > 0; });
-      if (vals.length) {
-        var sum = 0;
-        for (var vi = 0; vi < vals.length; vi++) sum += vals[vi];
-        qualityAvg = (sum / vals.length).toFixed(2);
-      }
-    }
+    var activeFeeds            = stats ? (stats.activeFeeds            != null ? stats.activeFeeds            : '—') : '—';
+    var feedsStaleCount        = stats ? (stats.feedsStaleCount        || 0)  : 0;
+    var clustersInQueue        = stats ? (stats.clustersInQueue        != null ? stats.clustersInQueue        : '—') : '—';
+    var clustersNeedingReview  = stats ? (stats.clustersNeedingReview  || 0)  : 0;
+    var qualityAvg             = stats && stats.qualityAvg != null ? stats.qualityAvg.toFixed(2) : '—';
 
     // statCard — matches JSX design/jsx/site-home.jsx:Stat (label, big value,
     // optional coloured sub, optional sparkline). Sparkline data comes from
@@ -325,34 +274,17 @@
       '</div>';
     }
 
-    // Derive a 12-point sparkline from the activity log (client-side bucket).
-    // `kind` picks which event type to count; returns a 12-element int array
-    // covering the last 12 hours. Not perfect — the log is capped at ~50 rows —
-    // but visually consistent with the JSX design until the server-side
-    // trend endpoint lands (WIRING-overview.md §B.1).
-    function _buildTrend(kind) {
-      var out = [0,0,0,0,0,0,0,0,0,0,0,0];
-      if (!_state.activity) return out;
-      var now = Date.now();
-      for (var i = 0; i < _state.activity.length; i++) {
-        var e = _state.activity[i];
-        if (kind && e.kind !== kind) continue;
-        if (!e.created_at) continue;
-        var t = new Date(e.created_at.indexOf('T') === -1
-          ? e.created_at.replace(' ', 'T') + 'Z'
-          : e.created_at).getTime();
-        if (isNaN(t)) continue;
-        var ageHr = (now - t) / 3600000;
-        if (ageHr < 0 || ageHr > 12) continue;
-        var idx = 11 - Math.floor(ageHr); // 0 = 12h ago, 11 = now
-        if (idx >= 0 && idx < 12) out[idx]++;
-      }
-      return out;
-    }
-
     // Sub-text wording matches JSX design exactly so the two UIs read the same.
     var publishedSub = null, publishedSubColor = null;
-    if (draftsFailed > 0) { publishedSub = draftsFailed + ' failed'; publishedSubColor = 'var(--sh-red)'; }
+    if (draftsFailed > 0) {
+      publishedSub = draftsFailed + ' failed'; publishedSubColor = 'var(--sh-red)';
+    } else if (typeof publishedToday === 'number' && typeof publishedYesterday === 'number') {
+      var delta = publishedToday - publishedYesterday;
+      if (delta !== 0) {
+        publishedSub = (delta > 0 ? '+' : '') + delta + ' vs yesterday';
+        publishedSubColor = delta > 0 ? 'var(--sh-green)' : 'var(--sh-text-3)';
+      }
+    }
 
     var queueSub, queueSubColor;
     if (clustersNeedingReview > 0) { queueSub = clustersNeedingReview + ' need review'; queueSubColor = 'var(--sh-amber)'; }
@@ -360,14 +292,15 @@
 
     var feedsSub, feedsSubColor;
     if (activeFeeds === 0 || activeFeeds === '—') { feedsSub = 'add your first feed'; feedsSubColor = 'var(--sh-text-3)'; }
-    else                                          { feedsSub = 'all healthy'; feedsSubColor = 'var(--sh-text-3)'; }
+    else if (feedsStaleCount > 0)                 { feedsSub = feedsStaleCount + ' stale';  feedsSubColor = 'var(--sh-amber)'; }
+    else                                          { feedsSub = 'all healthy';               feedsSubColor = 'var(--sh-text-3)'; }
 
-    var qualitySample = (clustersData && clustersData.clusters && clustersData.clusters.length) || 0;
-    var qualitySub = qualitySample > 0 ? ('last ' + qualitySample + ' articles') : 'no data yet';
+    var qualitySub = stats && stats.qualityAvg != null ? 'last 50 articles' : 'no data yet';
 
-    var publishedTrend = _buildTrend('published');
-    var queueTrend     = _buildTrend('clustered');
-    var qualityTrend   = _buildTrend('rewritten');
+    // Server-authoritative 12-point hourly trends.
+    var publishedTrend = (stats && stats.publishedTrend12h)       || [];
+    var queueTrend     = (stats && stats.clustersInQueueTrend12h) || [];
+    var qualityTrend   = (stats && stats.qualityTrend12h)         || [];
 
     var stats_html =
       '<div class="sh-stats-grid">' +
@@ -419,10 +352,10 @@
       '</div>';
 
     // ── Needs review card ───────────────────────────────────────────
-    var reviewList = (clustersData && clustersData.clusters) || [];
-    var topReview = reviewList.slice().sort(function (a, b) {
-      return (a.avg_similarity || 0) - (b.avg_similarity || 0);
-    }).slice(0, 3);
+    // Populated by /api/sites/:id/needs-review (WIRING §B.3) — server pre-sorts
+    // by quality asc then detected_at asc; no client-side sort needed.
+    var reviewData = _state.needsReview;
+    var topReview = (reviewData && reviewData.clusters) || [];
 
     var reviewHtml;
     if (!topReview.length) {
@@ -441,7 +374,7 @@
       }).join('');
     }
 
-    var needsReviewTotal = (clustersData && clustersData.total) || reviewList.length;
+    var needsReviewTotal = (reviewData && reviewData.total) || topReview.length;
     var review_html =
       '<div class="sh-card">' +
         '<div class="sh-card-head">' +
@@ -455,8 +388,8 @@
       '</div>';
 
     // ── Top sources ─────────────────────────────────────────────────
-    // /api/sources/stats returns `domains: [...]` — each row has domain + total.
-    var sourcesList = (sources && (sources.domains || sources.topDomains)) || [];
+    // /api/sites/:id/top-sources?days=7 returns `sources: [{domain, count}]`.
+    var sourcesList = _state.topSources || [];
     var sourcesHtml;
     if (!sourcesList.length) {
       sourcesHtml = '<div class="sh-empty">No sources yet.</div>';
@@ -465,7 +398,7 @@
         return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0">' +
           favicon(r.domain, 16) +
           '<span style="font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(r.domain) + '</span>' +
-          '<span class="sh-tabular" style="font-size:12px;color:var(--sh-text-3)">' + (r.total || r.count || 0) + '</span>' +
+          '<span class="sh-tabular" style="font-size:12px;color:var(--sh-text-3)">' + (r.count || r.total || 0) + '</span>' +
         '</div>';
       }).join('');
     }
@@ -502,34 +435,23 @@
           return null;
         }).catch(function () { return null; });
 
-    var statsP = api('/api/sites/' + siteId + '/stats').catch(function () { return null; });
-    var feedsP = api('/api/feeds').catch(function () { return null; });
-    var clustersP = api('/api/clusters?status=detected&per_page=20').catch(function () { return null; });
-    var sourcesP = api('/api/sources/stats').catch(function () { return null; });
-    var logsP   = api('/api/logs?per_page=50').catch(function () { return null; });
+    // Four authoritative endpoints (WIRING-overview.md §B). Stats now carries
+    // every stat-card number (including 12-point trend arrays); needs-review
+    // supersedes the ad-hoc /api/clusters detected fetch; activity replaces
+    // the /api/logs pattern-matching client-side; top-sources is a lean
+    // replacement for /api/sources/stats.
+    var kind = _state.activityFilter || 'all';
+    var statsP    = api('/api/sites/' + siteId + '/stats').catch(function () { return null; });
+    var actP      = api('/api/sites/' + siteId + '/activity?limit=25&kind=' + encodeURIComponent(kind)).catch(function () { return null; });
+    var reviewP   = api('/api/sites/' + siteId + '/needs-review?limit=3').catch(function () { return null; });
+    var sourcesP  = api('/api/sites/' + siteId + '/top-sources?days=7&limit=4').catch(function () { return null; });
 
-    return Promise.all([sitesLoad, statsP, feedsP, clustersP, sourcesP, logsP]).then(function (results) {
-      _state.stats    = results[1];
-      _state.feeds    = results[2];
-      _state.clusters = results[3];
-      _state.sources  = results[4];
-
-      // Convert logs → activity events (pattern match on message).
-      var logs = (results[5] && (results[5].data || results[5].logs)) || [];
-      var events = [];
-      for (var i = 0; i < logs.length; i++) {
-        var kind = _classifyLog(logs[i]);
-        if (!kind) continue;
-        events.push({
-          kind: kind.kind,
-          title: kind.title || logs[i].message,
-          sub: kind.sub || '',
-          created_at: logs[i].created_at,
-          cluster_id: kind.cluster_id,
-          wp_post_id: kind.wp_post_id
-        });
-      }
-      _state.activity = events;
+    return Promise.all([sitesLoad, statsP, actP, reviewP, sourcesP]).then(function (results) {
+      // results: [0]=sites-preload, [1]=stats, [2]=activity, [3]=needs-review, [4]=top-sources
+      _state.stats       = results[1] || null;
+      _state.activity    = (results[2] && results[2].events) || [];
+      _state.needsReview = (results[3] && results[3].ok) ? results[3] : null;
+      _state.topSources  = (results[4] && results[4].ok) ? (results[4].sources || []) : [];
       _state.loaded = true;
       renderAll();
     });
@@ -562,23 +484,10 @@
     _state.pollTimer = null;
   }
 
-  // Activity filter: for now just locally filters the already-loaded events.
-  // When the dedicated /api/sites/:id/activity endpoint lands, swap to a
-  // server-side filter so "Failures only" scans further back than 50 rows.
+  // Activity filter: server-side via /api/sites/:id/activity?kind=.
   function setActivityFilter(value) {
-    if (!_state.activity) return;
-    var original = _state.activity;
-    if (value === 'all') {
-      renderAll();
-      return;
-    }
-    _state.activity = original.filter(function (e) {
-      if (value === 'publishes') return e.kind === 'published';
-      if (value === 'failures')  return e.kind === 'failed';
-      return true;
-    });
-    renderAll();
-    _state.activity = original; // restore so next poll isn't pre-filtered
+    _state.activityFilter = value;
+    refreshAll();
   }
 
   function visitSite(url) {
@@ -596,10 +505,11 @@
   }
 
   function reviewAll() {
+    // Clusters page removed — review flow lands on Feeds instead.
     if (window.__dashboard && typeof window.__dashboard.navigateTo === 'function') {
-      window.__dashboard.navigateTo('clusters');
+      window.__dashboard.navigateTo('feeds');
     } else {
-      window.location.hash = 'clusters';
+      window.location.hash = 'feeds';
     }
   }
 

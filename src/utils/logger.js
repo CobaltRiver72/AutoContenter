@@ -169,20 +169,38 @@ function _extractSiteId(details) {
  * @param {number} [siteId] - Override: explicit per-site tag. Usually supplied
  *   by the wrapper returned from logger.forSite(siteId).
  */
+// Lazy-loaded to avoid a require cycle if request-context ever imports logger.
+let _requestCtx = null;
+function _currentRequestId() {
+  try {
+    if (!_requestCtx) _requestCtx = require('./request-context');
+    return _requestCtx.requestId();
+  } catch (_e) {
+    return null;
+  }
+}
+
 function log(level, mod, message, details, siteId) {
+  // Prefix with [rid=xxxxxx] when we're inside an Express request so the
+  // message can be grep'd end-to-end through route → module → worker call
+  // chains. No-op outside a request (workers, boot, pipeline ticks).
+  const rid = _currentRequestId();
+  const taggedMsg = rid ? '[rid=' + rid + '] ' + message : message;
+
   // Winston log
   const meta = { module: mod };
+  if (rid) meta.requestId = rid;
   if (details !== undefined && details !== null) {
     meta.details = typeof details === 'string' ? details : JSON.stringify(details);
   }
-  winstonLogger.log(level, message, meta);
+  winstonLogger.log(level, taggedMsg, meta);
 
   // SQLite log (async-safe, fire-and-forget). Explicit siteId wins over
   // inline-in-details tagging; either fills logs.site_id.
   const resolvedSiteId = Number.isInteger(siteId) && siteId > 0
     ? siteId
     : _extractSiteId(details);
-  writeToDb(level, mod, message, details, resolvedSiteId);
+  writeToDb(level, mod, taggedMsg, details, resolvedSiteId);
 }
 
 /**
