@@ -1054,10 +1054,10 @@ function createApiRouter(deps) {
       var domainRows = srcSid ? domainStmt.all(srcSid) : domainStmt.all();
 
       // ── 2. Draft conversion per domain ────────────────────────────────────
-      var draftSql = 'SELECT source_domain AS domain, COUNT(*) AS draft_count ' +
-                     'FROM drafts WHERE source_domain IS NOT NULL AND source_domain != ""' +
-                     (srcSid ? ' AND site_id = ?' : '') +
-                     ' GROUP BY source_domain';
+      var draftSql = "SELECT source_domain AS domain, COUNT(*) AS draft_count " +
+                     "FROM drafts WHERE source_domain IS NOT NULL AND source_domain != ''" +
+                     (srcSid ? " AND site_id = ?" : "") +
+                     " GROUP BY source_domain";
       var draftStmt = db.prepare(draftSql);
       var draftRows = srcSid ? draftStmt.all(srcSid) : draftStmt.all();
       var draftMap = {};

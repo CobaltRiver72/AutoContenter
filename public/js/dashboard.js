@@ -1,9 +1,10 @@
-// ─── Theme bootstrap (runs before first paint) ───────────────────────────────
+// ─── Theme bootstrap ─────────────────────────────────────────────────────────
+// The design is light-only (see design/jsx/style.css). We force `light` here
+// regardless of any stale localStorage pref so the app always matches the
+// JSX reference. The toggle button has been removed from the topbar.
 (function () {
-  var saved = null;
-  try { saved = localStorage.getItem('hdf-theme'); } catch (e) {}
-  var theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
-  document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.setAttribute('data-theme', 'light');
+  try { localStorage.removeItem('hdf-theme'); } catch (e) {}
 })();
 
 (function () {
@@ -589,7 +590,11 @@
         published: 'Published', settings: 'Settings',
         'wp-settings': 'WordPress Settings', sites: 'Sites', logs: 'Logs',
         sources: 'Sources', fuel: 'Fuel Prices', metals: 'Metals',
-        lottery: 'Lottery', autopilot: 'Autopilot'
+        lottery: 'Lottery', autopilot: 'Autopilot',
+        'create-feed': 'New feed',
+        'feed-detail': 'Feed',
+        'editor': 'Cluster editor',
+        'site-settings': 'Site settings'
       };
       pageTitleEl.textContent = PAGE_TITLES[page] || page.charAt(0).toUpperCase() + page.slice(1);
     }
@@ -632,6 +637,34 @@
       case 'metals': loadMetalsPage(); break;
       case 'lottery': loadLotteryPage(); break;
       case 'autopilot': loadAutopilot(); break;
+      case 'create-feed':
+        if (window.__createFeed && typeof window.__createFeed.load === 'function') {
+          window.__createFeed.load();
+        } else {
+          navigateTo('feeds');
+        }
+        break;
+      case 'feed-detail':
+        if (window.__feedDetail && typeof window.__feedDetail.load === 'function') {
+          window.__feedDetail.load();
+        } else {
+          navigateTo('feeds');
+        }
+        break;
+      case 'editor':
+        if (window.__editorPage && typeof window.__editorPage.load === 'function') {
+          window.__editorPage.load();
+        } else {
+          navigateTo('clusters');
+        }
+        break;
+      case 'site-settings':
+        if (window.__siteSettings && typeof window.__siteSettings.load === 'function') {
+          window.__siteSettings.load();
+        } else {
+          navigateTo('settings');
+        }
+        break;
     }
 
     // Close sidebar on mobile
@@ -704,6 +737,12 @@
   // ─── Overview Page ──────────────────────────────────────────────────────
 
   function loadOverview() {
+    // New Overview (site-home.js) takes over the page when loaded. Falls back
+    // to the legacy stats/status/health trio only if the module isn't present.
+    if (window.__siteHome && typeof window.__siteHome.load === 'function') {
+      window.__siteHome.load();
+      return;
+    }
     fetchStats();
     fetchStatus();
     fetchHealth();
@@ -8192,7 +8231,87 @@
     'sitesReactivate':         function (el) { _sitesReactivate(Number(el.dataset.siteId)); },
     'sitesHideForm':           function () { _sitesHideForm(); },
     'sitesTestWp':             function (el) { _sitesTestWp(el.dataset.siteId ? Number(el.dataset.siteId) : _sitesEditingId); },
-    'sitesTestFirehose':       function (el) { _sitesTestFirehose(el.dataset.siteId ? Number(el.dataset.siteId) : _sitesEditingId); }
+    'sitesTestFirehose':       function (el) { _sitesTestFirehose(el.dataset.siteId ? Number(el.dataset.siteId) : _sitesEditingId); },
+
+    // Site Home (new Overview screen rendered by site-home.js)
+    'siteHomeVisitSite':       function (el) { if (window.__siteHome) window.__siteHome.visitSite(el.dataset.url); },
+    'siteHomeNewFeed':         function () { if (window.__siteHome) window.__siteHome.newFeed(); },
+    'siteHomeOpenCluster':     function (el) { if (window.__siteHome) window.__siteHome.openCluster(Number(el.dataset.clusterId)); },
+    'siteHomeReviewAll':       function () { if (window.__siteHome) window.__siteHome.reviewAll(); },
+
+    // New sidebar: site switcher popover + "Connect site" shortcut.
+    'toggleSiteSwitcher':      function () { if (window.__siteHome) window.__siteHome.toggleSidebarSwitcher(); },
+    'pickSiteFromSidebar':     function (el) { if (window.__siteHome) window.__siteHome.pickSite(Number(el.dataset.siteId)); },
+    'goToSitesPage':           function () { navigateTo('sites'); },
+
+    // New Sites page (card grid)
+    'sitesOpenSite':           function (el) { if (window.__sitesPage) window.__sitesPage.openSite(Number(el.dataset.siteId)); },
+    'sitesAddSite':            function () { if (window.__sitesPage) window.__sitesPage.addSite(); },
+    'sitesEditSite':           function (el) { if (window.__sitesPage) window.__sitesPage.editSite(Number(el.dataset.siteId)); },
+    'sitesRefresh':            function () { if (window.__sitesPage) window.__sitesPage.refreshAll(); },
+
+    // New Feeds list
+    'feedsSetView':            function (el) { if (window.__feedsPage) window.__feedsPage.setView(el.dataset.view); },
+    'feedsOpenFeed':           function (el) { if (window.__feedsPage) window.__feedsPage.openFeed(Number(el.dataset.feedId)); },
+    'feedsToggleSelect':       function (el, e) { if (e) e.stopPropagation(); if (window.__feedsPage) window.__feedsPage.toggleSelect(Number(el.dataset.feedId)); },
+    'feedsToggleSelectAll':    function (_el, e) { if (e) e.stopPropagation(); if (window.__feedsPage) window.__feedsPage.toggleSelectAll(); },
+    'feedsNew':                function () { if (window.__feedsPage) window.__feedsPage.newFeed(); },
+    'feedsRowMenu':            function (el, e) { if (e) e.stopPropagation(); if (window.__feedsPage) window.__feedsPage.rowMenu(Number(el.dataset.feedId)); },
+    'feedsBulkPause':          function () { if (window.__feedsPage) window.__feedsPage.bulkPause(); },
+    'feedsBulkResume':         function () { if (window.__feedsPage) window.__feedsPage.bulkResume(); },
+    'feedsBulkDelete':         function () { if (window.__feedsPage) window.__feedsPage.bulkDelete(); },
+    'feedsAdvancedFilter':     function () {
+      // Advanced filter popover — JSX reserves this slot for multi-filter UI.
+      // v1: scroll the quick-filter bar into view / focus the search input.
+      var inp = document.querySelector('[data-input="feedsSearch"]');
+      if (inp) inp.focus();
+    },
+
+    // Create feed (template picker + form)
+    'createFeedPickTemplate':  function (el) { if (window.__createFeed) window.__createFeed.pickTemplate(el.dataset.templateId); },
+    'createFeedCloneName':     function (el) { if (window.__createFeed) window.__createFeed.cloneName(el.dataset.name); },
+    'createFeedBack':          function () { if (window.__createFeed) window.__createFeed.back(); },
+    'createFeedCancel':        function () { if (window.__createFeed) window.__createFeed.cancel(); },
+    'createFeedSetKind':       function (el) { if (window.__createFeed) window.__createFeed.setKind(el.dataset.kind); },
+    'createFeedSubmit':        function () { if (window.__createFeed) window.__createFeed.submit(); },
+
+    // Feed detail (tabs + cluster list + settings)
+    'fdBack':                  function () { if (window.__feedDetail) window.__feedDetail.back(); },
+    'fdSetTab':                function (el) { if (window.__feedDetail) window.__feedDetail.setTab(el.dataset.tab); },
+    'fdSelectCluster':         function (el) { if (window.__feedDetail) window.__feedDetail.setSelectedCluster(Number(el.dataset.clusterId)); },
+    'fdTogglePause':           function () { if (window.__feedDetail) window.__feedDetail.togglePause(); },
+    'fdQueueSelected':         function () { /* batch queue — coming soon */ },
+    'fdSaveConfig':            function () { if (window.__feedDetail) window.__feedDetail.saveConfig(); },
+    'fdResetConfig':           function () { if (window.__feedDetail) window.__feedDetail.resetConfig(); },
+    'fdSaveSettings':          function () { if (window.__feedDetail) window.__feedDetail.saveSettings(); },
+    'fdDelete':                function () { if (window.__feedDetail) window.__feedDetail.deleteFeed(); },
+    'fdOpenClusterEditor':     function (el) { if (window.__feedDetail) window.__feedDetail.openClusterEditor(Number(el.dataset.clusterId)); },
+    'fdPublishCluster':        function (el) { if (window.__feedDetail) window.__feedDetail.publishCluster(Number(el.dataset.clusterId)); },
+    'fdSkipCluster':           function (el) { if (window.__feedDetail) window.__feedDetail.skipCluster(Number(el.dataset.clusterId)); },
+
+    // Cluster editor (3-pane)
+    'editorBack':              function () { if (window.__editorPage) window.__editorPage.back(); },
+    'editorSetCtx':            function (el) { if (window.__editorPage) window.__editorPage.setCtx(el.dataset.ctx); },
+    'editorSetPreviewDevice':  function (el) { if (window.__editorPage) window.__editorPage.setPreviewDevice(el.dataset.device); },
+    'editorSetTone':           function (el) { if (window.__editorPage) window.__editorPage.setTone(el.dataset.tone); },
+    'editorSetLength':         function (el) { if (window.__editorPage) window.__editorPage.setLength(el.dataset.length); },
+    'editorSelectArticle':     function (el) { if (window.__editorPage) window.__editorPage.selectArticle(Number(el.dataset.articleId)); },
+    'editorSaveDraft':         function () { if (window.__editorPage) window.__editorPage.saveDraft(); },
+    'editorRegenerate':        function () { if (window.__editorPage) window.__editorPage.regenerate(); },
+    'editorPublish':           function () { if (window.__editorPage) window.__editorPage.publish(); },
+    'editorPublishMenu':       function () { if (window.__editorPage) window.__editorPage.publishMenu(); },
+    'editorCopyHtml':          function () { if (window.__editorPage) window.__editorPage.copyHtml(); },
+    'editorExportHtml':        function () { if (window.__editorPage) window.__editorPage.exportHtml(); },
+    'editorSeeGraph':          function () { if (window.__editorPage) window.__editorPage.seeGraph(); },
+    'editorInsertFirstMissing':function () { if (window.__editorPage) window.__editorPage.insertFirstMissing(); },
+
+    // Site settings (tabs + rules)
+    'ssSetTab':                function (el) { if (window.__siteSettings) window.__siteSettings.setTab(el.dataset.tab); },
+    'ssToggleDay':             function (el) { if (window.__siteSettings) window.__siteSettings.toggleDay(Number(el.dataset.day)); },
+    'ssSavePublish':           function () { if (window.__siteSettings) window.__siteSettings.savePublish(); },
+    'ssAddRule':               function () { if (window.__siteSettings) window.__siteSettings.addRule(); },
+    'ssRuleMenu':               function (el) { if (window.__siteSettings) window.__siteSettings.ruleMenu(el.dataset.ruleId); },
+    'ssTestWp':                function () { if (window.__siteSettings) window.__siteSettings.testWp(); }
   };
 
   var INPUT_ACTIONS = {
@@ -8201,14 +8320,38 @@
     'filterMetalsCities':       function () { filterMetalsCities(); },
     'loadFuelPosts':            function () { loadFuelPosts(); },
     'loadMetalsPosts':          function () { loadMetalsPosts(); },
-    'updateManualImportCount':  function () { __updateManualImportCount(); }
+    'updateManualImportCount':  function () { __updateManualImportCount(); },
+    'feedsSearch':              function (el) { if (window.__feedsPage) window.__feedsPage.setSearch(el.value); },
+    'createFeedName':           function (el) { if (window.__createFeed) window.__createFeed.setField('name', el.value); },
+    'createFeedQuery':          function (el) { if (window.__createFeed) window.__createFeed.setField('query', el.value); },
+    'createFeedMinSrc':         function (el) { if (window.__createFeed) window.__createFeed.setField('minSrc', Number(el.value)); },
+    'createFeedSim':            function (el) { if (window.__createFeed) window.__createFeed.setField('sim', Number(el.value)); },
+    'fdCfgQuery':               function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('query', el.value); },
+    'fdCfgMinSrc':              function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('minSrc', Number(el.value)); },
+    'fdCfgSim':                 function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('sim', Number(el.value)); },
+    'fdSetName':                function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('name', el.value); },
+    'fdSetDescription':         function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('description', el.value); },
+    'ssSchedStart':             function (el) { if (window.__siteSettings) window.__siteSettings.setSchedStart(el.value); },
+    'ssSchedEnd':               function (el) { if (window.__siteSettings) window.__siteSettings.setSchedEnd(el.value); }
   };
 
   var CHANGE_ACTIONS = {
     'filterFuelCities':   function () { filterFuelCities(); },
     'filterMetalsCities': function () { filterMetalsCities(); },
     'loadFuelPosts':      function () { loadFuelPosts(); },
-    'loadMetalsPosts':    function () { loadMetalsPosts(); }
+    'loadMetalsPosts':    function () { loadMetalsPosts(); },
+    'siteHomeFilterActivity': function (el) { if (window.__siteHome) window.__siteHome.setActivityFilter(el.value); },
+    'feedsStatusFilter':  function (el) { if (window.__feedsPage) window.__feedsPage.setStatusFilter(el.value); },
+    'feedsSourceFilter':  function (el) { if (window.__feedsPage) window.__feedsPage.setSourceFilter(el.value); },
+    'createFeedQueue':    function (el) { if (window.__createFeed) window.__createFeed.setField('queueReview', !!el.checked); },
+    'createFeedAutoPub':  function (el) { if (window.__createFeed) window.__createFeed.setField('autoPub', !!el.checked); },
+    'fdToggleHideBelow':  function (el) { if (window.__feedDetail) window.__feedDetail.toggleHideBelow(!!el.checked); },
+    'fdSetAutoPub':       function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('autoPub', !!el.checked); },
+    'fdSetNotify':        function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('notifyFail', !!el.checked); },
+    'editorToggleCitations': function (el) { if (window.__editorPage) window.__editorPage.toggleCitations(!!el.checked); },
+    'editorToggleSeo':       function (el) { if (window.__editorPage) window.__editorPage.toggleSeo(!!el.checked); },
+    'ssSelectCfg':           function (el) { if (window.__siteSettings) window.__siteSettings.selectCfg(el.dataset.field, el.value); },
+    'ssToggleRule':          function (el) { if (window.__siteSettings) window.__siteSettings.toggleRule(el.dataset.ruleId, !!el.checked); }
   };
 
   var ERROR_ACTIONS = {
@@ -8275,33 +8418,13 @@
 
   // ─── Init ───────────────────────────────────────────────────────────────
 
-  function _applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    var sunEl = document.getElementById('theme-icon-sun');
-    var moonEl = document.getElementById('theme-icon-moon');
-    if (sunEl)  sunEl.style.display  = theme === 'dark'  ? 'none' : '';
-    if (moonEl) moonEl.style.display = theme === 'light' ? 'none' : '';
-    try { localStorage.setItem('hdf-theme', theme); } catch (e) {}
-  }
-
   function _refreshIcons() {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  function initThemeToggle() {
-    var btn = document.getElementById('theme-toggle');
-    if (!btn) return;
-    // Sync icon visibility to current theme (already set by bootstrap IIFE) without re-writing localStorage
-    var current = document.documentElement.getAttribute('data-theme') || 'dark';
-    var sunEl = document.getElementById('theme-icon-sun');
-    var moonEl = document.getElementById('theme-icon-moon');
-    if (sunEl)  sunEl.style.display  = current === 'dark'  ? 'none' : '';
-    if (moonEl) moonEl.style.display = current === 'light' ? 'none' : '';
-    btn.addEventListener('click', function () {
-      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      _applyTheme(next);
-    });
-  }
+  // Theme toggle removed — the design is light-only. Keeping an empty stub so
+  // the init() call below is a no-op rather than a ReferenceError.
+  function initThemeToggle() {}
 
   // ─── Site Switcher ──────────────────────────────────────────────────────
 
@@ -8310,20 +8433,25 @@
       var sites = (data && data.sites) || [];
       state.sites = sites;
       var sel = document.getElementById('site-selector');
-      if (!sel) return;
-      sel.innerHTML = '<option value="0">All Sites</option>';
-      for (var i = 0; i < sites.length; i++) {
-        var opt = document.createElement('option');
-        opt.value = String(sites[i].id);
-        opt.textContent = sites[i].name;
-        if (sites[i].color) opt.setAttribute('data-color', sites[i].color);
-        sel.appendChild(opt);
+      if (sel) {
+        sel.innerHTML = '<option value="0">All Sites</option>';
+        for (var i = 0; i < sites.length; i++) {
+          var opt = document.createElement('option');
+          opt.value = String(sites[i].id);
+          opt.textContent = sites[i].name;
+          if (sites[i].color) opt.setAttribute('data-color', sites[i].color);
+          sel.appendChild(opt);
+        }
+        sel.value = String(state.activeSiteId);
+        // If the saved value isn't in the list, default to first real site
+        if (!sel.value || sel.selectedIndex < 0) {
+          sel.value = sites.length ? String(sites[0].id) : '1';
+          state.activeSiteId = parseInt(sel.value, 10) || 1;
+        }
       }
-      sel.value = String(state.activeSiteId);
-      // If the saved value isn't in the list, default to first real site
-      if (!sel.value || sel.selectedIndex < 0) {
-        sel.value = sites.length ? String(sites[0].id) : '1';
-        state.activeSiteId = parseInt(sel.value, 10) || 1;
+      // Keep the new sidebar switcher in sync with the topbar select.
+      if (window.__siteHome && typeof window.__siteHome.updateSidebarSwitcher === 'function') {
+        window.__siteHome.updateSidebarSwitcher();
       }
     }).catch(function (err) {
       console.warn('[sites] Failed to load sites:', err.message);
@@ -8397,6 +8525,13 @@
   var _sitesEditingId = null;
 
   function loadSitesPage() {
+    // New Sites page (sites-page.js) takes over when present; legacy CRUD
+    // form remains reachable via `sitesAddSite` / `sitesEditSite` which call
+    // back into _sitesShowForm below.
+    if (window.__sitesPage && typeof window.__sitesPage.load === 'function') {
+      window.__sitesPage.load();
+      return;
+    }
     var section = document.getElementById('page-sites');
     if (!section) return;
     section.innerHTML = [
@@ -8749,6 +8884,14 @@
   var _feedsCaps = { mgmt_key_configured: false, rule_count: 0, rule_limit: 25 };
 
   function loadFeedsPage() {
+    // New Feeds list (feeds-page.js) takes over when present. Legacy
+    // _feedsSwitch is still used for the per-feed detail drill-down
+    // (view: 'detail') — that screen will be replaced by feed-detail.jsx
+    // in a follow-up, at which point this fallback can be dropped.
+    if (window.__feedsPage && typeof window.__feedsPage.load === 'function') {
+      window.__feedsPage.load();
+      return;
+    }
     _feedsSwitch({ view: 'list' });
   }
 
@@ -12617,6 +12760,22 @@
     if (tab === 'recent') loadLotteryRecent();
     if (tab === 'logs') loadLotteryLogs();
   };
+
+  // Expose a narrow window handle so companion modules (site-home.js and
+  // future screens) can read state + reuse helpers without duplicating them.
+  window.__dashboard = {
+    state: state,
+    fetchApi: fetchApi,
+    navigateTo: navigateTo,
+    formatTime: formatTime,
+    formatDateTime: formatDateTime,
+    escapeHtml: escapeHtml
+  };
+
+  // Expose the legacy Sites add/edit form so sites-page.js can trigger it
+  // from the new card grid's "+ Connect site" tile without duplicating the
+  // entire CRUD flow.
+  window._sitesShowForm = _sitesShowForm;
 
   // Wait for DOM
   if (document.readyState === 'loading') {
