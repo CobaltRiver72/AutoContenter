@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,81 +8,106 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/dashboard.css?v=36">
+  <link rel="stylesheet" href="/css/site-home.css?v=12">
 </head>
 <body>
 
 <div class="app-shell" id="app-shell">
 
   <!-- Sidebar -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-      <span class="brand-name">HDF <span class="logo-accent">AutoPub</span></span>
-      <button class="sidebar-close icon-btn" id="sidebarClose" aria-label="Close sidebar" style="margin-left:auto">
+  <aside class="sidebar sh-sb" id="sidebar">
+
+    <!-- Site switcher (replaces brand). Populated + opened by site-home.js. -->
+    <div class="sh-sb-switcher" id="sh-sb-switcher">
+      <button class="sh-sb-site-btn" id="sh-sb-site-btn" data-click="toggleSiteSwitcher" aria-expanded="false">
+        <span class="sh-sb-avatar" id="sh-sb-avatar">D</span>
+        <div class="sh-sb-site-meta">
+          <div class="sh-sb-site-name" id="sh-sb-site-name">Site</div>
+          <div class="sh-sb-site-sub"  id="sh-sb-site-sub">1 site</div>
+        </div>
+        <svg data-lucide="chevrons-up-down" class="sh-sb-chev"></svg>
+      </button>
+      <button class="sh-sb-close" id="sidebarClose" aria-label="Close sidebar">
         <svg data-lucide="x" class="icon"></svg>
       </button>
+      <div class="sh-sb-dropdown hidden" id="sh-sb-dropdown" role="menu">
+        <!-- filled by site-home.js renderSiteSwitcher() -->
+      </div>
     </div>
-    <nav class="sidebar-nav">
+
+    <!-- Search placeholder (⌘K — handler deferred to Phase 2) -->
+    <div class="sh-sb-search">
+      <div class="sh-sb-search-input">
+        <svg data-lucide="search" class="sh-sb-search-icon"></svg>
+        <span>Search…</span>
+        <kbd>⌘K</kbd>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav sh-sb-nav">
 
       <div class="nav-section">
         <span class="nav-section-label">Pipeline</span>
         <a href="#overview" class="nav-link active" data-page="overview">
-          <svg data-lucide="layout-dashboard" class="icon"></svg> Overview
+          <svg data-lucide="layout-dashboard" class="icon"></svg> <span>Overview</span>
         </a>
         <a href="#feeds" class="nav-link" data-page="feeds">
-          <svg data-lucide="list-plus" class="icon"></svg> Feeds
+          <svg data-lucide="list-plus" class="icon"></svg> <span>Feeds</span>
         </a>
         <a href="#feed" class="nav-link" data-page="feed">
-          <svg data-lucide="rss" class="icon"></svg> Live Feed
-        </a>
-        <a href="#trends" class="nav-link" data-page="trends">
-          <svg data-lucide="trending-up" class="icon"></svg> Trends
+          <svg data-lucide="rss" class="icon"></svg> <span>Live feed</span>
         </a>
         <a href="#clusters" class="nav-link" data-page="clusters">
-          <svg data-lucide="git-branch" class="icon"></svg> Clusters
+          <svg data-lucide="git-branch" class="icon"></svg> <span>Clusters</span>
+        </a>
+        <a href="#trends" class="nav-link" data-page="trends">
+          <svg data-lucide="trending-up" class="icon"></svg> <span>Trends</span>
         </a>
       </div>
 
       <div class="nav-section">
         <span class="nav-section-label">Content</span>
         <a href="#published" class="nav-link" data-page="published">
-          <svg data-lucide="check-circle" class="icon"></svg> Published
+          <svg data-lucide="check-circle" class="icon"></svg> <span>Published</span>
         </a>
         <a href="#failed" class="nav-link" data-page="failed">
-          <svg data-lucide="alert-triangle" class="icon"></svg> Failed
+          <svg data-lucide="alert-triangle" class="icon"></svg> <span>Failed</span>
           <span class="nav-badge" id="failed-badge" style="display:none"></span>
         </a>
         <a href="#sources" class="nav-link" data-page="sources">
-          <svg data-lucide="radio" class="icon"></svg> Sources
+          <svg data-lucide="radio" class="icon"></svg> <span>Sources</span>
         </a>
       </div>
 
       <div class="nav-section">
-        <span class="nav-section-label">Data Feeds</span>
+        <span class="nav-section-label">Data feeds</span>
         <a href="#fuel" class="nav-link" data-page="fuel">
-          <svg data-lucide="fuel" class="icon"></svg> Fuel
+          <svg data-lucide="fuel" class="icon"></svg> <span>Fuel</span>
         </a>
         <a href="#metals" class="nav-link" data-page="metals">
-          <svg data-lucide="gem" class="icon"></svg> Metals
+          <svg data-lucide="gem" class="icon"></svg> <span>Metals</span>
         </a>
         <a href="#lottery" class="nav-link" data-page="lottery">
-          <svg data-lucide="ticket" class="icon"></svg> Lottery
+          <svg data-lucide="ticket" class="icon"></svg> <span>Lottery</span>
         </a>
       </div>
 
       <div class="nav-section">
-        <span class="nav-section-label">System</span>
+        <span class="nav-section-label">Settings</span>
+        <a href="#sites" class="nav-link" data-page="sites">
+          <svg data-lucide="globe" class="icon"></svg> <span>Sites</span>
+        </a>
+        <a href="#site-settings" class="nav-link" data-page="site-settings">
+          <svg data-lucide="sliders-horizontal" class="icon"></svg> <span>Site settings</span>
+        </a>
         <a href="#settings" class="nav-link" data-page="settings">
-          <svg data-lucide="settings" class="icon"></svg> Settings
+          <svg data-lucide="settings" class="icon"></svg> <span>Pipeline settings</span>
         </a>
         <a href="#wp-settings" class="nav-link" data-page="wp-settings">
-          <svg data-lucide="newspaper" class="icon"></svg> WP Settings
-        </a>
-        <a href="#sites" class="nav-link" data-page="sites">
-          <svg data-lucide="globe" class="icon"></svg> Sites
+          <svg data-lucide="newspaper" class="icon"></svg> <span>WordPress (legacy)</span>
         </a>
         <a href="#logs" class="nav-link" data-page="logs">
-          <svg data-lucide="scroll-text" class="icon"></svg> Logs
+          <svg data-lucide="scroll-text" class="icon"></svg> <span>Logs</span>
         </a>
       </div>
 
@@ -92,20 +117,27 @@
         see existing rules while they migrate. Scheduled for removal once all
         sites are migrated to Feeds.
       -->
-      <div class="nav-section">
-        <span class="nav-section-label" style="opacity:.7">Legacy (being phased out)</span>
-        <a href="#autopilot" class="nav-link" data-page="autopilot" style="opacity:.7" title="Superseded by Feeds">
-          <svg data-lucide="rocket" class="icon"></svg> Autopilot
+      <div class="nav-section sh-sb-legacy">
+        <span class="nav-section-label">Legacy</span>
+        <a href="#autopilot" class="nav-link" data-page="autopilot" title="Superseded by Feeds">
+          <svg data-lucide="rocket" class="icon"></svg> <span>Autopilot</span>
         </a>
-        <a href="#rules" class="nav-link" data-page="rules" style="opacity:.7" title="Superseded by Feeds">
-          <svg data-lucide="filter" class="icon"></svg> Firehose Rules
+        <a href="#rules" class="nav-link" data-page="rules" title="Superseded by Feeds">
+          <svg data-lucide="filter" class="icon"></svg> <span>Firehose rules</span>
         </a>
       </div>
 
     </nav>
-    <div class="sidebar-footer">
-      <a href="/logout" class="nav-link logout-link">
-        <svg data-lucide="log-out" class="icon"></svg> Logout
+
+    <!-- User footer: replaces plain Logout link -->
+    <div class="sh-sb-footer">
+      <div class="sh-sb-user-avatar">A</div>
+      <div class="sh-sb-user-meta">
+        <div class="sh-sb-user-name">Admin</div>
+        <div class="sh-sb-user-role">Dashboard</div>
+      </div>
+      <a href="/logout" class="sh-sb-user-action" title="Sign out">
+        <svg data-lucide="log-out" class="icon"></svg>
       </a>
     </div>
   </aside>
@@ -114,32 +146,44 @@
   <div class="main-wrapper">
 
     <!-- Top bar -->
-    <header class="topbar">
+    <header class="topbar sh-topbar">
       <div class="topbar-left">
         <button class="hamburger icon-btn" id="hamburger" aria-label="Toggle sidebar">
           <svg data-lucide="menu" class="icon"></svg>
         </button>
-        <span id="page-title" class="topbar-title">Overview</span>
+        <!-- Breadcrumb. #topbar-site-crumb is updated by site-home.js when
+             the active site changes; #page-title (kept for legacy callers)
+             holds the current page segment. -->
+        <nav class="sh-crumbs" aria-label="Breadcrumb">
+          <span class="sh-crumb" id="topbar-site-crumb">Site</span>
+          <span class="sh-crumb-sep"><svg data-lucide="chevron-right"></svg></span>
+          <span class="sh-crumb sh-crumb-current" id="page-title">Overview</span>
+        </nav>
       </div>
       <div class="topbar-right">
-        <div class="site-switcher">
+        <!-- Legacy controls — kept in DOM so existing dashboard.js logic that
+             writes to them keeps working, but hidden visually via CSS. -->
+        <div class="site-switcher sh-legacy-hide">
           <select id="site-selector" class="site-selector-select" title="Active site">
             <option value="1">Default Site</option>
           </select>
         </div>
-        <span class="status-item">
+        <span class="status-item sh-legacy-hide">
           <span class="status-dot" id="firehoseStatus" title="Firehose"></span>
           Firehose
         </span>
-        <span class="status-item">
+        <span class="status-item sh-legacy-hide">
           <span class="status-dot" id="trendsStatus" title="Trends"></span>
           Trends
         </span>
-        <span id="lastTrendsPoll" class="topbar-meta" title="Last trends poll">--</span>
-        <span id="bufferCount" class="topbar-meta" title="Articles in buffer">Buffer: --</span>
-        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme">
-          <svg data-lucide="sun" class="icon" id="theme-icon-sun" style="display:none"></svg>
-          <svg data-lucide="moon" class="icon" id="theme-icon-moon"></svg>
+        <span id="lastTrendsPoll" class="topbar-meta sh-legacy-hide" title="Last trends poll">--</span>
+        <span id="bufferCount" class="topbar-meta sh-legacy-hide" title="Articles in buffer">Buffer: --</span>
+
+        <button class="sh-topbar-btn" title="Notifications" aria-label="Notifications">
+          <svg data-lucide="bell" class="icon"></svg>
+        </button>
+        <button class="sh-topbar-btn" title="Help" aria-label="Help">
+          <svg data-lucide="help-circle" class="icon"></svg>
         </button>
       </div>
     </header>
@@ -1744,6 +1788,22 @@
       <!-- Feeds (list + detail — JS-rendered) -->
       <section class="page hidden" id="page-feeds"></section>
 
+      <!-- New Feed (template picker + one-page form). Rendered by
+           public/js/create-feed-page.js. -->
+      <section class="page hidden" id="page-create-feed"></section>
+
+      <!-- Feed detail (Stories / Configuration / Settings / Published).
+           Rendered by public/js/feed-detail-page.js. -->
+      <section class="page hidden" id="page-feed-detail"></section>
+
+      <!-- Cluster editor (3-pane: sources / article / context).
+           Rendered by public/js/editor-page.js. -->
+      <section class="page hidden" id="page-editor"></section>
+
+      <!-- Site settings (per-site publishing defaults + rules). Rendered by
+           public/js/site-settings-page.js. -->
+      <section class="page hidden" id="page-site-settings"></section>
+
     </main>
   </div>
 
@@ -2072,6 +2132,13 @@
   </div>
 
   <script src="/js/lucide.min.js"></script>
+  <script src="/js/site-home.js?v=6"></script>
+  <script src="/js/sites-page.js?v=2"></script>
+  <script src="/js/feeds-page.js?v=4"></script>
+  <script src="/js/create-feed-page.js?v=2"></script>
+  <script src="/js/feed-detail-page.js?v=1"></script>
+  <script src="/js/editor-page.js?v=2"></script>
+  <script src="/js/site-settings-page.js?v=1"></script>
   <script src="/js/dashboard.js?v=71"></script>
 </body>
 </html>
