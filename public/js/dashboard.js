@@ -6689,6 +6689,7 @@
     'editorNoop':              function () { /* marker — stops the outer editorSelectArticle dispatch when a nested link is clicked */ },
     'editorSaveDraft':         function () { if (window.__editorPage) window.__editorPage.saveDraft(); },
     'editorRegenerate':        function () { if (window.__editorPage) window.__editorPage.regenerate(); },
+    'editorDismissRegenerateError': function () { if (window.__editorPage) window.__editorPage.dismissRegenerateError(); },
     'editorPublish':           function () { if (window.__editorPage) window.__editorPage.publish(); },
     'editorPublishMenu':       function () { if (window.__editorPage) window.__editorPage.publishMenu(); },
     'editorCopyHtml':          function () { if (window.__editorPage) window.__editorPage.copyHtml(); },
