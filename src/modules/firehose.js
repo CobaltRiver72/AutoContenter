@@ -19,6 +19,45 @@ const MIN_RECONNECT_MS = 2000;
 // domain plus every subdomain, so "*.my-competitor.com" matches
 // "my-competitor.com" AND "blog.my-competitor.com". Plain entries match
 // exactly. Cheap O(n) for the short filter lists we ship (typically <20).
+// Turn a Firehose `doc`'s content field into a clean markdown string. The
+// event can ship content three ways:
+//   1. doc.markdown / doc.diff as a plain string — use as-is.
+//   2. A structured object like {chunks: [{text, type}, ...]} — join the
+//      text of each chunk. Empty arrays mean "no content captured", which
+//      should be stored as '' so the editor doesn't render `{"chunks":[]}`
+//      as a visible block of JSON.
+//   3. Anything else — return ''.
+// Never JSON.stringify a wrapper object into the content column: that's
+// what caused the ugly raw-JSON display in the cluster editor.
+function _coerceFirehoseContent(doc) {
+  if (!doc) return '';
+  if (typeof doc.markdown === 'string' && doc.markdown.trim()) return doc.markdown;
+  if (typeof doc.diff === 'string' && doc.diff.trim()) return doc.diff;
+
+  var candidates = [doc.markdown, doc.diff, doc.content];
+  for (var i = 0; i < candidates.length; i++) {
+    var c = candidates[i];
+    if (!c || typeof c !== 'object') continue;
+    var chunks = Array.isArray(c.chunks) ? c.chunks
+               : Array.isArray(c.paragraphs) ? c.paragraphs
+               : Array.isArray(c.blocks) ? c.blocks
+               : null;
+    if (!chunks || !chunks.length) continue;
+    var parts = [];
+    for (var j = 0; j < chunks.length; j++) {
+      var ch = chunks[j];
+      if (typeof ch === 'string') { parts.push(ch); continue; }
+      if (ch && typeof ch === 'object') {
+        var text = ch.text || ch.content || ch.value || '';
+        if (typeof text === 'string' && text.trim()) parts.push(text);
+      }
+    }
+    var joined = parts.join('\n\n').trim();
+    if (joined) return joined;
+  }
+  return '';
+}
+
 function _domainMatchesAny(domain, patterns) {
   if (!domain || !Array.isArray(patterns) || !patterns.length) return false;
   var d = String(domain).toLowerCase();
@@ -296,10 +335,7 @@ class FirehoseListener extends EventEmitter {
       domain: domain,
       title: doc.title || '',
       publish_time: doc.publish_time || null,
-      content_markdown: typeof doc.markdown === 'string' ? doc.markdown
-        : typeof doc.diff === 'string' ? doc.diff
-        : (doc.markdown || doc.diff) ? JSON.stringify(doc.markdown || doc.diff)
-        : '',
+      content_markdown: _coerceFirehoseContent(doc),
       language: doc.language ? String(doc.language).toLowerCase() : null,
       page_category: doc.page_category || null,
       page_types: doc.page_types || null,

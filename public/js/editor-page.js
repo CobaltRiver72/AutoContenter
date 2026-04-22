@@ -533,19 +533,53 @@
   //   2. article.content_markdown (raw Firehose snippet — always present)
   //   3. "no content captured" empty state
   // Cached per article id so re-selecting doesn't refetch.
+  // Strip legacy-shape payloads that used to slip through the ingest path
+  // as stringified JSON. If the content is an empty wrapper or parses to
+  // an object with a `chunks`/`paragraphs` field, we treat it as empty so
+  // the source view shows the clean empty state. Plain markdown / text
+  // passes through unchanged.
+  function _cleanSourceContent(raw) {
+    if (!raw || typeof raw !== 'string') return '';
+    var s = raw.trim();
+    if (!s) return '';
+    if (s === '{"chunks":[]}' || s === '{}' || s === '[]') return '';
+    if (s.charAt(0) === '{' || s.charAt(0) === '[') {
+      try {
+        var parsed = JSON.parse(s);
+        if (parsed && typeof parsed === 'object') {
+          var arr = parsed.chunks || parsed.paragraphs || parsed.blocks;
+          if (Array.isArray(arr) && arr.length === 0) return '';
+          // If it parses as a chunk-shaped object, try to extract text.
+          if (Array.isArray(arr) && arr.length) {
+            var parts = arr.map(function (ch) {
+              if (typeof ch === 'string') return ch;
+              return (ch && (ch.text || ch.content || ch.value)) || '';
+            }).filter(Boolean);
+            if (parts.length) return parts.join('\n\n');
+          }
+        }
+      } catch (_e) { /* not JSON — fall through and treat as text */ }
+    }
+    return raw;
+  }
+
   function _loadSourceContent(articleId) {
     if (!articleId || _state.sourceContent[articleId]) return;
     var article = _state.articles.find(function (a) { return a.id === articleId; });
     if (!article) return;
 
     // Initial seed from what's already loaded in _state (the articles list
-    // has content_markdown from Firehose).
+    // has content_markdown from Firehose). Guard against leftover bad data:
+    // some older articles were stored as literal JSON wrappers like
+    // '{"chunks":[]}' before the ingest path learned to extract text from
+    // structured Firehose payloads. Surface those as empty so the UI
+    // renders the "no content captured" state instead of rendering the JSON.
     _state.sourceContent[articleId] = {
       loading: false,
       url: article.url,
       title: article.title,
       byline: null,
-      content: article.content_markdown || '',
+      content: _cleanSourceContent(article.content_markdown),
       extracted: false,
     };
 
@@ -568,7 +602,7 @@
           url: full.source_url || article.url,
           title: full.extracted_title || article.title,
           byline: full.extracted_byline || null,
-          content: full.extracted_content || full.source_content_markdown || article.content_markdown || '',
+          content: _cleanSourceContent(full.extracted_content || full.source_content_markdown || article.content_markdown),
           extracted: !!full.extracted_content,
         };
       } else if (_state.sourceContent[articleId]) {
