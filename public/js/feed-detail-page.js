@@ -279,14 +279,29 @@
   }
 
   function _renderClusterPreview(c) {
+    // /api/clusters now enriches each cluster with source_domains (array of
+    // up to 8 distinct hostnames) and source_image (drafts.featured_image if
+    // extracted, else the Firehose-supplied articles.image_url). When neither
+    // field has content we show the empty-state, not a fake "Loading…".
     var domains = Array.isArray(c.source_domains) ? c.source_domains : [];
-    // Derive domains from the DB field `source_domains` if present; otherwise
-    // the clusters endpoint doesn't expose them, so leave empty.
     var domainsHtml = domains.length
       ? domains.map(function (d) {
           return '<div class="sh-fd-pill">' + favicon(d, 14) + '<span>' + escapeHtml(d) + '</span></div>';
         }).join('')
-      : '<div style="color:var(--sh-text-3);font-size:12px">Loading sources…</div>';
+      : '<div style="color:var(--sh-text-3);font-size:12px">No sources indexed yet.</div>';
+
+    // Cover image. CSP blocks inline onerror handlers, so a broken image URL
+    // shows a broken-image glyph; acceptable trade-off. We delegate error
+    // recovery to the existing image-fallback helper registered below (see
+    // wireImageFallback) which runs on 'error' events captured at the root.
+    var imgHtml = c.source_image
+      ? '<div class="sh-fd-img-wrap" style="border-radius:10px;overflow:hidden;margin-bottom:14px;background:var(--sh-surface-2);aspect-ratio:16/9">' +
+          '<img src="' + escapeHtml(c.source_image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" ' +
+          'class="sh-fd-cover-img" ' +
+          'style="width:100%;height:100%;object-fit:cover;display:block">' +
+        '</div>'
+      : '<div class="sh-fd-img-placeholder">' + icon('image', 24) +
+        '<div style="color:var(--sh-text-3);font-size:12px;margin-top:6px">No cover image yet — extracts on publish.</div></div>';
 
     return '<div style="padding:20px;overflow-y:auto;flex:1;max-height:600px">' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">' +
@@ -294,7 +309,7 @@
         (c.avg_similarity ? '<span class="sh-badge sh-badge-green">quality ' + c.avg_similarity.toFixed(2) + '</span>' : '') +
       '</div>' +
       '<h2 style="font-size:19px;font-weight:600;letter-spacing:-0.01em;line-height:1.25;margin:0 0 12px">' + escapeHtml(c.topic || 'Untitled') + '</h2>' +
-      '<div class="sh-fd-img-placeholder">' + icon('image', 24) + '</div>' +
+      imgHtml +
       '<div class="sh-eyebrow" style="margin-bottom:8px">Sources (' + (c.article_count || 0) + ')</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + domainsHtml + '</div>' +
       '<div class="sh-eyebrow" style="margin-bottom:8px">Summary</div>' +
@@ -560,9 +575,29 @@
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────
+  // CSP-safe broken-image fallback. The `error` event doesn't bubble, so we
+  // use capture phase once per page to catch any failing <img.sh-fd-cover-img>
+  // and swap the parent wrapper for the generic placeholder.
+  var _imgErrorWired = false;
+  function _wireImageFallback(root) {
+    if (_imgErrorWired) return;
+    _imgErrorWired = true;
+    root.addEventListener('error', function (e) {
+      var t = e.target;
+      if (t && t.tagName === 'IMG' && t.classList && t.classList.contains('sh-fd-cover-img')) {
+        var wrap = t.parentElement;
+        if (wrap) wrap.innerHTML = '<div class="sh-fd-img-placeholder" style="height:100%;display:flex;align-items:center;justify-content:center">' +
+          '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--sh-text-4)">' +
+          '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>' +
+          '</svg></div>';
+      }
+    }, true);
+  }
+
   function load(feedId) {
     var root = document.getElementById('page-feed-detail');
     if (!root) return;
+    _wireImageFallback(root);
 
     // feedId can come as explicit arg or via dashboard.state.currentFeedId
     if (feedId) _state.feedId = feedId;

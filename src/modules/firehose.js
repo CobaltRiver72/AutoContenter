@@ -277,6 +277,17 @@ class FirehoseListener extends EventEmitter {
       return;
     }
 
+    // Image URL from the Firehose event — field name varies by provider, so
+    // try common ones in order and take the first that looks like an http(s)
+    // URL. If nothing matches, the column stays NULL and the UI falls back
+    // to drafts.featured_image once the extractor fills it in.
+    var _imgCandidates = [doc.image, doc.image_url, doc.thumbnail, doc.thumbnail_url, doc.og_image, doc.media_url];
+    var imageUrl = null;
+    for (var _ii = 0; _ii < _imgCandidates.length; _ii++) {
+      var _c = _imgCandidates[_ii];
+      if (typeof _c === 'string' && /^https?:\/\//i.test(_c)) { imageUrl = _c; break; }
+    }
+
     // Build article object
     const article = {
       firehose_event_id: event.lastEventId || (data.tap_id + '-' + data.query_id + '-' + Date.now()),
@@ -292,6 +303,7 @@ class FirehoseListener extends EventEmitter {
       language: doc.language ? String(doc.language).toLowerCase() : null,
       page_category: doc.page_category || null,
       page_types: doc.page_types || null,
+      image_url: imageUrl,
     };
 
     // ─── Language Gate ─────────────────────────────────────────────────────

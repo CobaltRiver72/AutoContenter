@@ -1159,6 +1159,16 @@ function runMigrations() {
     // End Multi-Site Phase 1 migration
     // ═══════════════════════════════════════════════════════════════════════════
 
+    // ─── Article-level image capture ──────────────────────────────────────────
+    // Firehose events carry an image URL in the payload (og:image / thumbnail
+    // / media); previously we dropped it and waited for the extractor to
+    // re-download the page and parse meta tags itself. That left every
+    // "detected" cluster imageless in the Feed-detail preview. Store the
+    // Firehose-supplied image at ingest so the UI can show it immediately,
+    // and the extractor still gets to overwrite with a higher-quality pick
+    // later (via drafts.featured_image).
+    try { db.exec('ALTER TABLE articles ADD COLUMN image_url TEXT DEFAULT NULL'); } catch (_e) { /* column exists */ }
+
     // ─── Site Home performance indexes ────────────────────────────────────────
     // The per-site Overview screen fires 4 concurrent API calls on load:
     //   /api/sites/:id/stats        — published/queue/feeds/quality roll-ups
