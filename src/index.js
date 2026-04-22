@@ -225,9 +225,19 @@ async function boot() {
             if (cluster) {
               logger.info('index', 'Cluster ' + cluster.id + ' ready: "' +
                 (cluster.topic || '').substring(0, 60) + '" (' + cluster.article_count + ' articles)');
-              if (similarity.shouldPublish(cluster)) {
-                scheduler.enqueue(cluster);
-              }
+              // Always enqueue drafts the moment a cluster is formed so the
+              // extraction worker picks them up eagerly. Autopilot / admin
+              // Regenerate should NEVER have to wait on extraction — content
+              // is ready by the time they ask for a rewrite.
+              //
+              // The rewrite loop (workers/pipeline.js:_rewriteLoop) still
+              // enforces c.article_count >= MIN_SOURCES_THRESHOLD and the
+              // quality floor before firing the AI, so this change only
+              // affects *when* extraction runs, not *whether* the cluster
+              // eventually publishes. Singleton / below-threshold clusters
+              // sit extracted-and-ready; they become rewritable automatically
+              // if more matching articles join later.
+              scheduler.enqueue(cluster);
             }
           }
         } catch (err) {

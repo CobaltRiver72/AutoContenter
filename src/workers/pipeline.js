@@ -1599,8 +1599,14 @@ class Pipeline {
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
 
-      var existingCheck = this.db.prepare(
-        'SELECT COUNT(*) as count FROM drafts WHERE cluster_id = ? AND site_id = ?'
+      // Per-(cluster, site, article) existence check so a SECOND article
+      // joining an already-enqueued cluster still gets its own draft. The
+      // old code short-circuited the whole site loop when any draft for
+      // the cluster existed, which meant growth events (2nd source, 3rd
+      // source, ...) never produced drafts for the new articles — they
+      // sat in the articles table with no extraction queued.
+      var articleHasDraft = this.db.prepare(
+        'SELECT 1 FROM drafts WHERE cluster_id = ? AND site_id = ? AND source_article_id = ? LIMIT 1'
       );
 
       var self = this;
@@ -1631,9 +1637,6 @@ class Pipeline {
           var site = targetSites[si];
           var siteId = site.id;
 
-          var existing = existingCheck.get(cluster.id, siteId);
-          if (existing && existing.count > 0) continue;
-
           // Language filter is ONLY applied in legacy multi-site mode. In
           // feed-mode the feed's own filter already gated on ALLOWED_LANGUAGES
           // at ingest — re-applying PUBLISH_LANGUAGE here would double-filter
@@ -1650,14 +1653,33 @@ class Pipeline {
 
           matchedSites++;
 
+          // If the cluster already has a primary draft for this site, keep
+          // it as primary. Otherwise promote the first article this pass.
+          var hasPrimary = self.db.prepare(
+            "SELECT 1 FROM drafts WHERE cluster_id = ? AND site_id = ? AND cluster_role = 'primary' LIMIT 1"
+          ).get(cluster.id, siteId);
+          var primaryAssignedThisRun = false;
+
           for (var i = 0; i < articles.length; i++) {
             var a = articles[i];
+            // Skip articles that already have a draft for this site —
+            // growth events re-run enqueue() and this guard lets new
+            // articles get drafts without duplicating the existing ones.
+            if (articleHasDraft.get(cluster.id, siteId, a.id)) continue;
+
+            var role;
+            if (hasPrimary || primaryAssignedThisRun) {
+              role = 'source';
+            } else {
+              role = 'primary';
+              primaryAssignedThisRun = true;
+            }
             var artLang = a.language || (/[\u0900-\u097F]{3,}/.test((a.title || '') + ' ' + (a.content_markdown || '').slice(0, 300)) ? 'hi' : 'en');
             insertDraft.run(
               a.id, a.url, a.domain, a.title,
               a.content_markdown || '', artLang, 'wordpress',
               'fetching', 'auto',
-              cluster.id, i === 0 ? 'primary' : 'source', 'pending',
+              cluster.id, role, 'pending',
               siteId, feedId
             );
             totalDrafts++;
