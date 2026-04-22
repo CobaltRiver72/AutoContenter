@@ -123,7 +123,12 @@ function sanitizeDetailsForDb(details) {
 }
 
 function writeToDb(level, mod, message, details, siteId) {
-  if (!_db) return;
+  // Drop silently if the DB has been closed — happens during graceful
+  // shutdown when module .shutdown() methods log their own teardown.
+  // better-sqlite3 exposes `.open = false` after close(); without this
+  // check every late log call throws "database connection is not open"
+  // and the catch below spams stderr with it.
+  if (!_db || _db.open === false) return;
 
   try {
     if (!_insertStmt) {

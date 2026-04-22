@@ -522,30 +522,46 @@ async function boot() {
 
   // ─── Graceful shutdown ───────────────────────────────────────────────────
 
+  var _shuttingDown = false;
   function shutdown(signal) {
+    if (_shuttingDown) return;
+    _shuttingDown = true;
     logger.info('index', 'Received ' + signal + ', shutting down...');
-
-    server.close(function() {
-      logger.info('index', 'HTTP server closed');
-    });
 
     clearInterval(cleanupTimer);
     clearInterval(memoryWatchdog);
 
-    // Shutdown modules
-    var shutdownList = [feedsPool, firehosePool, firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
-    for (var i = 0; i < shutdownList.length; i++) {
+    // Stop accepting new connections and wait for in-flight requests to
+    // drain. Only AFTER that do we shut modules down and close the DB —
+    // otherwise express-session's end-of-response touch() tries to
+    // UPDATE sessions against a closed connection and spams the logs
+    // with "database connection is not open" stack traces.
+    server.close(function() {
+      logger.info('index', 'HTTP server closed');
       try {
-        if (shutdownList[i].shutdown) shutdownList[i].shutdown();
-        else if (shutdownList[i].stop) shutdownList[i].stop();
-      } catch (err) {
-        logger.error('index', 'Error shutting down module', err.message);
+        var shutdownList = [feedsPool, firehosePool, firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
+        for (var i = 0; i < shutdownList.length; i++) {
+          try {
+            if (shutdownList[i] && shutdownList[i].shutdown) shutdownList[i].shutdown();
+            else if (shutdownList[i] && shutdownList[i].stop) shutdownList[i].stop();
+          } catch (err) {
+            logger.error('index', 'Error shutting down module', err.message);
+          }
+        }
+        try { closeDb(); } catch (err) { logger.error('index', 'Error closing db', err.message); }
+      } finally {
+        setTimeout(function() { process.exit(0); }, 200);
       }
-    }
+    });
 
-    try { closeDb(); } catch (err) { logger.error('index', 'Error closing db', err.message); }
-
-    setTimeout(function() { process.exit(0); }, 500);
+    // Hard timeout guard: if a request hangs and server.close() never
+    // fires its callback, we still exit cleanly after 10s so PM2 can
+    // restart us. unref() keeps this timer from blocking exit itself.
+    setTimeout(function() {
+      logger.warn('index', 'Shutdown timed out after 10s, force-exiting');
+      try { closeDb(); } catch (_e) {}
+      process.exit(1);
+    }, 10000).unref();
   }
 
   process.on('SIGTERM', function() { shutdown('SIGTERM'); });
