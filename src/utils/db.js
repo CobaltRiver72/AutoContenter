@@ -1159,6 +1159,23 @@ function runMigrations() {
     // End Multi-Site Phase 1 migration
     // ═══════════════════════════════════════════════════════════════════════════
 
+    // ─── Site Home performance indexes ────────────────────────────────────────
+    // The per-site Overview screen fires 4 concurrent API calls on load:
+    //   /api/sites/:id/stats        — published/queue/feeds/quality roll-ups
+    //   /api/sites/:id/activity     — latest logs filtered by module + message
+    //   /api/sites/:id/needs-review — detected clusters by quality
+    //   /api/sites/:id/top-sources  — per-domain article count over last N days
+    // better-sqlite3 is synchronous, so a single slow query blocks every other
+    // request through the same Node process. These composite indexes make each
+    // of those roll-ups use an index scan instead of a full-table sort, which
+    // is what pushed /api/sites/1/stats past nginx's upstream timeout on prod.
+    db.exec('CREATE INDEX IF NOT EXISTS idx_published_site_time    ON published(site_id, published_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_articles_source_recv   ON articles(source_site_id, received_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_clusters_feed_status   ON clusters(feed_id, status, detected_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_clusters_feed_detected ON clusters(feed_id, detected_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster_site    ON drafts(cluster_id, site_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_logs_site_created      ON logs(site_id, created_at)');
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);
