@@ -1,6 +1,7 @@
 'use strict';
 
 const { NEWS_CATEGORIES } = require('../utils/categories');
+const clusteringConfig = require('../utils/clustering-config');
 
 const MODULE = 'buffer';
 
@@ -265,9 +266,12 @@ class ArticleBuffer {
    */
   cleanOldArticles() {
     try {
-      // Minimum 48h retention, or 2x buffer window, whichever is larger
-      var bufferHours = this.config.BUFFER_HOURS || 6;
-      var minRetention = Math.max(bufferHours * 2, 48);
+      // Retention must cover the LARGEST buffer window across active feeds so
+      // we never delete an article another feed would have matched against.
+      // Formula: max(active_feed_buffer_hours) * 2 + 1h safety margin, with
+      // a 48h absolute floor. Zero drift when every feed sits on globals.
+      var bufferHours = clusteringConfig.getMaxBufferHours();
+      var minRetention = Math.max(bufferHours * 2 + 1, 48);
 
       if (!this._stmts.clean) {
         this._stmts.clean = this.db.prepare(

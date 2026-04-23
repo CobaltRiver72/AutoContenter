@@ -2,6 +2,7 @@
 
 const natural = require('natural');
 const TfIdf = natural.TfIdf;
+const clusteringConfig = require('../utils/clustering-config');
 
 const MODULE = 'similarity';
 const MAX_FINGERPRINT_BYTES = 512 * 1024; // 512 KB
@@ -159,7 +160,12 @@ class SimilarityEngine {
         return [];
       }
 
-      const threshold = this.config.SIMILARITY_THRESHOLD || 0.20;
+      // Per-feed clustering config — resolved on main thread, passed to worker
+      // (for the async path) or applied directly (for this sync path below).
+      // newArticle.feed_id stamps the feed scope; legacy (null) rows fall back
+      // to globals inside resolveClusteringConfig.
+      const feedCfg = clusteringConfig.resolveClusteringConfig(newArticle.feed_id);
+      const threshold = feedCfg.similarity_threshold;
       const tfidf = new TfIdf();
 
       // Add all buffer article fingerprints to the corpus (index 0..N-1)
@@ -173,7 +179,7 @@ class SimilarityEngine {
       const newDocIndex = bufferArticles.length;
       const matches = [];
 
-      const allowSameDomain = this.config.ALLOW_SAME_DOMAIN_CLUSTERS === 'true' || this.config.ALLOW_SAME_DOMAIN_CLUSTERS === true;
+      const allowSameDomain = feedCfg.allow_same_domain_clusters;
 
       // Compute cosine similarity between new article and each buffer article
       for (let i = 0; i < bufferArticles.length; i++) {
@@ -220,6 +226,7 @@ class SimilarityEngine {
   async findMatchesAsync(newArticle, bufferArticles) {
     if (this._workerReady && this._worker) {
       try {
+        var feedCfg = clusteringConfig.resolveClusteringConfig(newArticle.feed_id);
         var result = await this._sendToWorker({
           newArticle: {
             id: newArticle.id,
@@ -237,8 +244,8 @@ class SimilarityEngine {
               language: a.language || null,
             };
           }),
-          threshold: this.config.SIMILARITY_THRESHOLD || 0.20,
-          allowSameDomain: this.config.ALLOW_SAME_DOMAIN_CLUSTERS === 'true' || this.config.ALLOW_SAME_DOMAIN_CLUSTERS === true,
+          threshold: feedCfg.similarity_threshold,
+          allowSameDomain: feedCfg.allow_same_domain_clusters,
         });
 
         // Re-attach full article objects to matches

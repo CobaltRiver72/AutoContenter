@@ -17,6 +17,7 @@ var config = getConfig();
 
 // ─── 2. Initialize SQLite database (runs migrations on require) ─────────────
 var { db, closeDb, recoverStuckDrafts } = require('./utils/db');
+var clusteringConfig = require('./utils/clustering-config');
 var { sanitizeForClient } = require('./utils/api-helpers');
 
 // ─── 3. Initialize logger, set db reference ────────────────────────────────
@@ -53,6 +54,7 @@ var siteConfigMod = require('./utils/site-config');
 
 // ─── Initialise site-config module (must happen after DB + loadRuntimeOverrides) ──
 siteConfigMod.init(db);
+clusteringConfig.init(db);
 
 // ─── Multi-site pools ──────────────────────────────────────────────────────
 // Per-feed SSE pool: one FirehoseListener per active Feed, keyed by feed_id.
@@ -160,9 +162,13 @@ async function boot() {
     logger.info('index', 'Processing similarity batch: ' + batch.length + ' article(s)');
 
     try {
-      // Load buffer articles ONCE for the entire batch
+      // Load buffer articles ONCE for the entire batch. Prefetch window is the
+      // MAX buffer_hours across active feeds, so every feed's sub-window is
+      // contained in the loaded set. The per-article trim below enforces each
+      // article's own feed's window on top.
+      var prefetchHours = clusteringConfig.getMaxBufferHours();
       var bufferArticles = buffer.getRecentArticlesForSimilarity(
-        parseFloat(_cfgMod.get('BUFFER_HOURS')) || 2.5,
+        prefetchHours,
         parseInt(_cfgMod.get('MAX_BUFFER_FOR_SIMILARITY'), 10) || 100
       );
 
@@ -170,19 +176,32 @@ async function boot() {
         var item = batch[i];
         var article = item.article;
 
+        // Per-feed clustering config drives the time window, min_sources
+        // floor, similarity threshold, and same-domain behavior for THIS
+        // article. Legacy (no feed_id) rows fall back to globals inside the
+        // resolver.
+        var articleCfg = clusteringConfig.resolveClusteringConfig(article.feed_id);
+        var perArticleCutoffMs = Date.now() - articleCfg.buffer_hours * 3600 * 1000;
+
         // Feed-scoped clustering: an article tagged with feed_id only matches
-        // other articles from the SAME feed. Legacy (no feed_id) articles only
-        // match other legacy articles. This enforces the "per-feed clusters"
-        // decision (each Feed is its own independent rewrite pipeline).
-        var relevantBuffer = article.feed_id
-          ? bufferArticles.filter(function (b) { return b.feed_id === article.feed_id; })
-          : bufferArticles.filter(function (b) { return !b.feed_id; });
+        // other articles from the SAME feed and within THIS feed's buffer
+        // window. Legacy (no feed_id) articles only match other legacy
+        // articles. Each Feed is its own independent rewrite pipeline.
+        var relevantBuffer = bufferArticles.filter(function (b) {
+          var feedMatch = article.feed_id ? (b.feed_id === article.feed_id) : !b.feed_id;
+          if (!feedMatch) return false;
+          if (!b.received_at) return true;
+          var recvMs = new Date(String(b.received_at).replace(' ', 'T') + 'Z').getTime();
+          if (isNaN(recvMs)) return true;
+          return recvMs >= perArticleCutoffMs;
+        });
 
         try {
           logger.debug('index', 'Clustering: article #' + article.id +
             ' fp=' + (article.fingerprint ? article.fingerprint.length + ' chars' : 'NONE') +
             ', buffer=' + relevantBuffer.length + '/' + bufferArticles.length + ' articles' +
-            (article.feed_id ? ' (feed=' + article.feed_id + ')' : ''));
+            (article.feed_id ? ' (feed=' + article.feed_id + ')' : '') +
+            ' window=' + articleCfg.buffer_hours + 'h min_src=' + articleCfg.min_sources);
 
           var matches = await similarity.findMatchesAsync(article, relevantBuffer);
 
@@ -192,7 +211,7 @@ async function boot() {
               matches.length + ' match(es), best score: ' + matches[0].score.toFixed(3));
           }
 
-          if (matches.length >= config.MIN_SOURCES_THRESHOLD - 1) {
+          if (matches.length >= articleCfg.min_sources - 1) {
             var cluster = similarity.createOrUpdateCluster(article, matches, item.trendsMatch);
             if (cluster) {
               logger.info('index', 'Cluster ' + cluster.id + ' ready: "' +

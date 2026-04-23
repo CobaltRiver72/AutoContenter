@@ -4,6 +4,7 @@ var { extractDraftContent } = require('../utils/draft-helpers');
 var _cfg = require('../utils/config');
 var { resolveTaxonomy } = require('../utils/publish-rule-engine');
 var siteConfig = require('../utils/site-config');
+var clusteringConfig = require('../utils/clustering-config');
 
 var MODULE = 'pipeline';
 
@@ -446,9 +447,13 @@ class Pipeline {
         if (!cFeedId) { gatedClusters.push(c); continue; }
         var q = feedQualityMap[cFeedId] || {};
 
-        // min_sources override (feed-specific; global minSources already gated at SQL)
-        if (q.min_sources && c.article_count < q.min_sources) {
-          this.logger.info(MODULE, 'Rewrite skip (feed min_sources): cluster #' + c.cluster_id + ' has ' + c.article_count + ' < feed=' + cFeedId + ' min=' + q.min_sources);
+        // min_sources override (feed-specific). Post PR-2, every feed has a
+        // backfilled min_sources in quality_config so resolveClusteringConfig
+        // returns a concrete number. Legacy rows (cFeedId === null) bypass
+        // this block above.
+        var feedClusterCfg = clusteringConfig.resolveClusteringConfig(cFeedId);
+        if (c.article_count < feedClusterCfg.min_sources) {
+          this.logger.info(MODULE, 'Rewrite skip (feed min_sources): cluster #' + c.cluster_id + ' has ' + c.article_count + ' < feed=' + cFeedId + ' min=' + feedClusterCfg.min_sources);
           continue;
         }
         // auto_publish toggle + quality threshold. When OFF, the feed wants
