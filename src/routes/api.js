@@ -3142,7 +3142,41 @@ function createApiRouter(deps) {
 
       var failedCntStmt = db.prepare("SELECT COUNT(*) as count FROM drafts WHERE status = 'failed'" + failedSw.clause);
       var total = failedCntStmt.get.apply(failedCntStmt, failedSw.params).count || 0;
-      res.json({ success: true, data: mapped, total: total, page: pp.page, perPage: pp.perPage });
+
+      // Feeds-side failures: surface any active feed with notify_failure=true
+      // and consecutive_failures >= 3 so admins see stale or disconnected
+      // firehose streams in the same place as failed drafts.
+      var failingFeeds = [];
+      try {
+        var feedFailSw = _siteWhere(req.siteId, 'f');
+        var feedFailStmt = db.prepare(
+          "SELECT f.id, f.name, f.site_id, f.consecutive_failures, f.quality_config, f.last_fetched_at " +
+          "FROM feeds f " +
+          "WHERE f.is_active = 1 AND f.consecutive_failures >= 3" + feedFailSw.clause
+        );
+        var feedFailRows = feedFailStmt.all.apply(feedFailStmt, feedFailSw.params);
+        for (var ffi = 0; ffi < feedFailRows.length; ffi++) {
+          var ffr = feedFailRows[ffi];
+          var notify = true;
+          try {
+            var qcf = JSON.parse(ffr.quality_config || '{}');
+            notify = qcf.notify_failure !== false;
+          } catch (_fpErr) { notify = true; }
+          if (notify) {
+            failingFeeds.push({
+              id: ffr.id,
+              name: ffr.name,
+              site_id: ffr.site_id,
+              consecutive_failures: ffr.consecutive_failures,
+              last_fetched_at: ffr.last_fetched_at,
+            });
+          }
+        }
+      } catch (feedFailErr) {
+        logger.warn('api', 'GET /api/drafts/failed failing_feeds fetch: ' + feedFailErr.message);
+      }
+
+      res.json({ success: true, data: mapped, total: total, page: pp.page, perPage: pp.perPage, failing_feeds: failingFeeds });
     } catch (err) {
       logger.error('api', 'GET /api/drafts/failed: ' + err.message);
       res.status(500).json({ success: false, error: err.message });

@@ -1045,6 +1045,11 @@ function runMigrations() {
     try { db.exec('ALTER TABLE feeds ADD COLUMN firehose_rule_id TEXT DEFAULT NULL'); } catch (_e) {}
     try { db.exec('ALTER TABLE feeds ADD COLUMN auto_provisioned INTEGER DEFAULT 0'); } catch (_e) {}
 
+    // Running count of SSE error events since the last successful article.
+    // Resets to 0 on article receipt; Failed page surfaces feeds where the
+    // count >= 3 AND quality_config.notify_failure = true.
+    try { db.exec('ALTER TABLE feeds ADD COLUMN consecutive_failures INTEGER DEFAULT 0'); } catch (_e) {}
+
     // ─── 4. Fix drafts unique index: UNIQUE(source_url) → UNIQUE(source_url, site_id)
     //        Same URL can exist as drafts for different sites in multi-site mode.
     //        Drop both the old non-unique and UNIQUE indexes — the new composite

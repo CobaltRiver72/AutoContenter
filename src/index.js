@@ -97,6 +97,14 @@ async function boot() {
     try {
       var articleId = buffer.addArticle(article);
       if (!articleId) return;
+      // Successful ingest resets the feed's failure streak so it drops off the
+      // Failed page the next time anyone refreshes. Guarded for legacy rows
+      // with no feed_id (pre-Feeds ingests).
+      if (article && article.feed_id) {
+        try {
+          db.prepare('UPDATE feeds SET consecutive_failures = 0 WHERE id = ? AND consecutive_failures > 0').run(article.feed_id);
+        } catch (_resetErr) { /* non-critical */ }
+      }
       var trendsMatch = null;
       if (trends.enabled && trends.ready) {
         trendsMatch = trends.matchArticle(article);
@@ -120,6 +128,18 @@ async function boot() {
   }
 
   feedsPool.on('article', _ingestArticle);
+
+  // Track firehose SSE error events so Feeds with notify_failure=true can
+  // surface on the Failed page after 3 consecutive failures. Only 'error'
+  // events increment — a successful reconnect that yields an article resets
+  // via _ingestArticle above.
+  feedsPool.on('status', function (st) {
+    if (!st || !st.feedId) return;
+    if (st.type !== 'error') return;
+    try {
+      db.prepare('UPDATE feeds SET consecutive_failures = consecutive_failures + 1 WHERE id = ?').run(st.feedId);
+    } catch (_incErr) { /* non-critical */ }
+  });
 
   /**
    * Process all queued articles for similarity in one batch.
