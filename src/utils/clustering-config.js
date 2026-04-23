@@ -22,6 +22,13 @@ var _stmtGet = null;
 var _cache = new Map();
 var _CACHE_TTL_MS = 5000;
 
+// Separate cache for getPrefilterFloor() — the SQL pre-filter floor used by
+// the pipeline's readyClustersSql. Same TTL as the per-feed cache so there's
+// one mental model for operators. Invalidated alongside the per-feed cache
+// on any write to feeds.quality_config (create / update / delete).
+var _floorCache = null;
+var _floorCacheAt = 0;
+
 /**
  * Initialise with a database reference. Call once at boot, after db is open.
  * Safe to call more than once (e.g. after a memory-watchdog db swap).
@@ -31,6 +38,8 @@ function init(db) {
   _db = db;
   _stmtGet = null;
   _cache.clear();
+  _floorCache = null;
+  _floorCacheAt = 0;
 }
 
 function _toBool(v, fallback) {
@@ -112,6 +121,74 @@ function invalidateClusteringCache(feedId) {
 }
 
 /**
+ * Compute the LOOSEST (minimum) min_sources + similarity_threshold across
+ * every row in feeds — the floor for pipeline.js's SQL pre-filter. A feed
+ * configured more permissive than the global would otherwise be silently
+ * excluded at the SQL layer before the per-feed resolver ever sees its
+ * clusters. The per-feed resolver still applies the precise gate downstream;
+ * this floor only guarantees the candidate reaches it.
+ *
+ * Layering:
+ *   each feed: q.min_sources || globals.min_sources   (same for similarity)
+ *   floor = min(each feed's effective value)
+ *   clamped to [1, 0] respectively for sanity.
+ *
+ * @returns {{ min_sources:number, similarity_threshold:number }}
+ */
+function _computeFloor() {
+  var defaults = _globalDefaults();
+  var fallback = {
+    min_sources: Math.max(1, Math.floor(defaults.min_sources)),
+    similarity_threshold: Math.max(0, defaults.similarity_threshold),
+  };
+
+  if (!_db) return fallback;
+
+  var rows;
+  try {
+    rows = _db.prepare('SELECT quality_config FROM feeds').all();
+  } catch (_e) { return fallback; }
+
+  if (!rows.length) return fallback;
+
+  var loosestMs = defaults.min_sources;
+  var loosestSt = defaults.similarity_threshold;
+
+  for (var i = 0; i < rows.length; i++) {
+    var q = {};
+    try { q = JSON.parse(rows[i].quality_config || '{}'); } catch (_pe) { q = {}; }
+
+    var ms = (typeof q.min_sources === 'number' && isFinite(q.min_sources))
+      ? q.min_sources
+      : defaults.min_sources;
+    var st = (typeof q.similarity_threshold === 'number' && isFinite(q.similarity_threshold))
+      ? q.similarity_threshold
+      : defaults.similarity_threshold;
+
+    if (ms < loosestMs) loosestMs = ms;
+    if (st < loosestSt) loosestSt = st;
+  }
+
+  return {
+    min_sources: Math.max(1, Math.floor(loosestMs)),
+    similarity_threshold: Math.max(0, loosestSt),
+  };
+}
+
+function getPrefilterFloor() {
+  var now = Date.now();
+  if (_floorCache && (now - _floorCacheAt) < _CACHE_TTL_MS) return _floorCache;
+  _floorCache = _computeFloor();
+  _floorCacheAt = now;
+  return _floorCache;
+}
+
+function invalidateFloorCache() {
+  _floorCache = null;
+  _floorCacheAt = 0;
+}
+
+/**
  * Compute the max buffer_hours across all active feeds — used by the
  * similarity prefetch to cover every feed's window in a single query.
  * Falls back to the global BUFFER_HOURS if nothing resolves.
@@ -143,4 +220,6 @@ module.exports = {
   resolveClusteringConfig: resolveClusteringConfig,
   invalidateClusteringCache: invalidateClusteringCache,
   getMaxBufferHours: getMaxBufferHours,
+  getPrefilterFloor: getPrefilterFloor,
+  invalidateFloorCache: invalidateFloorCache,
 };

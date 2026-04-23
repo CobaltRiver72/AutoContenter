@@ -7218,6 +7218,14 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
           logger.warn('api', 'feedsPool.addFeed failed: ' + e.message);
         });
       }
+      // A new feed can loosen the SQL pre-filter floor (e.g. min_sources=1
+      // when the global is 2). Drop the floor cache so the next tick sees
+      // the new feed's contribution without waiting for the 5 s TTL.
+      try {
+        var _ccCreate = require('../utils/clustering-config');
+        _ccCreate.invalidateClusteringCache(feedId);
+        _ccCreate.invalidateFloorCache();
+      } catch (_icErr) { /* non-critical */ }
       res.json({ ok: true, feed: _parseFeedRow(row) });
     } catch (err) {
       logger.error('api', 'Failed to create feed: ' + err.message);
@@ -7270,10 +7278,13 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         feedId
       );
 
-      // Drop the clustering-config cache for this feed so the next pipeline
-      // tick reads the saved values instead of waiting for the 5s TTL.
+      // Drop both clustering caches so the next pipeline tick reads the saved
+      // values instead of waiting for the 5 s TTL. Per-feed cache covers the
+      // gate; floor cache covers the SQL pre-filter threshold.
       try {
-        require('../utils/clustering-config').invalidateClusteringCache(feedId);
+        var _cc = require('../utils/clustering-config');
+        _cc.invalidateClusteringCache(feedId);
+        _cc.invalidateFloorCache();
       } catch (_icErr) { /* non-critical */ }
 
       // Rule sync. Three branches when we have a reason to touch Ahrefs:
@@ -7385,6 +7396,17 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
 
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
+
+      // Deactivating the loosest feed can tighten the SQL pre-filter floor
+      // (getMaxBufferHours filters on is_active=1 today, but getPrefilterFloor
+      // reads ALL rows so soft-delete still counts — invalidate to be safe if
+      // that policy flips). Clustering cache drop too for symmetry.
+      try {
+        var _ccDel = require('../utils/clustering-config');
+        _ccDel.invalidateClusteringCache(feedId);
+        _ccDel.invalidateFloorCache();
+      } catch (_icErr) { /* non-critical */ }
+
       res.json({ ok: true, message: 'Feed paused', feedId: feedId });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -7429,6 +7451,15 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
       db.prepare('DELETE FROM feeds WHERE id = ?').run(feedId);
+
+      // Removing a feed (hard delete) can tighten the SQL pre-filter floor
+      // if it was the loosest contributor. Drop both caches.
+      try {
+        var _ccDestroy = require('../utils/clustering-config');
+        _ccDestroy.invalidateClusteringCache(feedId);
+        _ccDestroy.invalidateFloorCache();
+      } catch (_icErr) { /* non-critical */ }
+
       res.json({ ok: true, message: 'Feed destroyed', feedId: feedId });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });

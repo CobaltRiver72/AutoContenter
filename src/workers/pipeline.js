@@ -270,8 +270,14 @@ class Pipeline {
         return;
       }
 
-      var minSources = _minSources();
-      var minSim = _minSimilarity();
+      // SQL pre-filter floor = loosest effective threshold across all feeds,
+      // NOT the global. This lets a feed configured more permissive than the
+      // global actually receive its candidates; the per-feed resolver at the
+      // cluster gate below does the precise filtering in JS. (PR 4.)
+      var prefilterFloor = clusteringConfig.getPrefilterFloor();
+      var minSources = prefilterFloor.min_sources;
+      var minSim = prefilterFloor.similarity_threshold;
+      this._logPrefilterFloor(prefilterFloor);
       var blockedKw = _blockedKeywords();
 
       // Slots available this tick (bounded by rate limits and concurrency)
@@ -1398,6 +1404,21 @@ class Pipeline {
     }
   }
 
+  // Logs the SQL pre-filter floor on first call and whenever it changes. Lets
+  // an operator read the app log to answer "why aren't my feed's loose
+  // settings taking effect" without opening the DB.
+  _logPrefilterFloor(floor) {
+    if (!floor) return;
+    var sig = floor.min_sources + '|' + floor.similarity_threshold;
+    if (this._lastPrefilterFloorSig === sig) return;
+    this._lastPrefilterFloorSig = sig;
+    this.logger.info(
+      MODULE,
+      'prefilter floor: min_sources=' + floor.min_sources +
+      ', similarity_threshold=' + floor.similarity_threshold
+    );
+  }
+
   // Throttled log when _publishLoop skips on rate limit. Logs at most once per
   // 120s per reason so the log panel stays legible during a long cooldown.
   _logPublishSkip(state) {
@@ -1447,6 +1468,15 @@ class Pipeline {
     }
 
     this.logger.info(MODULE, 'Pipeline V2 initialized (extract:sequential rewrite:manual publish:rate-limited)');
+
+    // Emit the resolved SQL pre-filter floor once at boot so an operator can
+    // answer "why isn't my looser feed publishing" from the log alone. The
+    // rewrite loop logs it again whenever the value changes.
+    try {
+      this._logPrefilterFloor(clusteringConfig.getPrefilterFloor());
+    } catch (e) {
+      this.logger.warn(MODULE, 'Could not log initial prefilter floor: ' + e.message);
+    }
   }
 
   start() {
