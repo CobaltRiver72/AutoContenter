@@ -538,7 +538,9 @@ function createApiRouter(deps) {
       var avgResult = db.prepare('SELECT AVG(article_count) as avg FROM clusters').get();
       var avgArticles = avgResult && avgResult.avg ? Math.round(avgResult.avg * 10) / 10 : 0;
 
-      var bufferHours = require('../utils/config').getConfig().BUFFER_HOURS || 6;
+      // Display window uses the max across active feeds so the dashboard
+      // counts every article that ANY feed could still be matching against.
+      var bufferHours = require('../utils/clustering-config').getMaxBufferHours();
       var bufferSize = db.prepare(
         "SELECT COUNT(*) as count FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours')"
       ).get(bufferHours).count;
@@ -570,7 +572,10 @@ function createApiRouter(deps) {
 
   router.post('/clusters/recluster', function (req, res) {
     try {
-      var bufferHours = require('../utils/config').getConfig().BUFFER_HOURS || 6;
+      // Recluster spans all feeds, so prefetch the max window and rely on the
+      // similarity engine's per-feed resolution + feed-id filter below.
+      var clusteringCfg = require('../utils/clustering-config');
+      var bufferHours = clusteringCfg.getMaxBufferHours();
       var articles = db.prepare(
         "SELECT * FROM articles WHERE received_at >= datetime('now', '-' || ? || ' hours') AND cluster_id IS NULL ORDER BY received_at ASC"
       ).all(bufferHours);
@@ -586,8 +591,20 @@ function createApiRouter(deps) {
         var article = articles[i];
         if (!article.fingerprint || article.cluster_id) continue;
 
-        var matches = similarity.findMatches(article, articles);
-        if (matches.length >= (require('../utils/config').getConfig().MIN_SOURCES_THRESHOLD || 2) - 1) {
+        // Scope candidates to this article's feed and time window; legacy
+        // (no feed_id) articles stay scoped to other legacy rows.
+        var perArticleCfg = clusteringCfg.resolveClusteringConfig(article.feed_id);
+        var cutoffMs = Date.now() - perArticleCfg.buffer_hours * 3600 * 1000;
+        var candidates = articles.filter(function (a) {
+          var feedMatch = article.feed_id ? (a.feed_id === article.feed_id) : !a.feed_id;
+          if (!feedMatch) return false;
+          if (!a.received_at) return true;
+          var recvMs = new Date(String(a.received_at).replace(' ', 'T') + 'Z').getTime();
+          if (isNaN(recvMs)) return true;
+          return recvMs >= cutoffMs;
+        });
+        var matches = similarity.findMatches(article, candidates);
+        if (matches.length >= perArticleCfg.min_sources - 1) {
           var cluster = similarity.createOrUpdateCluster(article, matches, null);
           if (cluster) {
             clustersCreated++;
@@ -3142,7 +3159,41 @@ function createApiRouter(deps) {
 
       var failedCntStmt = db.prepare("SELECT COUNT(*) as count FROM drafts WHERE status = 'failed'" + failedSw.clause);
       var total = failedCntStmt.get.apply(failedCntStmt, failedSw.params).count || 0;
-      res.json({ success: true, data: mapped, total: total, page: pp.page, perPage: pp.perPage });
+
+      // Feeds-side failures: surface any active feed with notify_failure=true
+      // and consecutive_failures >= 3 so admins see stale or disconnected
+      // firehose streams in the same place as failed drafts.
+      var failingFeeds = [];
+      try {
+        var feedFailSw = _siteWhere(req.siteId, 'f');
+        var feedFailStmt = db.prepare(
+          "SELECT f.id, f.name, f.site_id, f.consecutive_failures, f.quality_config, f.last_fetched_at " +
+          "FROM feeds f " +
+          "WHERE f.is_active = 1 AND f.consecutive_failures >= 3" + feedFailSw.clause
+        );
+        var feedFailRows = feedFailStmt.all.apply(feedFailStmt, feedFailSw.params);
+        for (var ffi = 0; ffi < feedFailRows.length; ffi++) {
+          var ffr = feedFailRows[ffi];
+          var notify = true;
+          try {
+            var qcf = JSON.parse(ffr.quality_config || '{}');
+            notify = qcf.notify_failure !== false;
+          } catch (_fpErr) { notify = true; }
+          if (notify) {
+            failingFeeds.push({
+              id: ffr.id,
+              name: ffr.name,
+              site_id: ffr.site_id,
+              consecutive_failures: ffr.consecutive_failures,
+              last_fetched_at: ffr.last_fetched_at,
+            });
+          }
+        }
+      } catch (feedFailErr) {
+        logger.warn('api', 'GET /api/drafts/failed failing_feeds fetch: ' + feedFailErr.message);
+      }
+
+      res.json({ success: true, data: mapped, total: total, page: pp.page, perPage: pp.perPage, failing_feeds: failingFeeds });
     } catch (err) {
       logger.error('api', 'GET /api/drafts/failed: ' + err.message);
       res.status(500).json({ success: false, error: err.message });
@@ -7061,6 +7112,21 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         '  (site_id, name, kind, is_active, source_config, dest_config, quality_config, firehose_token) ' +
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
       );
+      // Seed the four clustering keys from current globals so the feed's
+      // Configuration tab shows concrete starting values. Explicit values
+      // sent in the request body take precedence — merge (don't overwrite).
+      var cfgSeed = require('../utils/config');
+      var seededQuality = Object.assign({
+        min_sources:                parseInt(cfgSeed.get('MIN_SOURCES_THRESHOLD'), 10) || 2,
+        similarity_threshold:       parseFloat(cfgSeed.get('SIMILARITY_THRESHOLD')) || 0.20,
+        buffer_hours:               parseFloat(cfgSeed.get('BUFFER_HOURS')) || 2.5,
+        allow_same_domain_clusters: (function () {
+          var v = cfgSeed.get('ALLOW_SAME_DOMAIN_CLUSTERS');
+          if (typeof v === 'boolean') return v;
+          return String(v).toLowerCase() === 'true' || v === '1';
+        })(),
+      }, body.quality_config || {});
+
       var info = insert.run(
         body.site_id,
         body.name,
@@ -7068,7 +7134,7 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         body.is_active === false ? 0 : 1,
         JSON.stringify(body.source_config  || {}),
         JSON.stringify(body.dest_config    || {}),
-        JSON.stringify(body.quality_config || {}),
+        JSON.stringify(seededQuality),
         providedToken || null
       );
       var feedId = info.lastInsertRowid;
@@ -7178,6 +7244,12 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         next.source_config, next.dest_config, next.quality_config,
         feedId
       );
+
+      // Drop the clustering-config cache for this feed so the next pipeline
+      // tick reads the saved values instead of waiting for the 5s TTL.
+      try {
+        require('../utils/clustering-config').invalidateClusteringCache(feedId);
+      } catch (_icErr) { /* non-critical */ }
 
       // Rule sync. Three branches when we have a reason to touch Ahrefs:
       //   1. Existing rule on file + source_config changed → updateRule in

@@ -3,6 +3,7 @@
 var axios = require('axios');
 var path = require('path');
 var { assertSafeUrl, safeAxiosOptions, sanitizeAxiosError } = require('../utils/safe-http');
+var siteConfig = require('../utils/site-config');
 
 // Timeout for WordPress API calls — read from config at call time for hot-reload
 var _cfg = require('../utils/config');
@@ -441,16 +442,32 @@ class WordPressPublisher {
   async publish(rewrittenArticle, cluster, db, signal) {
     var wpImageId = null;
 
-    // Step 1: Upload featured image (if available)
-    var featuredImageUrl = rewrittenArticle.featuredImage || null;
+    // Resolve per-site featured-image mode. 'auto' (default) = behavior below;
+    // 'none' = skip the upload + publish with featured_media=0; 'ai' falls
+    // through to 'auto' with a TODO warn until image generation is wired up.
+    var featuredMode = 'auto';
+    try {
+      featuredMode = String(siteConfig.getSiteConfig(this.siteId, 'SITE_FEATURED_IMAGE_MODE') || 'auto').toLowerCase();
+    } catch (_sfErr) { /* fall back to 'auto' */ }
 
-    // Try to extract featured image from cluster articles
-    if (!featuredImageUrl && cluster && cluster.articles) {
-      for (var ai = 0; ai < cluster.articles.length; ai++) {
-        var a = cluster.articles[ai];
-        if (a.featured_image) { featuredImageUrl = a.featured_image; break; }
-        var imgUrl = extractImageUrl(a.content_markdown || a.content || '');
-        if (imgUrl) { featuredImageUrl = imgUrl; break; }
+    if (featuredMode === 'ai') {
+      this.logger.warn('publisher', 'SITE_FEATURED_IMAGE_MODE=ai not implemented; falling back to auto');
+      featuredMode = 'auto';
+    }
+
+    // Step 1: Upload featured image (if available)
+    var featuredImageUrl = null;
+    if (featuredMode !== 'none') {
+      featuredImageUrl = rewrittenArticle.featuredImage || null;
+
+      // Try to extract featured image from cluster articles
+      if (!featuredImageUrl && cluster && cluster.articles) {
+        for (var ai = 0; ai < cluster.articles.length; ai++) {
+          var a = cluster.articles[ai];
+          if (a.featured_image) { featuredImageUrl = a.featured_image; break; }
+          var imgUrl = extractImageUrl(a.content_markdown || a.content || '');
+          if (imgUrl) { featuredImageUrl = imgUrl; break; }
+        }
       }
     }
 
@@ -495,6 +512,38 @@ class WordPressPublisher {
     var wpAuthorId = rewrittenArticle.wpAuthorId || parseInt(this.config.WP_AUTHOR_ID, 10) || 1;
     var wpPrimaryCatId = rewrittenArticle.wpPrimaryCatId || wpCategories[0];
 
+    // Per-site canonical. 'self' (default) = WP uses post permalink; 'first' =
+    // point canonical at the first-source URL from the cluster so dup-content
+    // signals flow to the original publisher. Dual-write Yoast + Rank Math
+    // keys to match existing meta conventions above.
+    var canonicalMode = 'self';
+    try {
+      canonicalMode = String(siteConfig.getSiteConfig(this.siteId, 'SITE_CANONICAL_MODE') || 'self').toLowerCase();
+    } catch (_cmErr) { /* fall back to 'self' */ }
+
+    var canonicalUrl = '';
+    if (canonicalMode === 'first' && cluster && Array.isArray(cluster.articles) && cluster.articles.length) {
+      for (var ci = 0; ci < cluster.articles.length; ci++) {
+        if (cluster.articles[ci] && cluster.articles[ci].url) {
+          canonicalUrl = cluster.articles[ci].url;
+          break;
+        }
+      }
+    }
+
+    var postMeta = {
+      _yoast_wpseo_metadesc: rewrittenArticle.metaDescription || '',
+      _yoast_wpseo_focuskw: rewrittenArticle.targetKeyword || '',
+      _yoast_wpseo_primary_category: String(wpPrimaryCatId),
+      rank_math_description: rewrittenArticle.metaDescription || '',
+      rank_math_focus_keyword: rewrittenArticle.targetKeyword || '',
+      rank_math_primary_category: String(wpPrimaryCatId),
+    };
+    if (canonicalUrl) {
+      postMeta._yoast_wpseo_canonical = canonicalUrl;
+      postMeta.rank_math_canonical_url = canonicalUrl;
+    }
+
     var postData = {
       title: rewrittenArticle.title,
       slug: rewrittenArticle.slug || '',
@@ -505,14 +554,7 @@ class WordPressPublisher {
       categories: wpCategories,
       tags: wpTags,
       featured_media: wpImageId || 0,
-      meta: {
-        _yoast_wpseo_metadesc: rewrittenArticle.metaDescription || '',
-        _yoast_wpseo_focuskw: rewrittenArticle.targetKeyword || '',
-        _yoast_wpseo_primary_category: String(wpPrimaryCatId),
-        rank_math_description: rewrittenArticle.metaDescription || '',
-        rank_math_focus_keyword: rewrittenArticle.targetKeyword || '',
-        rank_math_primary_category: String(wpPrimaryCatId),
-      },
+      meta: postMeta,
     };
 
     // Optional admin-configured comment/ping status — empty means "use WP site default"

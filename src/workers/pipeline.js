@@ -4,6 +4,7 @@ var { extractDraftContent } = require('../utils/draft-helpers');
 var _cfg = require('../utils/config');
 var { resolveTaxonomy } = require('../utils/publish-rule-engine');
 var siteConfig = require('../utils/site-config');
+var clusteringConfig = require('../utils/clustering-config');
 
 var MODULE = 'pipeline';
 
@@ -52,6 +53,32 @@ function _autoRewriteHourlyLimit(){ return parseInt(_cfg.get('AUTO_REWRITE_HOURL
 function _minSources()            { return parseInt(_cfg.get('MIN_SOURCES_THRESHOLD'), 10) || 2; }
 function _minSimilarity()         { return parseFloat(_cfg.get('SIMILARITY_THRESHOLD')) || 0.30; }
 function _blockedKeywords()       { return []; }
+
+// SITE_PUBLISH_SCHEDULE shape (see public/js/site-settings-page.js:375-379):
+//   { days: [Mo,Tu,We,Th,Fr,Sa,Su], windowStart: 'HH:MM', windowEnd: 'HH:MM' }
+// `days` is a 7-element boolean array indexed Mo=0..Su=6. JS Date.getDay()
+// uses 0=Sun..6=Sat, so we translate with (jsDay + 6) % 7.
+// TODO(timezone): per-site TZ support — using server local time for now.
+function _isWithinPublishWindow(schedule, now) {
+  if (!schedule || typeof schedule !== 'object') return true;
+
+  if (Array.isArray(schedule.days) && schedule.days.length === 7) {
+    var uiDayIndex = (now.getDay() + 6) % 7;
+    if (!schedule.days[uiDayIndex]) return false;
+  }
+
+  if (schedule.windowStart && schedule.windowEnd) {
+    var startParts = String(schedule.windowStart).split(':');
+    var endParts = String(schedule.windowEnd).split(':');
+    if (startParts.length !== 2 || endParts.length !== 2) return true;
+    var startMin = (parseInt(startParts[0], 10) || 0) * 60 + (parseInt(startParts[1], 10) || 0);
+    var endMin = (parseInt(endParts[0], 10) || 0) * 60 + (parseInt(endParts[1], 10) || 0);
+    var nowMin = now.getHours() * 60 + now.getMinutes();
+    if (nowMin < startMin || nowMin > endMin) return false;
+  }
+
+  return true;
+}
 
 /**
  * Pipeline V2: Decoupled multi-stage workers.
@@ -420,10 +447,30 @@ class Pipeline {
         if (!cFeedId) { gatedClusters.push(c); continue; }
         var q = feedQualityMap[cFeedId] || {};
 
-        // min_sources override (feed-specific; global minSources already gated at SQL)
-        if (q.min_sources && c.article_count < q.min_sources) {
-          this.logger.info(MODULE, 'Rewrite skip (feed min_sources): cluster #' + c.cluster_id + ' has ' + c.article_count + ' < feed=' + cFeedId + ' min=' + q.min_sources);
+        // min_sources override (feed-specific). Post PR-2, every feed has a
+        // backfilled min_sources in quality_config so resolveClusteringConfig
+        // returns a concrete number. Legacy rows (cFeedId === null) bypass
+        // this block above.
+        var feedClusterCfg = clusteringConfig.resolveClusteringConfig(cFeedId);
+        if (c.article_count < feedClusterCfg.min_sources) {
+          this.logger.info(MODULE, 'Rewrite skip (feed min_sources): cluster #' + c.cluster_id + ' has ' + c.article_count + ' < feed=' + cFeedId + ' min=' + feedClusterCfg.min_sources);
           continue;
+        }
+        // auto_publish toggle + quality threshold. When OFF, the feed wants
+        // manual review — skip the auto-rewrite so the cluster stays in
+        // 'draft' for an admin to promote. When ON, require avg_similarity
+        // (range 0-1) to meet the configured threshold (default 0.8).
+        if (q.auto_publish === false) {
+          this.logger.info(MODULE, 'Rewrite skip (feed auto_publish=off): cluster #' + c.cluster_id + ' feed=' + cFeedId);
+          continue;
+        }
+        if (q.auto_publish === true) {
+          var autoPubThreshold = (typeof q.auto_publish_quality === 'number') ? q.auto_publish_quality : 0.8;
+          var clusterQuality = (typeof c.avg_similarity === 'number') ? c.avg_similarity : 0;
+          if (clusterQuality < autoPubThreshold) {
+            this.logger.info(MODULE, 'Rewrite skip (feed auto_publish quality): cluster #' + c.cluster_id + ' quality=' + clusterQuality.toFixed(2) + ' < feed=' + cFeedId + ' threshold=' + autoPubThreshold);
+            continue;
+          }
         }
         // daily_limit — cap auto-publishes per feed per UTC day. Hit = stop.
         if (q.daily_limit && (feedPublishedTodayMap[cFeedId] || 0) >= q.daily_limit) {
@@ -1031,6 +1078,21 @@ class Pipeline {
         return;
       }
 
+      // Per-site publish schedule gate. If the site configured an active-days
+      // or time-window restriction and we're outside it, leave the draft in
+      // 'ready' state for the next tick. No mutation — purely check-and-defer.
+      try {
+        var scheduleRaw = siteConfig.getSiteConfig(publishSiteId, 'SITE_PUBLISH_SCHEDULE');
+        if (scheduleRaw) {
+          var schedule = null;
+          try { schedule = JSON.parse(scheduleRaw); } catch (_spSyntax) { schedule = null; }
+          if (schedule && !_isWithinPublishWindow(schedule, new Date())) {
+            this.logger.debug(MODULE, 'Publish deferred for site ' + publishSiteId + ' — outside SITE_PUBLISH_SCHEDULE window');
+            return;
+          }
+        }
+      } catch (_spsErr) { /* ignore — publish proceeds */ }
+
       // Atomic CAS lock (lease window must match _leaseMins()).
       // The WHERE clause guarantees only one worker wins the race — if another
       // worker grabbed this draft between our SELECT and UPDATE, changes === 0
@@ -1063,6 +1125,22 @@ class Pipeline {
       // Build the objects the publisher expects
       var taxonomy = resolveTaxonomy(readyPrimary, this.db, require('../utils/config').getConfig());
 
+      // Site-level defaults (below Feed dest_config, above global WP_POST_STATUS
+      // / WP_AUTHOR_ID). Feed takes precedence: admins configuring a feed-level
+      // author/status mean it, so we don't let a site-wide knob override them.
+      var siteScope = readyPrimary.site_id || 1;
+      try {
+        var sitePostStatus = siteConfig.getSiteConfig(siteScope, 'SITE_POST_STATUS');
+        if (sitePostStatus) {
+          if (sitePostStatus === 'future') {
+            this.logger.warn(MODULE, 'SITE_POST_STATUS=future not fully implemented; publishing now for site ' + siteScope);
+            taxonomy.postStatus = 'publish';
+          } else {
+            taxonomy.postStatus = sitePostStatus;
+          }
+        }
+      } catch (_spsErr) { /* ignore — fall back to resolveTaxonomy default */ }
+
       // Feed-mode: override classifier/publish-rules taxonomy with the Feed's
       // explicit dest_config. A Feed already decided category/author/tags/status
       // at creation time — we respect that without letting the AI classifier
@@ -1086,6 +1164,18 @@ class Pipeline {
           this.logger.warn(MODULE, 'Feed dest_config parse failed for feed ' + readyPrimary.feed_id + ': ' + feedDestErr.message);
         }
       }
+
+      // Site-level author mode. 'admin' forces the site's WP_AUTHOR_ID regardless
+      // of feed override; 'auto' (default) keeps whatever the feed or
+      // resolveTaxonomy already picked. WP_AUTHOR_ID goes through getSiteConfig
+      // so per-site overrides win before falling back to the global setting.
+      try {
+        var authorMode = siteConfig.getSiteConfig(siteScope, 'SITE_AUTHOR_MODE') || 'auto';
+        if (authorMode === 'admin') {
+          var siteAdminAuthor = parseInt(siteConfig.getSiteConfig(siteScope, 'WP_AUTHOR_ID'), 10);
+          if (siteAdminAuthor > 0) taxonomy.authorId = siteAdminAuthor;
+        }
+      } catch (_samErr) { /* ignore */ }
 
       var rewrittenArticle = {
         title: readyPrimary.rewritten_title || readyPrimary.source_title,

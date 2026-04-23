@@ -26,6 +26,11 @@ var DEFAULTS = {
   ENABLE_FALLBACK: 'true',
   MAX_TOKENS: '4096',
   TEMPERATURE: '0.7',
+  // Clustering defaults. After PR 2, these are SEED VALUES for newly created
+  // feeds (copied into feeds.quality_config at creation) and FALLBACKS for
+  // legacy rows with no feed_id. Per-feed overrides always win — edit via
+  // Feed → Configuration. Pipeline Settings UI no longer exposes these; they
+  // stay editable via /api/settings as an emergency safety net.
   MIN_SOURCES_THRESHOLD: '2',
   SIMILARITY_THRESHOLD: '0.20',
   ALLOW_SAME_DOMAIN_CLUSTERS: 'true',

@@ -1941,7 +1941,7 @@
 
     fetchApi('/api/drafts/failed?page=' + failedCurrentPage)
       .then(function (data) {
-        renderFailedTable(container, data.data || []);
+        renderFailedTable(container, data.data || [], data.failing_feeds || []);
         updateFailedBadge(data.total || 0);
         if (pagination && typeof renderPagination === 'function') {
           renderPagination(pagination, data.total || 0, data.page || 1, data.perPage || 20, function (p) {
@@ -1955,10 +1955,29 @@
       .finally(function () { _loadFailedInFlight = false; });
   }
 
-  function renderFailedTable(container, rows) {
+  function renderFailingFeedsBanner(feeds) {
+    if (!feeds || !feeds.length) return '';
+    var rows = feeds.map(function (f) {
+      var missStreak = f.consecutive_failures || 0;
+      return '<li style="margin-bottom:4px">' +
+        '<strong>' + escapeHtml(f.name || ('Feed #' + f.id)) + '</strong> — ' +
+        missStreak + ' consecutive fetch failure' + (missStreak === 1 ? '' : 's') +
+        (f.last_fetched_at ? ' · last article ' + escapeHtml(f.last_fetched_at) : '') +
+      '</li>';
+    }).join('');
+    return '<div class="feed-failed-banner" style="background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.4);' +
+      'border-radius:8px;padding:12px 14px;margin-bottom:16px;color:var(--danger,#dc2626);font-size:13px">' +
+      '<div style="font-weight:600;margin-bottom:6px">&#9888; ' + feeds.length +
+      ' feed' + (feeds.length === 1 ? '' : 's') + ' missed ≥ 3 consecutive fetches</div>' +
+      '<ul style="margin:0;padding-left:18px;line-height:1.5">' + rows + '</ul>' +
+    '</div>';
+  }
+
+  function renderFailedTable(container, rows, failingFeeds) {
     if (!container) return;
+    var bannerHtml = renderFailingFeedsBanner(failingFeeds);
     if (!rows || rows.length === 0) {
-      container.innerHTML =
+      container.innerHTML = bannerHtml +
         '<div class="feed-empty">' +
           '<div class="feed-empty-icon">&#9888;</div>' +
           '<div class="feed-empty-title">No failed drafts</div>' +
@@ -1967,7 +1986,7 @@
       return;
     }
 
-    var html = '<table class="data-table">' +
+    var html = bannerHtml + '<table class="data-table">' +
       '<thead><tr>' +
         '<th>Title</th>' +
         '<th>Domain</th>' +
@@ -4847,7 +4866,11 @@
     // Standard groups (AI is handled by its own section now)
     var standardGroups = {
       'Firehose': ['FIREHOSE_TOKEN'],
-      'Pipeline': ['MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
+      // Clustering settings (MIN_SOURCES_THRESHOLD, SIMILARITY_THRESHOLD,
+      // BUFFER_HOURS, ALLOW_SAME_DOMAIN_CLUSTERS) moved to per-feed — edit
+      // each feed's Configuration tab. They remain in settings/config as
+      // seed values for new feeds and as legacy fallbacks.
+      'Pipeline': ['MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
       'InfraNodus': ['INFRANODUS_ENABLED', 'INFRANODUS_API_KEY'],
       'Jina AI Reader (Extraction Fallback)': ['JINA_ENABLED', 'JINA_API_KEY'],
@@ -4866,7 +4889,6 @@
     var booleanKeys = {
       TRENDS_ENABLED: true,
       INFRANODUS_ENABLED: true,
-      ALLOW_SAME_DOMAIN_CLUSTERS: true,
       JINA_ENABLED: true,
     };
 
@@ -6361,6 +6383,7 @@
     'fdCfgQuery':               function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('query', el.value); },
     'fdCfgMinSrc':              function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('minSrc', Number(el.value)); },
     'fdCfgSim':                 function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('sim', Number(el.value)); },
+    'fdCfgBufferHours':         function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('bufferHours', Number(el.value) || 0); },
     'fdSetName':                function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('name', el.value); },
     'fdSetDescription':         function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('description', el.value); },
     'ssSchedStart':             function (el) { if (window.__siteSettings) window.__siteSettings.setSchedStart(el.value); },
@@ -6380,6 +6403,7 @@
     'fdToggleHideBelow':  function (el) { if (window.__feedDetail) window.__feedDetail.toggleHideBelow(!!el.checked); },
     'fdSetAutoPub':       function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('autoPub', !!el.checked); },
     'fdSetNotify':        function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('notifyFail', !!el.checked); },
+    'fdCfgAllowSame':     function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('allowSameDomain', !!el.checked); },
     'editorToggleCitations': function (el) { if (window.__editorPage) window.__editorPage.toggleCitations(!!el.checked); },
     'editorToggleSeo':       function (el) { if (window.__editorPage) window.__editorPage.toggleSeo(!!el.checked); },
     'ssSelectCfg':           function (el) { if (window.__siteSettings) window.__siteSettings.selectCfg(el.dataset.field, el.value); },

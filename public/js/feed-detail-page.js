@@ -21,7 +21,7 @@
     loading: false,
     // editable shadows used by Configuration / Settings tabs so we can
     // diff against the source-of-truth _state.feed on save
-    cfg: { query: '', minSrc: 2, sim: 72 },
+    cfg: { query: '', minSrc: 2, sim: 72, bufferHours: 2.5, allowSameDomain: true },
     setg: { name: '', description: '', autoPub: false, notifyFail: true },
   };
   var _pollTimer = null;
@@ -117,6 +117,8 @@
           query:  sc.query || '',
           minSrc: qc.min_sources || 2,
           sim:    Math.round((qc.similarity_threshold || 0.72) * 100),
+          bufferHours:     (typeof qc.buffer_hours === 'number') ? qc.buffer_hours : 2.5,
+          allowSameDomain: (typeof qc.allow_same_domain_clusters === 'boolean') ? qc.allow_same_domain_clusters : true,
         };
         _state.setg = {
           name: _state.feed.name || '',
@@ -349,6 +351,23 @@
           '<input type="range" class="sh-range" min="50" max="100" value="' + cfg.sim + '" data-input="fdCfgSim"/>' +
         '</div>' +
 
+        '<div style="margin-top:14px">' +
+          '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px">' +
+            '<span>Buffer window (hours)</span>' +
+            '<span class="sh-tabular" style="color:var(--sh-text-3)">' + cfg.bufferHours + 'h</span>' +
+          '</div>' +
+          '<input type="number" class="sh-input" min="0.5" max="48" step="0.5" value="' + cfg.bufferHours + '" data-input="fdCfgBufferHours" style="width:100%;max-width:140px"/>' +
+          '<div class="sh-field-hint">How far back to look when clustering. Shorter = fresher only; longer = catches slow-rolling stories.</div>' +
+        '</div>' +
+
+        '<div style="margin-top:14px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">' +
+          '<div style="flex:1">' +
+            '<div style="font-size:13px;font-weight:500">Allow same-domain clusters</div>' +
+            '<div class="sh-field-hint" style="margin-top:4px">When on, multiple articles from the same outlet can cluster together. Turn off to require cross-source confirmation.</div>' +
+          '</div>' +
+          '<input type="checkbox" class="sh-toggle" ' + (cfg.allowSameDomain ? 'checked' : '') + ' data-change="fdCfgAllowSame"/>' +
+        '</div>' +
+
         '<div style="margin-top:28px;display:flex;gap:8px">' +
           '<button class="sh-btn sh-btn-primary" data-click="fdSaveConfig"' + (_state.saving ? ' disabled' : '') + '>' + (_state.saving ? 'Saving…' : 'Save changes') + '</button>' +
           '<button class="sh-btn" data-click="fdResetConfig">Reset</button>' +
@@ -506,6 +525,8 @@
       quality_config: Object.assign({}, _state.feed.quality_config, {
         min_sources: _state.cfg.minSrc,
         similarity_threshold: _state.cfg.sim / 100,
+        buffer_hours: Number(_state.cfg.bufferHours) || 2.5,
+        allow_same_domain_clusters: !!_state.cfg.allowSameDomain,
       }),
     };
     api('/api/feeds/' + _state.feedId, { method: 'PUT', body: body })
