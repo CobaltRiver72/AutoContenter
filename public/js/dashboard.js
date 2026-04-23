@@ -6339,6 +6339,9 @@
     'fdOpenClusterEditor':     function (el) { if (window.__feedDetail) window.__feedDetail.openClusterEditor(Number(el.dataset.clusterId)); },
     'fdPublishCluster':        function (el) { if (window.__feedDetail) window.__feedDetail.publishCluster(Number(el.dataset.clusterId)); },
     'fdSkipCluster':           function (el) { if (window.__feedDetail) window.__feedDetail.skipCluster(Number(el.dataset.clusterId)); },
+    // Feed Configuration → Sources (PR 5)
+    'fdCfgToggleLang':         function (el) { if (window.__feedDetail) window.__feedDetail.toggleLanguage(el.dataset.lang); },
+    'fdCfgRemoveTag':          function (el) { if (window.__feedDetail) window.__feedDetail.removeTag(el.dataset.field, el.dataset.value); },
 
     // Cluster editor (3-pane)
     'editorBack':              function () { if (window.__editorPage) window.__editorPage.back(); },
@@ -6405,6 +6408,7 @@
     'fdSetAutoPub':       function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('autoPub', !!el.checked); },
     'fdSetNotify':        function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('notifyFail', !!el.checked); },
     'fdCfgAllowSame':     function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('allowSameDomain', !!el.checked); },
+    'fdCfgTimeRange':     function (el) { if (window.__feedDetail) window.__feedDetail.setTimeRange(el.value); },
     'editorToggleCitations': function (el) { if (window.__editorPage) window.__editorPage.toggleCitations(!!el.checked); },
     'editorToggleSeo':       function (el) { if (window.__editorPage) window.__editorPage.toggleSeo(!!el.checked); },
     'ssSelectCfg':           function (el) { if (window.__siteSettings) window.__siteSettings.selectCfg(el.dataset.field, el.value); },
@@ -6417,12 +6421,10 @@
     'hideParent': function (el) { if (el.parentElement) el.parentElement.style.display = 'none'; }
   };
 
-  // Keydown + paste registries — needed by the chip/tag inputs on the Feed
-  // Configuration tab (include_domains, exclude_domains). CSP blocks inline
-  // handlers, so these widgets rely on delegated listeners like every other
-  // UI control. Consumers register handlers on window.__feedDetail (or any
-  // other page module) and reference them by action name via data-keydown /
-  // data-paste attributes.
+  // Keydown + paste registries — used by the chip/tag-input controls on the
+  // Feed Configuration tab (include_domains, exclude_domains). CSP blocks
+  // inline handlers, so these widgets need delegated listeners like every
+  // other UI control.
   var KEYDOWN_ACTIONS = {
     'fdCfgTagKey': function (el, e) {
       if (window.__feedDetail && typeof window.__feedDetail.onTagKeydown === 'function') {
