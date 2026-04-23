@@ -6339,6 +6339,9 @@
     'fdOpenClusterEditor':     function (el) { if (window.__feedDetail) window.__feedDetail.openClusterEditor(Number(el.dataset.clusterId)); },
     'fdPublishCluster':        function (el) { if (window.__feedDetail) window.__feedDetail.publishCluster(Number(el.dataset.clusterId)); },
     'fdSkipCluster':           function (el) { if (window.__feedDetail) window.__feedDetail.skipCluster(Number(el.dataset.clusterId)); },
+    // Feed Configuration → Sources (PR 5)
+    'fdCfgToggleLang':         function (el) { if (window.__feedDetail) window.__feedDetail.toggleLanguage(el.dataset.lang); },
+    'fdCfgRemoveTag':          function (el) { if (window.__feedDetail) window.__feedDetail.removeTag(el.dataset.field, el.dataset.value); },
 
     // Cluster editor (3-pane)
     'editorBack':              function () { if (window.__editorPage) window.__editorPage.back(); },
@@ -6405,6 +6408,7 @@
     'fdSetAutoPub':       function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('autoPub', !!el.checked); },
     'fdSetNotify':        function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('notifyFail', !!el.checked); },
     'fdCfgAllowSame':     function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('allowSameDomain', !!el.checked); },
+    'fdCfgTimeRange':     function (el) { if (window.__feedDetail) window.__feedDetail.setTimeRange(el.value); },
     'editorToggleCitations': function (el) { if (window.__editorPage) window.__editorPage.toggleCitations(!!el.checked); },
     'editorToggleSeo':       function (el) { if (window.__editorPage) window.__editorPage.toggleSeo(!!el.checked); },
     'ssSelectCfg':           function (el) { if (window.__siteSettings) window.__siteSettings.selectCfg(el.dataset.field, el.value); },
@@ -6417,6 +6421,26 @@
     'hideParent': function (el) { if (el.parentElement) el.parentElement.style.display = 'none'; }
   };
 
+  // Keydown + paste registries — used by the chip/tag-input controls on the
+  // Feed Configuration tab (include_domains, exclude_domains). CSP blocks
+  // inline handlers, so these widgets need delegated listeners like every
+  // other UI control.
+  var KEYDOWN_ACTIONS = {
+    'fdCfgTagKey': function (el, e) {
+      if (window.__feedDetail && typeof window.__feedDetail.onTagKeydown === 'function') {
+        window.__feedDetail.onTagKeydown(el, e);
+      }
+    }
+  };
+
+  var PASTE_ACTIONS = {
+    'fdCfgTagPaste': function (el, e) {
+      if (window.__feedDetail && typeof window.__feedDetail.onTagPaste === 'function') {
+        window.__feedDetail.onTagPaste(el, e);
+      }
+    }
+  };
+
   function _dispatchEvent(registry, attr) {
     return function (e) {
       var el = e.target && e.target.closest && e.target.closest('[' + attr + ']');
@@ -6427,9 +6451,11 @@
   }
 
   function bindDelegatedEvents() {
-    document.addEventListener('click',  _dispatchEvent(CLICK_ACTIONS,  'data-click'));
-    document.addEventListener('input',  _dispatchEvent(INPUT_ACTIONS,  'data-input'));
-    document.addEventListener('change', _dispatchEvent(CHANGE_ACTIONS, 'data-change'));
+    document.addEventListener('click',   _dispatchEvent(CLICK_ACTIONS,   'data-click'));
+    document.addEventListener('input',   _dispatchEvent(INPUT_ACTIONS,   'data-input'));
+    document.addEventListener('change',  _dispatchEvent(CHANGE_ACTIONS,  'data-change'));
+    document.addEventListener('keydown', _dispatchEvent(KEYDOWN_ACTIONS, 'data-keydown'));
+    document.addEventListener('paste',   _dispatchEvent(PASTE_ACTIONS,   'data-paste'));
     // error events don't bubble — observe in the capture phase so a single
     // document listener still sees per-element failures (e.g. broken img).
     document.addEventListener('error', function (e) {

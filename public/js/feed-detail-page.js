@@ -21,7 +21,20 @@
     loading: false,
     // editable shadows used by Configuration / Settings tabs so we can
     // diff against the source-of-truth _state.feed on save
-    cfg: { query: '', minSrc: 2, sim: 72, bufferHours: 2.5, allowSameDomain: true },
+    cfg: {
+      query: '', minSrc: 2, sim: 72, bufferHours: 2.5, allowSameDomain: true,
+      // Source-filter shadows (PR 5) — all four round-trip via source_config.
+      timeRange: 'any',       // one of TIME_RANGE_MAP keys in lucene-builder
+      languages: [],          // ISO codes; empty = inherit site default
+      includeDomains: [],     // array of strings, wildcards like "*.reuters.com" OK
+      excludeDomains: [],
+    },
+    // Site-wide ALLOWED_LANGUAGES (fetched once on load) — rendered in the
+    // Languages hint so the admin sees what "empty = inherit" actually means.
+    siteDefaultLanguages: ['en', 'hi'],
+    // Tracks which tag input the user last interacted with so a post-render
+    // focus restore lands back in the right control. Reset on each render cycle.
+    activeTagField: null,
     setg: { name: '', description: '', autoPub: false, notifyFail: true },
   };
   var _pollTimer = null;
@@ -111,24 +124,56 @@
 
       // Seed editable shadows
       if (_state.feed) {
-        var sc = _state.feed.source_config || {};
-        var qc = _state.feed.quality_config || {};
-        _state.cfg = {
-          query:  sc.query || '',
-          minSrc: qc.min_sources || 2,
-          sim:    Math.round((qc.similarity_threshold || 0.72) * 100),
-          bufferHours:     (typeof qc.buffer_hours === 'number') ? qc.buffer_hours : 2.5,
-          allowSameDomain: (typeof qc.allow_same_domain_clusters === 'boolean') ? qc.allow_same_domain_clusters : true,
-        };
+        _seedCfgFromFeed();
         _state.setg = {
           name: _state.feed.name || '',
           description: (_state.feed.dest_config && _state.feed.dest_config.description) || '',
-          autoPub: !!qc.auto_publish,
-          notifyFail: qc.notify_failure !== false,
+          autoPub: !!(_state.feed.quality_config && _state.feed.quality_config.auto_publish),
+          notifyFail: !_state.feed.quality_config || _state.feed.quality_config.notify_failure !== false,
         };
+        _fetchSiteDefaults(_state.feed.site_id);
       }
       render();
     });
+  }
+
+  // Pulls all editable shadows from the current feed row. Used by both
+  // initial seed (refreshFeed above) and Reset — keeping a single source of
+  // truth so Reset can't drift from the live seed behavior.
+  function _seedCfgFromFeed() {
+    if (!_state.feed) return;
+    var sc = _state.feed.source_config || {};
+    var qc = _state.feed.quality_config || {};
+    _state.cfg = {
+      query:           sc.query || '',
+      minSrc:          qc.min_sources || 2,
+      sim:             Math.round((qc.similarity_threshold || 0.72) * 100),
+      bufferHours:     (typeof qc.buffer_hours === 'number') ? qc.buffer_hours : 2.5,
+      allowSameDomain: (typeof qc.allow_same_domain_clusters === 'boolean') ? qc.allow_same_domain_clusters : true,
+      timeRange:       (typeof sc.time_range === 'string' && sc.time_range) ? sc.time_range : 'any',
+      languages:       Array.isArray(sc.allowed_languages) ? sc.allowed_languages.slice() : [],
+      includeDomains:  Array.isArray(sc.include_domains)   ? sc.include_domains.slice()   : [],
+      excludeDomains:  Array.isArray(sc.exclude_domains)   ? sc.exclude_domains.slice()   : [],
+    };
+  }
+
+  // Read the feed's parent site's ALLOWED_LANGUAGES so the Languages hint
+  // can tell the admin what "leave empty to inherit" means for their site.
+  // Fails silently — the default ['en','hi'] is already in state.
+  function _fetchSiteDefaults(siteId) {
+    if (!siteId) return;
+    api('/api/sites/' + siteId + '/config').then(function (r) {
+      if (!r || !r.ok || !r.config) return;
+      var raw = r.config.ALLOWED_LANGUAGES;
+      if (!raw) return;
+      var arr = String(raw).split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+      if (arr.length) {
+        _state.siteDefaultLanguages = arr;
+        // Only re-render if the Configuration tab is the visible one —
+        // cheap guard against rendering while the user is on another tab.
+        if (_state.tab === 'config') render();
+      }
+    }).catch(function () { /* keep default */ });
   }
 
   // Preview endpoint for Configuration tab (hourly bar chart + numbers).
@@ -173,6 +218,11 @@
        _renderPublishedTab());
 
     if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+
+    // Tag-input focus restore — the config tab re-renders on every chip
+    // add/remove, which nukes focus. If the user was typing in a tag input,
+    // put them back there with the caret at the end.
+    if (_state.tab === 'config') _restoreTagFocus();
   }
 
   function _renderHeader() {
@@ -326,6 +376,154 @@
     '</div>';
   }
 
+  // ─── Sources section (PR 5) ────────────────────────────────────────────
+  // Four controls that map 1:1 to feeds.source_config keys. The backend
+  // (firehose.js + lucene-builder.js) already consumes each; this section
+  // is pure UI surfacing — zero new backend filters.
+
+  var LANG_OPTIONS = [
+    { value: 'en', label: 'English'    },
+    { value: 'hi', label: 'Hindi'      },
+    { value: 'es', label: 'Spanish'    },
+    { value: 'fr', label: 'French'     },
+    { value: 'de', label: 'German'     },
+    { value: 'pt', label: 'Portuguese' },
+    { value: 'it', label: 'Italian'    },
+    { value: 'ja', label: 'Japanese'   },
+    { value: 'zh', label: 'Chinese'    },
+    { value: 'ar', label: 'Arabic'     },
+  ];
+
+  var TIME_RANGE_OPTIONS = [
+    { value: 'any',        label: 'Any time'   },
+    { value: 'past-hour',  label: 'Past hour'  },
+    { value: 'past-day',   label: 'Past day'   },
+    { value: 'past-week',  label: 'Past week'  },
+    { value: 'past-month', label: 'Past month' },
+    { value: 'past-year',  label: 'Past year'  },
+  ];
+
+  // Mirrors the validation in src/utils/lucene-builder._cleanDomain plus
+  // the shape check the spec mandates. Allows wildcards like *.example.com
+  // and bare domains; rejects spaces, slashes, schemes, empty.
+  var _DOMAIN_RE = /^[*.]*[a-z0-9.-]+$/i;
+  function _isValidDomain(raw) {
+    if (!raw || typeof raw !== 'string') return false;
+    var s = raw.trim().toLowerCase();
+    if (!s || s.length > 253) return false;
+    return _DOMAIN_RE.test(s);
+  }
+
+  function _normalizeDomain(raw) {
+    return String(raw || '').trim().toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '');
+  }
+
+  function _renderLangPills(selected) {
+    var active = {};
+    for (var i = 0; i < (selected || []).length; i++) active[selected[i]] = true;
+    return LANG_OPTIONS.map(function (opt) {
+      var on = !!active[opt.value];
+      var style = on
+        ? 'background:var(--sh-text);color:var(--sh-bg);border-color:var(--sh-text)'
+        : '';
+      return '<button type="button" class="sh-btn sh-btn-sm" style="' + style +
+        '" data-click="fdCfgToggleLang" data-lang="' + escapeHtml(opt.value) + '">' +
+        escapeHtml(opt.label) + ' · ' + escapeHtml(opt.value) +
+        '</button>';
+    }).join('');
+  }
+
+  function _renderTagChip(field, value) {
+    return '<span class="sh-fd-tag" style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px 2px 10px;background:var(--sh-bg-2);border:1px solid var(--sh-border);border-radius:12px;font-size:12.5px;line-height:1.4">' +
+      '<span class="sh-mono">' + escapeHtml(value) + '</span>' +
+      '<button type="button" class="sh-btn-icon" style="padding:0 4px;background:transparent;border:none;color:var(--sh-text-3);cursor:pointer;font-size:14px;line-height:1" data-click="fdCfgRemoveTag" data-field="' + escapeHtml(field) + '" data-value="' + escapeHtml(value) + '" aria-label="Remove ' + escapeHtml(value) + '">&times;</button>' +
+    '</span>';
+  }
+
+  function _renderTagInput(field, values) {
+    var chips = (values || []).map(function (v) { return _renderTagChip(field, v); }).join(' ');
+    var placeholder = values && values.length
+      ? 'Add another + Enter'
+      : 'example.com or *.reuters.com, then Enter';
+    return '<div class="sh-fd-tag-wrap" data-tag-field="' + escapeHtml(field) + '" ' +
+      'style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;' +
+      'min-height:36px;border:1px solid var(--sh-border);border-radius:6px;background:var(--sh-surface)">' +
+      chips +
+      (chips ? ' ' : '') +
+      '<input type="text" data-keydown="fdCfgTagKey" data-paste="fdCfgTagPaste" ' +
+        'data-field="' + escapeHtml(field) + '" ' +
+        'class="sh-fd-tag-input" ' +
+        'style="flex:1;min-width:140px;border:none;outline:none;background:transparent;font-size:13px;padding:2px" ' +
+        'placeholder="' + escapeHtml(placeholder) + '"/>' +
+    '</div>';
+  }
+
+  function _renderSourcesSection(cfg) {
+    var siteDefaults = (_state.siteDefaultLanguages || []).join(', ') || 'en, hi';
+
+    return '<div class="sh-eyebrow" style="margin-top:24px">Sources</div>' +
+      // Time window
+      '<div style="margin-bottom:14px">' +
+        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Time window</div>' +
+        '<select class="sh-select" data-change="fdCfgTimeRange" style="width:100%;max-width:240px">' +
+          TIME_RANGE_OPTIONS.map(function (o) {
+            var sel = (o.value === cfg.timeRange) ? ' selected' : '';
+            return '<option value="' + escapeHtml(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+          }).join('') +
+        '</select>' +
+        '<div class="sh-field-hint">How far back Firehose searches when your query matches.</div>' +
+      '</div>' +
+
+      // Languages
+      '<div style="margin-bottom:14px">' +
+        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Languages</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px">' + _renderLangPills(cfg.languages) + '</div>' +
+        '<div class="sh-field-hint">Articles must match one of the selected languages.</div>' +
+        ((!cfg.languages || !cfg.languages.length)
+          ? '<div class="sh-field-hint" style="color:var(--sh-text-3);font-style:italic">Leave empty to inherit site default (currently: ' + escapeHtml(siteDefaults) + ')</div>'
+          : '') +
+      '</div>' +
+
+      // Include domains
+      '<div style="margin-bottom:14px">' +
+        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Include domains</div>' +
+        _renderTagInput('includeDomains', cfg.includeDomains) +
+        '<div class="sh-field-hint">Only articles from these domains. Leave empty for no restriction. Wildcards: *.reuters.com matches any Reuters subdomain.</div>' +
+      '</div>' +
+
+      // Exclude domains
+      '<div style="margin-bottom:14px">' +
+        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Exclude domains</div>' +
+        _renderTagInput('excludeDomains', cfg.excludeDomains) +
+        '<div class="sh-field-hint">Articles from these domains are dropped. Wildcards supported.</div>' +
+      '</div>';
+  }
+
+  // After each render cycle, if the user was typing in a tag input, restore
+  // focus so their flow isn't interrupted by a chip add/remove.
+  function _restoreTagFocus() {
+    if (!_state.activeTagField) return;
+    var input = document.querySelector(
+      'input[data-keydown="fdCfgTagKey"][data-field="' + _state.activeTagField + '"]'
+    );
+    if (input) input.focus();
+  }
+
+  // Brief red flash on the given input to signal a rejected entry.
+  function _flashInputInvalid(input) {
+    if (!input) return;
+    var prevBorder = input.style.border;
+    var prevBg = input.style.background;
+    input.style.border = '1px solid var(--sh-red,#dc2626)';
+    input.style.background = 'rgba(248,113,113,0.08)';
+    setTimeout(function () {
+      input.style.border = prevBorder;
+      input.style.background = prevBg;
+    }, 1800);
+  }
+
   // ─── Configuration tab ─────────────────────────────────────────────────
   function _renderConfigTab() {
     var cfg = _state.cfg;
@@ -333,7 +531,9 @@
       '<div>' +
         '<div class="sh-eyebrow">Query</div>' +
         '<input class="sh-input sh-mono" value="' + escapeHtml(cfg.query) + '" data-input="fdCfgQuery" style="height:36px;font-size:13px"/>' +
-        '<div class="sh-field-hint">AND / OR / quoted phrases supported</div>' +
+        '<div class="sh-field-hint">Search terms. Use &quot;quotes&quot; for exact phrases, AND/OR/NOT for logic.<br>Example: (&quot;electric vehicles&quot; OR tesla) AND NOT opinion</div>' +
+
+        _renderSourcesSection(cfg) +
 
         '<div class="sh-eyebrow" style="margin-top:24px">Clustering</div>' +
         '<div style="margin-bottom:14px">' +
@@ -521,7 +721,16 @@
     if (!_state.feed) return;
     _state.saving = true; render();
     var body = {
-      source_config: Object.assign({}, _state.feed.source_config, { query: _state.cfg.query }),
+      source_config: Object.assign({}, _state.feed.source_config, {
+        query: _state.cfg.query,
+        // PR 5 — four controls surfaced in the Sources section. Lucene
+        // builder + firehose listener already consume these; this PR is
+        // purely the UI that writes them.
+        time_range:        _state.cfg.timeRange || 'any',
+        allowed_languages: (_state.cfg.languages || []).slice(),
+        include_domains:   (_state.cfg.includeDomains || []).slice(),
+        exclude_domains:   (_state.cfg.excludeDomains || []).slice(),
+      }),
       quality_config: Object.assign({}, _state.feed.quality_config, {
         min_sources: _state.cfg.minSrc,
         similarity_threshold: _state.cfg.sim / 100,
@@ -538,9 +747,104 @@
   }
   function resetConfig() {
     if (!_state.feed) return;
-    var sc = _state.feed.source_config || {}, qc = _state.feed.quality_config || {};
-    _state.cfg = { query: sc.query || '', minSrc: qc.min_sources || 2, sim: Math.round((qc.similarity_threshold || 0.72) * 100) };
+    // Single source of truth — delegate to _seedCfgFromFeed so Reset can't
+    // drift from the initial-load seeding behavior as fields get added.
+    _seedCfgFromFeed();
+    _state.activeTagField = null;
     render();
+  }
+
+  // Source-section setters — each one mutates _state.cfg + re-renders so
+  // the pill/chip visual state stays in sync.
+  function setTimeRange(value) {
+    var allowed = { any:1, 'past-hour':1, 'past-day':1, 'past-week':1, 'past-month':1, 'past-year':1 };
+    if (!allowed[value]) return;
+    _state.cfg.timeRange = value;
+    // No re-render — the <select> already shows the new value; _state just
+    // needs to hold it for the next save. Avoid interrupting focus.
+  }
+
+  function toggleLanguage(code) {
+    if (!code || typeof code !== 'string') return;
+    var arr = (_state.cfg.languages || []).slice();
+    var idx = arr.indexOf(code);
+    if (idx === -1) arr.push(code); else arr.splice(idx, 1);
+    _state.cfg.languages = arr;
+    render();
+  }
+
+  function _addDomainTag(field, raw, inputEl) {
+    var cleaned = _normalizeDomain(raw);
+    if (!_isValidDomain(cleaned)) {
+      _flashInputInvalid(inputEl);
+      return false;
+    }
+    var curr = (_state.cfg[field] || []).slice();
+    if (curr.indexOf(cleaned) === -1) curr.push(cleaned);
+    _state.cfg[field] = curr;
+    return true;
+  }
+
+  function _removeDomainTag(field, value) {
+    var curr = (_state.cfg[field] || []).slice();
+    var idx = curr.indexOf(value);
+    if (idx !== -1) curr.splice(idx, 1);
+    _state.cfg[field] = curr;
+  }
+
+  // Public re-rendering wrapper — the click-delegation handler calls this
+  // so the X-button on a chip triggers a visual update.
+  function removeTagAndRender(field, value) {
+    _state.activeTagField = field;
+    _removeDomainTag(field, value);
+    render();
+  }
+
+  // Keydown on a tag input: Enter/comma confirm, Backspace-on-empty pop.
+  // `el` is the input element; `e` is the KeyboardEvent.
+  function onTagKeydown(el, e) {
+    var field = el.getAttribute('data-field');
+    if (!field) return;
+    _state.activeTagField = field;
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      var raw = el.value;
+      if (!raw || !raw.trim()) return;
+      if (_addDomainTag(field, raw, el)) {
+        el.value = '';
+        render();
+      }
+    } else if (e.key === 'Backspace' && !el.value) {
+      var curr = (_state.cfg[field] || []).slice();
+      if (curr.length === 0) return;
+      curr.pop();
+      _state.cfg[field] = curr;
+      render();
+    }
+  }
+
+  // Paste on a tag input: split on commas, add each valid piece as a chip.
+  function onTagPaste(el, e) {
+    var field = el.getAttribute('data-field');
+    if (!field) return;
+    var clip = (e.clipboardData || window.clipboardData);
+    if (!clip) return;
+    var text = clip.getData('text');
+    if (!text) return;
+    // Only hijack if the paste contains a comma or newline — a single-
+    // domain paste is natural plain-text insert, no split needed.
+    if (text.indexOf(',') === -1 && text.indexOf('\n') === -1) return;
+    e.preventDefault();
+    _state.activeTagField = field;
+    var tokens = text.split(/[,\n]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    var addedAny = false;
+    for (var i = 0; i < tokens.length; i++) {
+      if (_addDomainTag(field, tokens[i], el)) addedAny = true;
+    }
+    if (addedAny) {
+      el.value = '';
+      render();
+    }
   }
 
   function setSetg(field, value) { _state.setg[field] = value; }
@@ -675,5 +979,11 @@
     openClusterEditor: openClusterEditor,
     publishCluster: publishCluster,
     skipCluster: skipCluster,
+    // PR 5 — Sources section
+    setTimeRange: setTimeRange,
+    toggleLanguage: toggleLanguage,
+    removeTag: removeTagAndRender,
+    onTagKeydown: onTagKeydown,
+    onTagPaste: onTagPaste,
   };
 }());
