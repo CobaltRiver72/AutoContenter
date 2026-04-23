@@ -1154,6 +1154,68 @@ function runMigrations() {
     db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_cluster_site    ON drafts(cluster_id, site_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_logs_site_created      ON logs(site_id, created_at)');
 
+    // ─── Clustering-settings promotion to per-feed ───────────────────────────
+    // Four keys that were admin-editable on the Pipeline Settings page are
+    // moving to the feed's quality_config JSON so each feed can tune them
+    // independently (breaking-news vs weekly-column have very different
+    // windows and thresholds). This backfill is idempotent — it only writes
+    // missing JSON keys and leaves already-tuned feeds alone. Running it
+    // twice is a no-op.
+    (function _migrateBackfillFeedClustering() {
+      function _getSetting(key, fallback) {
+        try {
+          var row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+          if (row && row.value !== undefined && row.value !== null && row.value !== '') return row.value;
+        } catch (_e) { /* settings table might not exist yet — use fallback */ }
+        return fallback;
+      }
+
+      function _toBool(v, fb) {
+        if (v === undefined || v === null || v === '') return !!fb;
+        if (typeof v === 'boolean') return v;
+        var s = String(v).toLowerCase().trim();
+        return s === 'true' || s === '1' || s === 'on' || s === 'yes';
+      }
+
+      var globalMinSources   = parseInt(_getSetting('MIN_SOURCES_THRESHOLD', config.MIN_SOURCES_THRESHOLD), 10);
+      if (isNaN(globalMinSources) || globalMinSources < 1) globalMinSources = 2;
+      var globalSimThreshold = parseFloat(_getSetting('SIMILARITY_THRESHOLD', config.SIMILARITY_THRESHOLD));
+      if (isNaN(globalSimThreshold)) globalSimThreshold = 0.20;
+      var globalBufferHours  = parseFloat(_getSetting('BUFFER_HOURS', config.BUFFER_HOURS));
+      if (isNaN(globalBufferHours) || globalBufferHours <= 0) globalBufferHours = 2.5;
+      var globalAllowSame    = _toBool(_getSetting('ALLOW_SAME_DOMAIN_CLUSTERS', config.ALLOW_SAME_DOMAIN_CLUSTERS), true);
+
+      var feedRows;
+      try {
+        feedRows = db.prepare('SELECT id, quality_config FROM feeds').all();
+      } catch (_fqErr) { feedRows = []; /* feeds table not yet created on first boot */ }
+
+      if (feedRows.length === 0) return;
+
+      var updateStmt = db.prepare('UPDATE feeds SET quality_config = ? WHERE id = ?');
+      var backfilled = 0;
+      for (var fi = 0; fi < feedRows.length; fi++) {
+        var f = feedRows[fi];
+        var qc;
+        try { qc = JSON.parse(f.quality_config || '{}'); } catch (_jpe) { qc = {}; }
+
+        var changed = false;
+        if (typeof qc.min_sources !== 'number')                { qc.min_sources                = globalMinSources;   changed = true; }
+        if (typeof qc.similarity_threshold !== 'number')       { qc.similarity_threshold       = globalSimThreshold; changed = true; }
+        if (typeof qc.buffer_hours !== 'number')               { qc.buffer_hours               = globalBufferHours;  changed = true; }
+        if (typeof qc.allow_same_domain_clusters !== 'boolean'){ qc.allow_same_domain_clusters = globalAllowSame;    changed = true; }
+
+        if (changed) {
+          updateStmt.run(JSON.stringify(qc), f.id);
+          backfilled++;
+        }
+      }
+
+      if (backfilled > 0) {
+        console.log('[db] Backfilled clustering config on ' + backfilled + ' feed(s) (min_sources=' + globalMinSources + ', sim=' + globalSimThreshold + ', buffer_hours=' + globalBufferHours + ', allow_same_domain=' + globalAllowSame + ')');
+      }
+    })();
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);
