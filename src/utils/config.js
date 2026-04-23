@@ -36,12 +36,18 @@ var DEFAULTS = {
   ALLOW_SAME_DOMAIN_CLUSTERS: 'true',
   MAX_BUFFER_FOR_SIMILARITY: '100',
   BUFFER_HOURS: '2.5',
+  // Publish rate. SITE-LEVEL DEFAULTS — every site's own
+  // SITE_PUBLISH_RATE_COUNT / SITE_PUBLISH_RATE_UNIT (in site_config)
+  // always wins. The Pipeline Settings UI no longer exposes these; they are
+  // seed values for newly created sites, fallbacks for legacy rows, and an
+  // API-editable safety net.
+  PUBLISH_RATE_COUNT: '4',
+  PUBLISH_RATE_UNIT: 'hour',
+  // LEGACY — retained as a second-tier fallback when both unified globals
+  // are empty. Planned for removal after one release cycle; new installs
+  // should rely on the unified pair above.
   MAX_PUBLISH_PER_HOUR: '4',
   PUBLISH_COOLDOWN_MINUTES: '10',
-  // Unified publish rate — overrides the two legacy settings above when both
-  // are set. Admin-configurable via the Settings page.
-  PUBLISH_RATE_COUNT: '',
-  PUBLISH_RATE_UNIT: '',
   TRENDS_GEO: 'IN',
   TRENDS_POLL_MINUTES: '15',
   WP_AUTHOR_ID: '1',

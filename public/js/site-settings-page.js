@@ -35,6 +35,8 @@
       days:          [true, true, true, true, true, false, false],
       windowStart:   '08:00',
       windowEnd:     '22:00',
+      publishRateCount: 4,
+      publishRateUnit:  'hour',
       rules:         SEED_RULES,
     },
     wpCheck: null,    // { ok, wp_url, at }
@@ -109,6 +111,13 @@
         if (Array.isArray(sched.days) && sched.days.length === 7) _state.cfg.days = sched.days;
         if (sched.windowStart) _state.cfg.windowStart = sched.windowStart;
         if (sched.windowEnd)   _state.cfg.windowEnd   = sched.windowEnd;
+      }
+
+      var rateCountRaw = parseInt(config.SITE_PUBLISH_RATE_COUNT, 10);
+      if (!isNaN(rateCountRaw) && rateCountRaw > 0) _state.cfg.publishRateCount = rateCountRaw;
+      var rateUnitRaw = String(config.SITE_PUBLISH_RATE_UNIT || '').toLowerCase();
+      if (rateUnitRaw === 'hour' || rateUnitRaw === 'day' || rateUnitRaw === 'week') {
+        _state.cfg.publishRateUnit = rateUnitRaw;
       }
 
       var rules = _safeJson(config.SITE_AUTOMATION_RULES);
@@ -283,13 +292,34 @@
               '<input class="sh-input" value="' + escapeHtml(c.windowEnd) + '" data-input="ssSchedEnd" style="width:100%"/>' +
             '</div>' +
           '</div>' +
+        '</div>' +
+      '</div>' +
 
-          '<div style="margin-top:16px;display:flex;gap:8px">' +
-            '<button class="sh-btn sh-btn-primary sh-btn-sm" data-click="ssSavePublish"' + (_state.saving ? ' disabled' : '') + '>' +
-              (_state.saving ? 'Saving…' : 'Save publishing settings') +
-            '</button>' +
+      // Publish rate — related pacing control, placed next to the schedule.
+      '<div style="font-size:14px;font-weight:600;margin:28px 0 12px">Publish rate</div>' +
+      '<div class="sh-card">' +
+        '<div style="padding:20px">' +
+          '<div style="display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap">' +
+            '<span>Up to</span>' +
+            '<input class="sh-input" type="number" min="1" max="999" step="1" value="' + escapeHtml(String(c.publishRateCount)) + '" data-input="ssRateCount" style="width:80px"/>' +
+            '<span>posts per</span>' +
+            '<select class="sh-select" data-change="ssRateUnit" style="width:120px">' +
+              ['hour','day','week'].map(function (u) {
+                var sel = (u === c.publishRateUnit) ? ' selected' : '';
+                return '<option value="' + u + '"' + sel + '>' + u + '</option>';
+              }).join('') +
+            '</select>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--sh-text-3);margin-top:10px;line-height:1.5">' +
+            'Posts are spaced evenly across the window. 4 / hour publishes roughly one every 15 minutes.' +
           '</div>' +
         '</div>' +
+      '</div>' +
+
+      '<div style="margin-top:16px;display:flex;gap:8px">' +
+        '<button class="sh-btn sh-btn-primary sh-btn-sm" data-click="ssSavePublish"' + (_state.saving ? ' disabled' : '') + '>' +
+          (_state.saving ? 'Saving…' : 'Save publishing settings') +
+        '</button>' +
       '</div>' +
     '</div>';
   }
@@ -362,11 +392,22 @@
   function selectCfg(field, value) { _state.cfg[field] = value; /* lazy save via Save button */ render(); }
   function setSchedStart(v) { _state.cfg.windowStart = v; }
   function setSchedEnd(v)   { _state.cfg.windowEnd = v; }
+  function setRateCount(v) {
+    var n = parseInt(v, 10);
+    if (!isNaN(n) && n >= 1) _state.cfg.publishRateCount = n;
+  }
+  function setRateUnit(v) {
+    if (v === 'hour' || v === 'day' || v === 'week') _state.cfg.publishRateUnit = v;
+  }
   function toggleDay(i) {
     _state.cfg.days[i] = !_state.cfg.days[i];
     render();
   }
   function savePublish() {
+    var rateCount = parseInt(_state.cfg.publishRateCount, 10);
+    if (isNaN(rateCount) || rateCount < 1) rateCount = 1;
+    var rateUnit = (_state.cfg.publishRateUnit === 'day' || _state.cfg.publishRateUnit === 'week')
+      ? _state.cfg.publishRateUnit : 'hour';
     var patch = {
       SITE_POST_STATUS:         _state.cfg.postStatus,
       SITE_AUTHOR_MODE:         _state.cfg.author,
@@ -377,6 +418,8 @@
         windowStart: _state.cfg.windowStart,
         windowEnd: _state.cfg.windowEnd,
       }),
+      SITE_PUBLISH_RATE_COUNT:  String(rateCount),
+      SITE_PUBLISH_RATE_UNIT:   rateUnit,
       SITE_AUTOMATION_RULES:    JSON.stringify(_state.cfg.rules),
     };
     _saveConfig(patch);
@@ -422,6 +465,8 @@
     selectCfg: selectCfg,
     setSchedStart: setSchedStart,
     setSchedEnd: setSchedEnd,
+    setRateCount: setRateCount,
+    setRateUnit: setRateUnit,
     toggleDay: toggleDay,
     savePublish: savePublish,
     toggleRule: toggleRule,

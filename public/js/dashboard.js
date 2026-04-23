@@ -4866,11 +4866,11 @@
     // Standard groups (AI is handled by its own section now)
     var standardGroups = {
       'Firehose': ['FIREHOSE_TOKEN'],
-      // Clustering settings (MIN_SOURCES_THRESHOLD, SIMILARITY_THRESHOLD,
-      // BUFFER_HOURS, ALLOW_SAME_DOMAIN_CLUSTERS) moved to per-feed — edit
-      // each feed's Configuration tab. They remain in settings/config as
-      // seed values for new feeds and as legacy fallbacks.
-      'Pipeline': ['MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
+      // Pipeline group removed in PR 3. Clustering settings moved to per-feed
+      // (Feed Configuration tab); publish-rate settings moved to per-site
+      // (Site Settings → Publishing tab). All four keys remain editable via
+      // /api/settings as an emergency safety net and as seed values for
+      // newly created feeds / sites.
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
       'InfraNodus': ['INFRANODUS_ENABLED', 'INFRANODUS_API_KEY'],
       'Jina AI Reader (Extraction Fallback)': ['JINA_ENABLED', 'JINA_API_KEY'],
@@ -6387,7 +6387,8 @@
     'fdSetName':                function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('name', el.value); },
     'fdSetDescription':         function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('description', el.value); },
     'ssSchedStart':             function (el) { if (window.__siteSettings) window.__siteSettings.setSchedStart(el.value); },
-    'ssSchedEnd':               function (el) { if (window.__siteSettings) window.__siteSettings.setSchedEnd(el.value); }
+    'ssSchedEnd':               function (el) { if (window.__siteSettings) window.__siteSettings.setSchedEnd(el.value); },
+    'ssRateCount':              function (el) { if (window.__siteSettings) window.__siteSettings.setRateCount(el.value); }
   };
 
   var CHANGE_ACTIONS = {
@@ -6407,7 +6408,8 @@
     'editorToggleCitations': function (el) { if (window.__editorPage) window.__editorPage.toggleCitations(!!el.checked); },
     'editorToggleSeo':       function (el) { if (window.__editorPage) window.__editorPage.toggleSeo(!!el.checked); },
     'ssSelectCfg':           function (el) { if (window.__siteSettings) window.__siteSettings.selectCfg(el.dataset.field, el.value); },
-    'ssToggleRule':          function (el) { if (window.__siteSettings) window.__siteSettings.toggleRule(el.dataset.ruleId, !!el.checked); }
+    'ssToggleRule':          function (el) { if (window.__siteSettings) window.__siteSettings.toggleRule(el.dataset.ruleId, !!el.checked); },
+    'ssRateUnit':            function (el) { if (window.__siteSettings) window.__siteSettings.setRateUnit(el.value); }
   };
 
   var ERROR_ACTIONS = {
@@ -9942,7 +9944,7 @@
 
   var _pipelineSettingKeys = [
     'EXTRACTION_POLL_MS', 'PUBLISH_POLL_MS', 'REWRITE_CONCURRENCY', 'REWRITE_MAX_RETRIES',
-    'LEASE_MINUTES', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES',
+    'LEASE_MINUTES',
     'CLUSTERING_DEBOUNCE_MS', 'CLUSTERING_MAX_WAIT_MS', 'CLUSTER_QUEUE_MAX',
     'MAX_TOKENS', 'TEMPERATURE', 'WP_TIMEOUT_MS'
   ];
