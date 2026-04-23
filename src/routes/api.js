@@ -6289,6 +6289,26 @@ function createApiRouter(deps) {
         wp_username: body.wp_username,
         wp_app_password: body.wp_app_password
       });
+
+      // Seed publish-rate keys from current globals so the new site has a
+      // sensible cadence out of the gate (Site Settings → Publishing tab
+      // reads these immediately instead of showing empty fields).
+      try {
+        var cfgSeed = require('../utils/config');
+        var seedCount = parseInt(cfgSeed.get('PUBLISH_RATE_COUNT'), 10);
+        if (isNaN(seedCount) || seedCount <= 0) {
+          seedCount = parseInt(cfgSeed.get('MAX_PUBLISH_PER_HOUR'), 10) || 4;
+        }
+        var seedUnitRaw = String(cfgSeed.get('PUBLISH_RATE_UNIT') || '').toLowerCase();
+        var seedUnit = (seedUnitRaw === 'hour' || seedUnitRaw === 'day' || seedUnitRaw === 'week') ? seedUnitRaw : 'hour';
+        siteConfigMod.bulkSetSiteConfig(site.id, {
+          SITE_PUBLISH_RATE_COUNT: String(seedCount),
+          SITE_PUBLISH_RATE_UNIT: seedUnit,
+        });
+      } catch (seedErr) {
+        logger.warn('api', 'New-site rate seeding failed for site ' + site.id + ': ' + seedErr.message);
+      }
+
       res.json({ ok: true, site: site });
     } catch (err) {
       if (err.message && err.message.indexOf('UNIQUE constraint') !== -1) {
@@ -6398,6 +6418,11 @@ function createApiRouter(deps) {
         return res.status(400).json({ ok: false, error: 'config object required' });
       }
       siteConfigMod.bulkSetSiteConfig(siteId, body.config);
+      // Drop the publish-rate cache so a just-saved SITE_PUBLISH_RATE_{COUNT,UNIT}
+      // takes effect on the next tick, not after the 5 s TTL.
+      try {
+        require('../utils/publish-rate').invalidateCache(siteId);
+      } catch (_prErr) { /* non-critical */ }
       res.json({ ok: true, message: 'Site config updated', siteId: siteId });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });

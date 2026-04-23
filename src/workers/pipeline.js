@@ -5,6 +5,7 @@ var _cfg = require('../utils/config');
 var { resolveTaxonomy } = require('../utils/publish-rule-engine');
 var siteConfig = require('../utils/site-config');
 var clusteringConfig = require('../utils/clustering-config');
+var publishRate = require('../utils/publish-rate');
 
 var MODULE = 'pipeline';
 
@@ -14,29 +15,11 @@ function _rewriteConcurrency(){ return parseInt(_cfg.get('REWRITE_CONCURRENCY'),
 function _rewriteMaxRetries() { return parseInt(_cfg.get('REWRITE_MAX_RETRIES'), 10) || 3; }
 function _extractionPollMs()  { return parseInt(_cfg.get('EXTRACTION_POLL_MS'), 10) || 500; }
 function _publishPollMs()     { return parseInt(_cfg.get('PUBLISH_POLL_MS'), 10) || 30000; }
-function _maxPublishPerHour() { return parseInt(_cfg.get('MAX_PUBLISH_PER_HOUR'), 10) || 4; }
-function _publishCooldownMs() { return (parseInt(_cfg.get('PUBLISH_COOLDOWN_MINUTES'), 10) || 10) * 60000; }
-
-// Unified publish rate: PUBLISH_RATE_COUNT articles per PUBLISH_RATE_UNIT.
-// If either is unset, falls back to legacy MAX_PUBLISH_PER_HOUR +
-// PUBLISH_COOLDOWN_MINUTES so existing installs keep working unchanged.
-function _publishRateUnit() {
-  var u = String(_cfg.get('PUBLISH_RATE_UNIT') || '').trim().toLowerCase();
-  if (u === 'second' || u === 'minute' || u === 'hour' || u === 'day') return u;
-  return '';
-}
-function _publishRateCount() {
-  var raw = _cfg.get('PUBLISH_RATE_COUNT');
-  if (raw === undefined || raw === null || raw === '') return 0;
-  var n = parseInt(raw, 10);
-  return (isNaN(n) || n < 0) ? 0 : n;
-}
-function _publishWindowMs(unit) {
-  if (unit === 'second') return 1000;
-  if (unit === 'minute') return 60000;
-  if (unit === 'day')    return 86400000;
-  return 3600000; // hour default
-}
+// Publish rate resolution is in src/utils/publish-rate.js — one rule per
+// site, with unified global + legacy fallback. Consumers here call
+// publishRate.resolvePublishRate(siteId, this.config) via the _resolvedPublishRate
+// method below. The old global helpers (_maxPublishPerHour, _publishCooldownMs,
+// _publishRateUnit, _publishRateCount, _publishWindowMs) are gone.
 
 function _autoRewriteEnabled() {
   var v = _cfg.get('AUTO_REWRITE_ENABLED');
@@ -1031,44 +1014,73 @@ class Pipeline {
     this._publishRunning = true;
 
     try {
-      var rateState = this.getPublishRateState(siteFilter && siteFilter > 0 ? siteFilter : undefined);
-      if (!rateState.ready) {
-        this._logPublishSkip(rateState);
-        return;
-      }
+      // Pick which site this tick publishes for.
+      //   - Run-Now passes siteFilter → publish only for that site.
+      //   - Scheduler tick leaves siteFilter undefined → find sites that have
+      //     ready drafts and pick the first one whose per-site rate allows.
+      //     This keeps per-site budgets independent so a saturated Site A
+      //     never blocks Site B's publishes.
+      var publishSiteId = null;
+      var rateState = null;
 
-      // Optional per-site filter. Run-Now passes siteFilter to restrict
-      // publishes to the active site; the scheduler tick leaves it undefined.
-      var pubSiteWhere = '';
-      var pubSiteParams = [];
       if (siteFilter && typeof siteFilter === 'number' && siteFilter > 0) {
-        pubSiteWhere = ' AND d.site_id = ?';
-        pubSiteParams = [siteFilter];
+        rateState = this.getPublishRateState(siteFilter);
+        if (!rateState.ready) {
+          this._logPublishSkip(rateState);
+          return;
+        }
+        publishSiteId = siteFilter;
+      } else {
+        var candidateRows = this.db.prepare(
+          "SELECT DISTINCT d.site_id AS site_id FROM drafts d " +
+          "JOIN clusters c ON d.cluster_id = c.id " +
+          "WHERE d.mode IN ('auto', 'manual_import') AND d.status = 'ready' AND d.cluster_role = 'primary' " +
+          "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100 " +
+          "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
+          "  AND c.status = 'queued' " +
+          "ORDER BY d.site_id"
+        ).all();
+
+        if (candidateRows.length === 0) return; // nothing to publish anywhere
+
+        var firstState = null;
+        for (var ci = 0; ci < candidateRows.length; ci++) {
+          var candidateSite = candidateRows[ci].site_id || 1;
+          var candidateState = this.getPublishRateState(candidateSite);
+          if (!firstState) firstState = candidateState;
+          if (candidateState.ready) {
+            publishSiteId = candidateSite;
+            rateState = candidateState;
+            break;
+          }
+        }
+        if (!publishSiteId) {
+          // Every candidate site is rate-capped. Log the first site's reason
+          // (throttled) so the admin sees something, not silence.
+          if (firstState) this._logPublishSkip(firstState);
+          return;
+        }
       }
 
-      // Find a cluster with primary draft in 'ready' status. Publish gating —
+      // Find the top-priority ready cluster FOR THIS SITE. Publish gating —
       // quality thresholds, auto-publish toggle, blocked keywords, etc. — is
       // owned by the feed that produced this draft. Drafts only reach
       // status='ready' after their feed's per-feed gate approved them, so the
       // publisher here just drains the queue at the configured rate.
-      var readyPrimarySql =
+      var readyPrimary = this.db.prepare(
         "SELECT d.*, c.topic, c.trends_boosted, c.article_count, c.avg_similarity FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
         "WHERE d.mode IN ('auto', 'manual_import') AND d.status = 'ready' AND d.cluster_role = 'primary' " +
         "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100 " +
         "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
-        "  AND c.status = 'queued'" +
-        pubSiteWhere + " " +
+        "  AND c.status = 'queued' " +
+        "  AND d.site_id = ? " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, d.created_at ASC " +
-        "LIMIT 1";
-      var readyPrimaryStmt = this.db.prepare(readyPrimarySql);
-      var readyPrimary = pubSiteParams.length
-        ? readyPrimaryStmt.get.apply(readyPrimaryStmt, pubSiteParams)
-        : readyPrimaryStmt.get();
+        "LIMIT 1"
+      ).get(publishSiteId);
 
       if (!readyPrimary) return;
 
-      var publishSiteId = readyPrimary.site_id || 1;
       var clusterId = readyPrimary.cluster_id;
 
       // Select the correct publisher for this draft's site
@@ -1314,34 +1326,18 @@ class Pipeline {
 
   // ─── RATE LIMIT ───────────────────────────────────────────────────────
   //
-  // Reads the unified PUBLISH_RATE_COUNT + PUBLISH_RATE_UNIT settings when
-  // both are set; otherwise falls back to the legacy MAX_PUBLISH_PER_HOUR +
-  // PUBLISH_COOLDOWN_MINUTES pair. The gap between consecutive publishes is
-  // derived as windowMs / count, so setting "10 per hour" gives a 6-minute
-  // cadence automatically — no need to keep cooldown in sync manually.
+  // Every site owns its own rule — "N posts per hour/day/week" — via
+  // site_config. Resolution lives in src/utils/publish-rate.js; this method
+  // is a thin wrapper that threads the site's frozen config through.
+  // Gap between publishes is always derived (windowMs / count); there is no
+  // separate cooldown concept anymore.
 
-  _resolvedPublishRate() {
-    var unit = _publishRateUnit();
-    var count = _publishRateCount();
-    var windowMs, gapMs, source;
-
-    if (unit && count > 0) {
-      windowMs = _publishWindowMs(unit);
-      gapMs = Math.floor(windowMs / count);
-      source = 'unified';
-    } else {
-      // Legacy path
-      unit = 'hour';
-      count = _maxPublishPerHour();
-      windowMs = 60 * 60 * 1000;
-      gapMs = _publishCooldownMs();
-      source = 'legacy';
-    }
-    return { count: count, unit: unit, windowMs: windowMs, gapMs: gapMs, source: source };
+  _resolvedPublishRate(siteId) {
+    return publishRate.resolvePublishRate(siteId, this.config);
   }
 
   getPublishRateState(siteId) {
-    var r = this._resolvedPublishRate();
+    var r = this._resolvedPublishRate(siteId);
     var now = Date.now();
     var cutoff = now - r.windowMs;
     var historyArr = siteId ? this._getSitePublishHistory(siteId) : this._getAllPublishHistory();
@@ -1382,9 +1378,14 @@ class Pipeline {
   canPublishNow() {
     try {
       var state = this.getPublishRateState();
-      // Prune any history older than the largest window we care about so the
-      // Map doesn't grow unbounded between windows.
-      var cutoff = Date.now() - Math.max(state.windowMs, 60 * 60 * 1000);
+      // Prune each site's history older than the LONGEST per-site window so a
+      // site configured for "N per week" doesn't lose history before its
+      // window closes. Global floor stays 1 h to absorb any aggregate reads
+      // that still use the legacy helper.
+      var activeSiteIds = [];
+      this.publishHistory.forEach(function (_arr, siteId) { activeSiteIds.push(siteId); });
+      var maxWindow = publishRate.getMaxWindowMs(this.config, activeSiteIds);
+      var cutoff = Date.now() - Math.max(maxWindow, 60 * 60 * 1000);
       this.publishHistory.forEach(function (arr, key, map) {
         var pruned = arr.filter(function (ts) { return ts > cutoff; });
         if (pruned.length === 0) map.delete(key);
@@ -1542,8 +1543,12 @@ class Pipeline {
     try {
       var now = Date.now();
       var oneHourAgo = now - 60 * 60 * 1000;
-      var maxPerHour = parseInt(this.config.MAX_PUBLISH_PER_HOUR, 10) || 4;
-      var cooldownMs = (parseInt(this.config.PUBLISH_COOLDOWN_MINUTES, 10) || 10) * 60 * 1000;
+      // Aggregate dashboard view — pick a representative rate via the global
+      // resolver (unified → legacy). Per-site budgets are honored separately
+      // inside _publishLoop; this surface is display-only.
+      var globalRate = this._resolvedPublishRate(null);
+      var maxPerHour = globalRate.unit === 'hour' ? globalRate.count : globalRate.count;
+      var cooldownMs = globalRate.gapMs;
 
       var allHistory = this._getAllPublishHistory();
       var recentHistory = allHistory.filter(function (ts) { return ts > oneHourAgo; });

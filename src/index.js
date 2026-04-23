@@ -18,6 +18,7 @@ var config = getConfig();
 // ─── 2. Initialize SQLite database (runs migrations on require) ─────────────
 var { db, closeDb, recoverStuckDrafts } = require('./utils/db');
 var clusteringConfig = require('./utils/clustering-config');
+var publishRate = require('./utils/publish-rate');
 var { sanitizeForClient } = require('./utils/api-helpers');
 
 // ─── 3. Initialize logger, set db reference ────────────────────────────────
@@ -55,6 +56,7 @@ var siteConfigMod = require('./utils/site-config');
 // ─── Initialise site-config module (must happen after DB + loadRuntimeOverrides) ──
 siteConfigMod.init(db);
 clusteringConfig.init(db);
+publishRate.init(logger);
 
 // ─── Multi-site pools ──────────────────────────────────────────────────────
 // Per-feed SSE pool: one FirehoseListener per active Feed, keyed by feed_id.
