@@ -6417,6 +6417,28 @@
     'hideParent': function (el) { if (el.parentElement) el.parentElement.style.display = 'none'; }
   };
 
+  // Keydown + paste registries — needed by the chip/tag inputs on the Feed
+  // Configuration tab (include_domains, exclude_domains). CSP blocks inline
+  // handlers, so these widgets rely on delegated listeners like every other
+  // UI control. Consumers register handlers on window.__feedDetail (or any
+  // other page module) and reference them by action name via data-keydown /
+  // data-paste attributes.
+  var KEYDOWN_ACTIONS = {
+    'fdCfgTagKey': function (el, e) {
+      if (window.__feedDetail && typeof window.__feedDetail.onTagKeydown === 'function') {
+        window.__feedDetail.onTagKeydown(el, e);
+      }
+    }
+  };
+
+  var PASTE_ACTIONS = {
+    'fdCfgTagPaste': function (el, e) {
+      if (window.__feedDetail && typeof window.__feedDetail.onTagPaste === 'function') {
+        window.__feedDetail.onTagPaste(el, e);
+      }
+    }
+  };
+
   function _dispatchEvent(registry, attr) {
     return function (e) {
       var el = e.target && e.target.closest && e.target.closest('[' + attr + ']');
@@ -6427,9 +6449,11 @@
   }
 
   function bindDelegatedEvents() {
-    document.addEventListener('click',  _dispatchEvent(CLICK_ACTIONS,  'data-click'));
-    document.addEventListener('input',  _dispatchEvent(INPUT_ACTIONS,  'data-input'));
-    document.addEventListener('change', _dispatchEvent(CHANGE_ACTIONS, 'data-change'));
+    document.addEventListener('click',   _dispatchEvent(CLICK_ACTIONS,   'data-click'));
+    document.addEventListener('input',   _dispatchEvent(INPUT_ACTIONS,   'data-input'));
+    document.addEventListener('change',  _dispatchEvent(CHANGE_ACTIONS,  'data-change'));
+    document.addEventListener('keydown', _dispatchEvent(KEYDOWN_ACTIONS, 'data-keydown'));
+    document.addEventListener('paste',   _dispatchEvent(PASTE_ACTIONS,   'data-paste'));
     // error events don't bubble — observe in the capture phase so a single
     // document listener still sees per-element failures (e.g. broken img).
     document.addEventListener('error', function (e) {
