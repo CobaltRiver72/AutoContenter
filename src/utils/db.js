@@ -1216,6 +1216,65 @@ function runMigrations() {
       }
     })();
 
+    // ─── Publish-rate promotion to per-site (PR 3) ───────────────────────────
+    // MAX_PUBLISH_PER_HOUR + PUBLISH_COOLDOWN_MINUTES (legacy) and the
+    // PUBLISH_RATE_{COUNT,UNIT} pair (unified) both lived at the global level.
+    // Each site now owns its own SITE_PUBLISH_RATE_COUNT + SITE_PUBLISH_RATE_UNIT
+    // in site_config. This seeds every existing site with the current effective
+    // global so nothing drifts silently. ON CONFLICT DO NOTHING keeps it
+    // idempotent — repeat boots are no-ops.
+    (function _migrateBackfillSitePublishRate() {
+      function _getSetting(key, fallback) {
+        try {
+          var row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+          if (row && row.value !== undefined && row.value !== null && row.value !== '') return row.value;
+        } catch (_e) { /* fall through */ }
+        return fallback;
+      }
+
+      function _normalizeUnit(u) {
+        if (!u) return null;
+        var s = String(u).toLowerCase().trim();
+        return (s === 'hour' || s === 'day' || s === 'week') ? s : null;
+      }
+
+      // Prefer unified globals, fall back to legacy (MAX_PUBLISH_PER_HOUR).
+      var seedUnit = _normalizeUnit(_getSetting('PUBLISH_RATE_UNIT', config.PUBLISH_RATE_UNIT));
+      var seedCount = parseInt(_getSetting('PUBLISH_RATE_COUNT', config.PUBLISH_RATE_COUNT), 10);
+      if (isNaN(seedCount) || seedCount <= 0) seedCount = 0;
+
+      if (!seedUnit || seedCount <= 0) {
+        seedUnit = 'hour';
+        var legacyCount = parseInt(_getSetting('MAX_PUBLISH_PER_HOUR', config.MAX_PUBLISH_PER_HOUR), 10);
+        seedCount = (isNaN(legacyCount) || legacyCount <= 0) ? 4 : legacyCount;
+      }
+
+      var siteRows;
+      try {
+        siteRows = db.prepare('SELECT id FROM sites').all();
+      } catch (_se) { siteRows = []; /* sites table not yet created */ }
+
+      if (siteRows.length === 0) return;
+
+      var upsertStmt = db.prepare(
+        "INSERT INTO site_config (site_id, key, value, updated_at) " +
+        "VALUES (?, ?, ?, datetime('now')) " +
+        "ON CONFLICT(site_id, key) DO NOTHING"
+      );
+
+      var seeded = 0;
+      for (var si = 0; si < siteRows.length; si++) {
+        var siteId = siteRows[si].id;
+        var r1 = upsertStmt.run(siteId, 'SITE_PUBLISH_RATE_COUNT', String(seedCount));
+        var r2 = upsertStmt.run(siteId, 'SITE_PUBLISH_RATE_UNIT', String(seedUnit));
+        if (r1.changes > 0 || r2.changes > 0) seeded++;
+      }
+
+      if (seeded > 0) {
+        console.log('[db] Seeded SITE_PUBLISH_RATE_{COUNT,UNIT} on ' + seeded + ' site(s) (seed=' + seedCount + '/' + seedUnit + ')');
+      }
+    })();
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);
