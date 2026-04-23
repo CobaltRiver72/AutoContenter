@@ -127,7 +127,7 @@ function toDec(v) {
  * Create the API router.
  *
  * @param {object} deps - Module references
- * @param {object} deps.firehose
+ * @param {object} deps.feedsPool
  * @param {object} deps.trends
  * @param {object} deps.buffer
  * @param {object} deps.similarity
@@ -153,7 +153,7 @@ function createApiRouter(deps) {
   });
   var { parseId, sanitizeForClient } = require('../utils/api-helpers');
   var { validateAndNormalizeUrl } = require('../utils/draft-helpers');
-  var { firehose, firehosePool, feedsPool, publisherPool, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
+  var { feedsPool, publisherPool, trends, buffer, similarity, extractor, rewriter, publisher, scheduler, infranodus, db, logger } = deps;
 
   // ─── Multi-site: extract req.siteId on every API request ─────────────────
   router.use(siteScope);
@@ -206,7 +206,7 @@ function createApiRouter(deps) {
   router.get('/status', function (req, res) {
     try {
       var status = {
-        firehose: firehose ? firehose.getStatus() : { state: 'not_loaded' },
+        feedsPool: feedsPool && typeof feedsPool.getHealth === 'function' ? feedsPool.getHealth() : { state: 'not_loaded' },
         trends: trends ? trends.getStatus() : { state: 'not_loaded' },
         scheduler: scheduler ? scheduler.getQueueStatus() : { state: 'not_loaded' },
         buffer: buffer ? buffer.getStats() : { state: 'not_loaded' },
@@ -224,7 +224,7 @@ function createApiRouter(deps) {
     try {
       var modules = [];
       var { fuel, metals } = req.app.locals.modules || {};
-      var sources = [firehose, trends, buffer, similarity, extractor, scheduler, infranodus, fuel, metals].filter(Boolean);
+      var sources = [feedsPool, trends, buffer, similarity, extractor, scheduler, infranodus, fuel, metals].filter(Boolean);
       for (var i = 0; i < sources.length; i++) {
         if (sources[i] && typeof sources[i].getHealth === 'function') {
           modules.push(sources[i].getHealth());
@@ -232,7 +232,7 @@ function createApiRouter(deps) {
       }
 
       var hasCriticalError = modules.some(function (m) {
-        return (m.module === 'firehose' || m.module === 'buffer') && m.status === 'error';
+        return (m.module === 'feeds-pool' || m.module === 'buffer') && m.status === 'error';
       });
       var hasAnyError = modules.some(function (m) { return m.status === 'error'; });
 
@@ -442,21 +442,15 @@ function createApiRouter(deps) {
       res.write('event: article\ndata: ' + data + '\n\n');
     }
 
-    // Subscribe to BOTH the legacy single-site firehose AND the multi-site pool
-    // so sites 2+ (served by the pool) also stream into the live feed.
-    if (firehose && typeof firehose.on === 'function') {
-      firehose.on('article', onArticle);
-    }
-    if (firehosePool && typeof firehosePool.on === 'function') {
-      firehosePool.on('article', onArticle);
+    // Subscribe to the per-feed pool — every article ingested by any feed
+    // surfaces here. Site filtering happens above via sseSiteId.
+    if (feedsPool && typeof feedsPool.on === 'function') {
+      feedsPool.on('article', onArticle);
     }
 
     function unsubscribe() {
-      if (firehose && typeof firehose.removeListener === 'function') {
-        firehose.removeListener('article', onArticle);
-      }
-      if (firehosePool && typeof firehosePool.removeListener === 'function') {
-        firehosePool.removeListener('article', onArticle);
+      if (feedsPool && typeof feedsPool.removeListener === 'function') {
+        feedsPool.removeListener('article', onArticle);
       }
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = null;
@@ -1912,16 +1906,10 @@ function createApiRouter(deps) {
         'PORT',
         'FUEL_RAPIDAPI_KEY', 'METALS_RAPIDAPI_KEY',
         'WP_SITE_URL',
-        // Autopilot
-        'AUTOPILOT_ENABLED', 'AUTOPILOT_DAILY_TARGET',
-        'AUTOPILOT_WEEKENDS', 'AUTOPILOT_MIN_SIMILARITY', 'AUTOPILOT_MIN_TIER', 'AUTOPILOT_MIN_WORDS',
-        'AUTOPILOT_BLOCKED_KEYWORDS', 'AUTOPILOT_BLOCKED_DOMAINS', 'AUTOPILOT_ALLOWED_DOMAINS',
-        'AUTOPILOT_BLOCKED_CATEGORIES', 'AUTOPILOT_AUTO_CATEGORIZE',
         'PUBLISH_LANGUAGE', 'REWRITE_LANGUAGE',
-        // Firehose
-        'FIREHOSE_SINCE', 'FIREHOSE_TIMEOUT', 'FIREHOSE_RECONNECT_MIN', 'FIREHOSE_RECONNECT_MAX',
-        'FIREHOSE_ALLOWED_DOMAINS', 'FIREHOSE_BLOCKED_DOMAINS', 'FIREHOSE_CUSTOM_TEMPLATES',
-        'FIREHOSE_ALLOWED_LANGS', 'ALLOWED_LANGUAGES',
+        // Firehose (per-feed config lives on feeds.source_config — only the
+        // global management key + allowed-languages fallback remain here)
+        'FIREHOSE_MANAGEMENT_KEY', 'ALLOWED_LANGUAGES',
         // Pipeline engine
         'EXTRACTION_POLL_MS', 'EXTRACTION_TIMEOUT_MS', 'EXTRACTION_MAX_SIZE_MB', 'JINA_ENABLED',
         'CLUSTERING_DEBOUNCE_MS', 'CLUSTERING_MAX_WAIT_MS', 'CLUSTER_QUEUE_MAX', 'MAX_BUFFER_FOR_SIMILARITY',
@@ -2028,16 +2016,9 @@ function createApiRouter(deps) {
         logger.info('api', 'InfraNodus re-initialized after settings change');
       }
 
-      // Re-initialize firehose if FIREHOSE_TOKEN changed
-      var hasFirehoseChange = validEntries.some(function (e) { return e[0] === 'FIREHOSE_TOKEN'; });
-      if (hasFirehoseChange && firehose) {
-        var freshConfig = getConfig();
-        firehose.stop();
-        firehose._stopped = false;
-        firehose.updateConfig(freshConfig);
-        if (freshConfig.FIREHOSE_TOKEN) firehose.connect();
-        logger.info('api', 'Firehose re-initialized after token change');
-      }
+      // Firehose tokens are now per-feed (see feeds.firehose_token). A change
+      // to the global FIREHOSE_TOKEN fallback doesn't require restarting any
+      // listener — individual feeds re-init on their own edit endpoints.
 
       logger.info('api', 'Settings updated', { keys: validEntries.map(function (e) { return e[0]; }) });
       res.json({ success: true, updated: validEntries.length });
@@ -2462,7 +2443,6 @@ function createApiRouter(deps) {
     if (!token) {
       return res.json({ success: false, error: 'Firehose token not configured', tokenConfigured: false });
     }
-    // Test by fetching rules (lightweight API call)
     return axios.get('https://api.firehose.com/v1/rules', {
       headers: { 'Authorization': 'Bearer ' + token },
       timeout: 10000,
@@ -2474,7 +2454,7 @@ function createApiRouter(deps) {
         tokenConfigured: true,
         rulesCount: rulesCount,
         message: 'Connection successful. ' + rulesCount + ' rules configured.',
-        status: firehose ? firehose.getStatus() : {},
+        status: { state: 'ok' },
       });
     })
     .catch(function (err) {
@@ -2704,272 +2684,6 @@ function createApiRouter(deps) {
     });
   });
 
-  // ─── Firehose Rules Proxy ──────────────────────────────────────────────
-  // Helper: resolve firehose token for active site (falls back to global settings)
-  function _siteFirehoseToken(siteId) {
-    if (siteId && siteId !== 1) {
-      var row = db.prepare('SELECT firehose_token FROM sites WHERE id = ?').get(siteId);
-      if (row && row.firehose_token) return row.firehose_token;
-    }
-    return getConfig().FIREHOSE_TOKEN || null;
-  }
-
-  router.get('/firehose/rules', function (req, res) {
-    var token = _siteFirehoseToken(req.siteId);
-    if (!token) {
-      return res.status(400).json({ error: 'Firehose token not configured' });
-    }
-    axios.get('https://api.firehose.com/v1/rules', {
-      headers: { 'Authorization': 'Bearer ' + token },
-      timeout: 15000,
-    })
-    .then(function (response) {
-      res.json(response.data);
-    })
-    .catch(function (err) {
-      var safe = sanitizeAxiosError(err);
-      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
-      logger.error('api', 'Failed to fetch firehose rules', msg);
-      res.status(safe.status || 500).json({ error: msg });
-    });
-  });
-
-  router.post('/firehose/rules', function (req, res) {
-    var token = _siteFirehoseToken(req.siteId);
-    if (!token) {
-      return res.status(400).json({ error: 'Firehose token not configured' });
-    }
-    var body = req.body;
-    if (!body || !body.value) {
-      return res.status(400).json({ error: 'Rule "value" (Lucene query) is required' });
-    }
-    axios.post('https://api.firehose.com/v1/rules', {
-      value: body.value,
-      tag: body.tag || '',
-      quality: body.quality !== false,
-    }, {
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      timeout: 15000,
-    })
-    .then(function (response) {
-      logger.info('api', 'Firehose rule created', { tag: body.tag, value: body.value.substring(0, 80) });
-      res.json(response.data);
-    })
-    .catch(function (err) {
-      var safe = sanitizeAxiosError(err);
-      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
-      logger.error('api', 'Failed to create firehose rule', msg);
-      res.status(safe.status || 500).json({ error: msg });
-    });
-  });
-
-  router.put('/firehose/rules/:id', function (req, res) {
-    var token = _siteFirehoseToken(req.siteId);
-    if (!token) {
-      return res.status(400).json({ error: 'Firehose token not configured' });
-    }
-    var ruleId = req.params.id;
-    if (!/^[a-zA-Z0-9_-]+$/.test(ruleId)) {
-      return res.status(400).json({ error: 'Invalid rule ID format' });
-    }
-    var body = req.body;
-    return axios.put('https://api.firehose.com/v1/rules/' + ruleId, body, {
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      timeout: 15000,
-    })
-    .then(function (response) {
-      logger.info('api', 'Firehose rule updated', { ruleId: ruleId });
-      res.json(response.data);
-    })
-    .catch(function (err) {
-      var safe = sanitizeAxiosError(err);
-      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
-      logger.error('api', 'Failed to update firehose rule', msg);
-      res.status(safe.status || 500).json({ error: msg });
-    });
-  });
-
-  router.delete('/firehose/rules/:id', function (req, res) {
-    var token = _siteFirehoseToken(req.siteId);
-    if (!token) {
-      return res.status(400).json({ error: 'Firehose token not configured' });
-    }
-    var ruleId = req.params.id;
-    if (!/^[a-zA-Z0-9_-]+$/.test(ruleId)) {
-      return res.status(400).json({ error: 'Invalid rule ID format' });
-    }
-    return axios.delete('https://api.firehose.com/v1/rules/' + ruleId, {
-      headers: { 'Authorization': 'Bearer ' + token },
-      timeout: 15000,
-    })
-    .then(function (response) {
-      logger.info('api', 'Firehose rule deleted', { ruleId: ruleId });
-      res.json({ success: true });
-    })
-    .catch(function (err) {
-      var safe = sanitizeAxiosError(err);
-      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
-      logger.error('api', 'Failed to delete firehose rule', msg);
-      res.status(safe.status || 500).json({ error: msg });
-    });
-  });
-
-  router.get('/firehose/status', function (req, res) {
-    try {
-      var statusSiteId = req.siteId;
-      // All-Sites mode: return aggregate pool health
-      if (!statusSiteId || statusSiteId === 0) {
-        var poolHealth = firehosePool ? firehosePool.getHealth() : [];
-        return res.json({ allSites: true, listeners: poolHealth });
-      }
-      // Single-site mode: return that site's listener status
-      var listener = firehosePool ? firehosePool.get(statusSiteId) : null;
-      if (listener) {
-        var status = listener.getStatus ? listener.getStatus() : listener.getHealth();
-        var siteRow = db.prepare('SELECT firehose_token FROM sites WHERE id = ?').get(statusSiteId) || {};
-        var token = siteRow.firehose_token || '';
-        status.tokenConfigured = !!token;
-        status.tokenPreview = token ? '...' + token.slice(-4) : '';
-        return res.json(status);
-      }
-      // Fallback to legacy single firehose for site 1
-      var legacyStatus = firehose ? firehose.getStatus() : { connected: false, stopped: true };
-      var globalConfig = getConfig();
-      legacyStatus.tokenConfigured = !!globalConfig.FIREHOSE_TOKEN;
-      legacyStatus.tokenPreview = globalConfig.FIREHOSE_TOKEN ? '...' + globalConfig.FIREHOSE_TOKEN.slice(-4) : '';
-      res.json(legacyStatus);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ─── POST /api/firehose/connect — Save token & connect ────────────────
-  // Accepts either a tap token (fh_) or management key (fhm_).
-  // If management key, auto-discovers/creates a tap and saves the tap token.
-
-  router.post('/firehose/connect', function (req, res) {
-    try {
-      var connectSiteId = req.siteId || 1;
-      var token = req.body && req.body.token;
-      if (!token) {
-        return res.status(400).json({ error: 'Token is required' });
-      }
-
-      token = token.trim();
-
-      // Detect key type
-      if (token.indexOf('fhm_') === 0) {
-        // Management key — need to discover or create a tap
-        logger.info('api', 'Management key detected, discovering taps...');
-        var mgmtKey = token;
-
-        // Save management key for future use
-        var upsertMgmt = db.prepare(
-          "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
-          "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-        );
-        upsertMgmt.run('FIREHOSE_MANAGEMENT_KEY', mgmtKey);
-
-        // List existing taps
-        axios.get('https://api.firehose.com/v1/taps', {
-          headers: { 'Authorization': 'Bearer ' + mgmtKey },
-          timeout: 15000,
-        })
-        .then(function (tapsRes) {
-          var taps = tapsRes.data;
-          if (!Array.isArray(taps)) taps = taps.taps || taps.data || [];
-
-          if (taps.length > 0) {
-            // Use the first tap's token
-            var tapToken = taps[0].token || taps[0].tap_token;
-            var tapName = taps[0].name || taps[0].id || 'tap-1';
-            logger.info('api', 'Found existing tap: ' + tapName + ', token: ...' + (tapToken ? tapToken.slice(-4) : ''));
-            saveTapTokenAndConnect(tapToken, connectSiteId, res);
-          } else {
-            // No taps exist — create one
-            logger.info('api', 'No taps found, creating new tap...');
-            axios.post('https://api.firehose.com/v1/taps', {
-              name: 'hdf-autopub'
-            }, {
-              headers: { 'Authorization': 'Bearer ' + mgmtKey, 'Content-Type': 'application/json' },
-              timeout: 15000,
-            })
-            .then(function (createRes) {
-              var newTap = createRes.data;
-              var tapToken = newTap.token || newTap.tap_token;
-              logger.info('api', 'Created new tap: hdf-autopub, token: ...' + (tapToken ? tapToken.slice(-4) : ''));
-              saveTapTokenAndConnect(tapToken, connectSiteId, res);
-            })
-            .catch(function (err) {
-              var safe = sanitizeAxiosError(err);
-              var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
-              logger.error('api', 'Failed to create tap', msg);
-              res.status(500).json({ error: 'Failed to create tap: ' + msg });
-            });
-          }
-        })
-        .catch(function (err) {
-          var safe = sanitizeAxiosError(err);
-          var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
-          logger.error('api', 'Failed to list taps', msg);
-          res.status(500).json({ error: 'Failed to list taps with management key: ' + msg });
-        });
-
-      } else {
-        // Direct tap token (fh_ or other) — save and connect immediately
-        saveTapTokenAndConnect(token, connectSiteId, res);
-      }
-    } catch (err) {
-      logger.error('api', 'Failed to save firehose token', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  function saveTapTokenAndConnect(tapToken, siteId, res) {
-    if (!tapToken) {
-      return res.status(500).json({ error: 'No tap token received from API' });
-    }
-    siteId = siteId || 1;
-
-    if (siteId === 1) {
-      // Default site: save to global settings + restart legacy firehose
-      var upsertStmt = db.prepare(
-        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-      );
-      upsertStmt.run('FIREHOSE_TOKEN', tapToken);
-
-      var { loadRuntimeOverrides } = require('../utils/config');
-      loadRuntimeOverrides(db);
-      var newConfig = getConfig();
-
-      if (firehose) {
-        firehose.stop();
-        firehose._stopped = false;
-        firehose.updateConfig(newConfig);
-        firehose.connect();
-      }
-    } else {
-      // Non-default site: save to sites.firehose_token + hot-add to pool
-      db.prepare("UPDATE sites SET firehose_token = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(tapToken, siteId);
-
-      if (firehosePool) {
-        // Remove existing listener (if any) and re-add with new token
-        firehosePool.removeSite(siteId).catch(function () {});
-        firehosePool.addSite(siteId).catch(function (e) {
-          logger.warn('api', 'firehosePool.addSite failed: ' + e.message);
-        });
-      }
-    }
-
-    logger.info('api', 'Tap token saved for site ' + siteId + ' and connection initiated');
-    res.json({
-      success: true,
-      message: 'Tap token saved. Connecting to Firehose...',
-      tokenPreview: '...' + tapToken.slice(-4),
-    });
-  }
 
   // ─── Draft Routes (Manual Selection + Editor) ─────────────────────────
 
@@ -4970,29 +4684,6 @@ function createApiRouter(deps) {
     }
   });
 
-  // ─── GET /api/firehose/taps — List taps (requires management key) ────
-
-  router.get('/firehose/taps', function (req, res) {
-    var mgmtKey = db.prepare("SELECT value FROM settings WHERE key = 'FIREHOSE_MANAGEMENT_KEY'").get();
-    if (!mgmtKey || !mgmtKey.value) {
-      return res.status(400).json({ error: 'No management key configured. Save one first via Firehose connect.' });
-    }
-
-    axios.get('https://api.firehose.com/v1/taps', {
-      headers: { 'Authorization': 'Bearer ' + mgmtKey.value },
-      timeout: 15000,
-    })
-    .then(function (response) {
-      var taps = response.data;
-      if (!Array.isArray(taps)) taps = taps.taps || taps.data || [];
-      res.json({ taps: taps });
-    })
-    .catch(function (err) {
-      var safe = sanitizeAxiosError(err);
-      var msg = safe.status ? 'API error ' + safe.status + ': ' + (safe.data || safe.message) : safe.message;
-      res.status(safe.status || 500).json({ error: msg });
-    });
-  });
 
   // ─── POST /api/drafts/:id/retry — Reset a failed draft for retry ──────
   // If the draft has rewritten_html → reset to 'ready' (publish retry).
@@ -5107,7 +4798,7 @@ function createApiRouter(deps) {
         modules: {},
       };
 
-      var moduleNames = ['firehose', 'trends', 'buffer', 'similarity', 'extractor', 'rewriter', 'publisher', 'scheduler', 'infranodus'];
+      var moduleNames = ['feedsPool', 'trends', 'buffer', 'similarity', 'extractor', 'rewriter', 'publisher', 'scheduler', 'infranodus'];
       for (var i = 0; i < moduleNames.length; i++) {
         var mod = deps[moduleNames[i]];
         if (mod && mod.getHealth) {
@@ -5970,536 +5661,6 @@ function createApiRouter(deps) {
     }
   });
 
-  // ─── Autopilot API ───────────────────────────────────────────────────────
-
-  router.get('/autopilot/status', function (req, res) {
-    try {
-      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
-      if (!ap) return res.json({ ok: true, data: { enabled: false, active: false } });
-      res.json({ ok: true, data: ap.getStatus() });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  router.get('/autopilot/decisions', function (req, res) {
-    try {
-      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
-      var limit = parseInt(req.query.limit, 10) || 100;
-      if (!ap) return res.json({ ok: true, data: [] });
-      res.json({ ok: true, data: ap.getRecentDecisions(limit, req.siteId) });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // GET /api/autopilot/simulate — dry-run: check next ready cluster against all filters
-  router.get('/autopilot/simulate', function (req, res) {
-    try {
-      var db = req.app.locals.db;
-      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
-
-      // Queue depth snapshot (scoped to current site)
-      var simSw = _siteWhere(req.siteId);
-      var queueStats = {};
-      ['ready','rewriting','draft','failed','published'].forEach(function (s) {
-        var qStmt = db.prepare('SELECT COUNT(*) as n FROM drafts WHERE status = ?' + simSw.clause);
-        queueStats[s] = (qStmt.get.apply(qStmt, [s].concat(simSw.params)) || {}).n || 0;
-      });
-
-      if (!ap) {
-        return res.json({ ok: true, data: { queue: queueStats, result: null,
-          message: 'Autopilot module not loaded' } });
-      }
-
-      // Find next ready primary draft (scoped to current site)
-      var nextDraftStmt = db.prepare(
-        "SELECT d.*, c.avg_similarity, c.article_count FROM drafts d " +
-        "JOIN clusters c ON c.id = d.cluster_id " +
-        "WHERE d.status = 'ready' AND d.cluster_role = 'primary' " +
-        "AND c.status NOT IN ('published','skipped')" + simSw.clause +
-        " ORDER BY d.updated_at ASC LIMIT 1"
-      );
-      var nextDraft = nextDraftStmt.get.apply(nextDraftStmt, simSw.params);
-
-      if (!nextDraft) {
-        return res.json({ ok: true, data: { queue: queueStats, result: null,
-          message: 'No ready clusters in queue. Check Live Feed and Clusters pages.' } });
-      }
-
-      // Run through all autopilot checks (read-only — no DB writes)
-      var cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(nextDraft.cluster_id);
-      var decision = ap.simulateChecks(cluster, nextDraft);
-      var status = ap.getStatus();
-
-      res.json({ ok: true, data: {
-        queue: queueStats,
-        candidate: {
-          draftId: nextDraft.id,
-          clusterId: nextDraft.cluster_id,
-          title: nextDraft.rewritten_title || nextDraft.source_title || '(untitled)',
-          wordCount: nextDraft.rewritten_word_count || 0,
-          similarity: nextDraft.avg_similarity || 0,
-          sourceDomain: nextDraft.source_domain || ''
-        },
-        decision: decision,
-        autopilotStatus: status
-      }});
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // Helper: read a boolean flag for the active site, falling back to global
-  // settings when the site has no per-site override. siteId=0 reads global only.
-  function _readEnabledFlag(key, siteId) {
-    if (siteId) {
-      var siteVal = siteConfigMod.getSiteConfig(siteId, key);
-      if (siteVal !== undefined && siteVal !== null && siteVal !== '') {
-        return siteVal === true || siteVal === 1 || String(siteVal).toLowerCase() === 'true' || siteVal === '1';
-      }
-    }
-    var { get: cfgGet } = require('../utils/config');
-    var globalVal = cfgGet(key);
-    return globalVal === true || globalVal === 1 || String(globalVal).toLowerCase() === 'true' || globalVal === '1';
-  }
-
-  router.post('/autopilot/toggle', function (req, res) {
-    try {
-      var toggleSiteId = req.siteId || 0;
-      var isEnabled = _readEnabledFlag('AUTOPILOT_ENABLED', toggleSiteId);
-      var newValue  = isEnabled ? 'false' : 'true';
-      if (toggleSiteId) {
-        siteConfigMod.setSiteConfig(toggleSiteId, 'AUTOPILOT_ENABLED', newValue);
-      } else {
-        var { set: cfgSet } = require('../utils/config');
-        cfgSet('AUTOPILOT_ENABLED', newValue, req.app.locals.db);
-      }
-      var ap = req.app.locals.modules && req.app.locals.modules.autopilot;
-      res.json({
-        ok: true,
-        enabled: newValue === 'true',
-        siteId: toggleSiteId,
-        scope: toggleSiteId ? 'site' : 'global',
-        status: ap ? ap.getStatus() : null,
-      });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // POST /api/auto-rewrite/toggle — toggle AUTO_REWRITE_ENABLED (per-site or global)
-  router.post('/auto-rewrite/toggle', function (req, res) {
-    try {
-      var toggleSiteId = req.siteId || 0;
-      var isEnabled = _readEnabledFlag('AUTO_REWRITE_ENABLED', toggleSiteId);
-      var newValue  = isEnabled ? 'false' : 'true';
-      if (toggleSiteId) {
-        siteConfigMod.setSiteConfig(toggleSiteId, 'AUTO_REWRITE_ENABLED', newValue);
-      } else {
-        var { set: cfgSet } = require('../utils/config');
-        cfgSet('AUTO_REWRITE_ENABLED', newValue, req.app.locals.db);
-      }
-      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
-      var status = pipeline && typeof pipeline.getAutoRewriteStatus === 'function'
-        ? pipeline.getAutoRewriteStatus() : null;
-      res.json({
-        ok: true,
-        enabled: newValue === 'true',
-        siteId: toggleSiteId,
-        scope: toggleSiteId ? 'site' : 'global',
-        status: status,
-      });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // GET /api/auto-rewrite/status — auto-rewrite engine stats
-  router.get('/auto-rewrite/status', function (req, res) {
-    try {
-      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
-      if (!pipeline || typeof pipeline.getAutoRewriteStatus !== 'function') {
-        return res.json({ ok: true, data: { enabled: false, pendingClusters: 0 } });
-      }
-      res.json({ ok: true, data: pipeline.getAutoRewriteStatus() });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // POST /api/autopilot/run-now — manually trigger one rewrite + publish cycle.
-  // Runs the exact same methods the scheduler calls on every tick. Gates
-  // (AUTO_REWRITE_ENABLED, AUTOPILOT_ENABLED, rate limits, quality filters)
-  // still apply, so the logs show real production behaviour.
-  //
-  // Before invoking the loops this also runs a 6-stage filter drop-off
-  // diagnostic against the rewrite selector, so when the loop finds zero
-  // candidates the UI can point at the exact filter that excluded them.
-  router.post('/autopilot/run-now', async function (req, res) {
-    var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
-    if (!pipeline) {
-      return res.status(500).json({ ok: false, error: 'scheduler not initialised' });
-    }
-    var db = req.app.locals.db;
-    // Scope to the active site. siteId=0 (All Sites) runs the unscoped loop.
-    var rnSiteId = req.siteId || 0;
-    var autoRw = rnSiteId
-      ? siteConfigMod.getSiteConfig(rnSiteId, 'AUTO_REWRITE_ENABLED')
-      : cfgGet('AUTO_REWRITE_ENABLED');
-    var autoPub = rnSiteId
-      ? siteConfigMod.getSiteConfig(rnSiteId, 'AUTOPILOT_ENABLED')
-      : cfgGet('AUTOPILOT_ENABLED');
-    var gateSummary = 'rewrite=' + autoRw + ' publish=' + autoPub + ' site=' + (rnSiteId || 'all');
-    logger.info('autopilot', 'Run-Now triggered by user (' + gateSummary + ')');
-
-    // ─── Filter drop-off diagnostic ─────────────────────────────────────────
-    // Runs COUNT(DISTINCT cluster_id) against the same tables the rewrite
-    // selector uses, adding one filter per stage. Reveals which filter is
-    // cutting candidates to zero. Matches pipeline.js _rewriteLoop selector
-    // semantics (pipeline.js:257-274). When the admin is on a specific site,
-    // every stage also filters `d.site_id = ?` so the counts reflect ONLY
-    // that site's pipeline — never surfacing Site A's backlog while scoped
-    // to Site B.
-    var diagnostic = { stages: [], biggestDrop: null, error: null, siteId: rnSiteId };
-    try {
-      var minSources = parseInt(cfgGet('MIN_SOURCES_THRESHOLD'), 10);
-      if (isNaN(minSources) || minSources < 1) minSources = 2;
-      var minSim = parseFloat(cfgGet('AUTOPILOT_MIN_SIMILARITY'));
-      if (isNaN(minSim)) minSim = 0.30;
-
-      // Per-site filter — prepended as a leading param so stage param arrays
-      // stay simple. When unscoped, F_SITE is empty.
-      var F_SITE = rnSiteId ? ' AND d.site_id = ?' : '';
-      var siteLeadParams = rnSiteId ? [rnSiteId] : [];
-
-      var base = "SELECT COUNT(DISTINCT d.cluster_id) AS n FROM drafts d " +
-        "JOIN clusters c ON d.cluster_id = c.id " +
-        "WHERE d.status='draft' AND c.status='queued' AND d.cluster_role='primary'" +
-        F_SITE;
-      var F_MODE = " AND d.mode IN ('auto','manual_import')";
-      var F_SOURCES = " AND c.article_count >= ?";
-      var F_SIM = " AND (c.avg_similarity IS NULL OR c.avg_similarity >= ?)";
-      var F_LOCK = " AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now'))";
-      var F_NOSIB = " AND NOT EXISTS (SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
-        "AND d2.status='fetching' AND d2.mode IN ('auto','manual_import'))";
-
-      var stages = [
-        { key: 'pending_primary',     sql: base,                                                  params: siteLeadParams.slice(),                                       note: 'baseline: draft + queued + primary' + (rnSiteId ? ' (site=' + rnSiteId + ')' : '') },
-        { key: 'mode_auto',           sql: base + F_MODE,                                         params: siteLeadParams.slice(),                                       note: "mode IN (auto, manual_import)" },
-        { key: 'min_sources',         sql: base + F_MODE + F_SOURCES,                             params: siteLeadParams.concat([minSources]),                          note: 'article_count >= ' + minSources },
-        { key: 'min_similarity',      sql: base + F_MODE + F_SOURCES + F_SIM,                     params: siteLeadParams.concat([minSources, minSim]),                  note: 'avg_similarity >= ' + minSim },
-        { key: 'not_locked',          sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK,            params: siteLeadParams.concat([minSources, minSim]),                  note: 'primary draft not locked' },
-        { key: 'no_sibling_fetching', sql: base + F_MODE + F_SOURCES + F_SIM + F_LOCK + F_NOSIB,  params: siteLeadParams.concat([minSources, minSim]),                  note: 'no sibling still in fetching' },
-      ];
-
-      for (var i = 0; i < stages.length; i++) {
-        var stmt = db.prepare(stages[i].sql);
-        var row = stmt.get.apply(stmt, stages[i].params);
-        diagnostic.stages.push({ stage: stages[i].key, count: (row && row.n) || 0, note: stages[i].note });
-      }
-
-      for (var j = 1; j < diagnostic.stages.length; j++) {
-        var drop = diagnostic.stages[j - 1].count - diagnostic.stages[j].count;
-        if (drop > 0 && (!diagnostic.biggestDrop || drop > diagnostic.biggestDrop.drop)) {
-          diagnostic.biggestDrop = {
-            from: diagnostic.stages[j - 1].stage,
-            to: diagnostic.stages[j].stage,
-            fromCount: diagnostic.stages[j - 1].count,
-            toCount: diagnostic.stages[j].count,
-            drop: drop,
-            filter: diagnostic.stages[j].note,
-          };
-        }
-      }
-
-      var summary = diagnostic.stages.map(function (s) { return s.stage + '=' + s.count; }).join(' -> ');
-      logger.info('autopilot', 'Run-Now diagnostic: ' + summary);
-      if (diagnostic.biggestDrop) {
-        var bd = diagnostic.biggestDrop;
-        logger.info('autopilot',
-          'Run-Now biggest drop: ' + bd.from + '(' + bd.fromCount + ') -> ' + bd.to + '(' + bd.toCount + ') ' +
-          '[-' + bd.drop + '] filter: ' + bd.filter);
-      } else if (diagnostic.stages[0].count === 0) {
-        logger.info('autopilot', 'Run-Now diagnostic: no clusters match baseline (nothing pending to rewrite)');
-      }
-    } catch (diagErr) {
-      diagnostic.error = diagErr.message;
-      logger.warn('autopilot', 'Run-Now diagnostic failed: ' + diagErr.message);
-    }
-
-    // ─── Deep trace: replicate _rewriteLoop's exact SQL with real LIMIT ─────
-    // The diagnostic above only runs the FILTERS, not the LIMIT or the
-    // blocked-keyword JS post-filter. This block runs the identical query
-    // the production loop uses, so we can see if the real candidate set
-    // is being cut by concurrency limits, rate caps, or topic filters.
-    try {
-      logger.info('autopilot',
-        'Run-Now state-before: rewriteRunning=' + !!pipeline._rewriteRunning +
-        ' publishRunning=' + !!pipeline._publishRunning);
-
-      var concurrency = parseInt(cfgGet('REWRITE_CONCURRENCY'), 10) || 3;
-      var dailyLimit = parseInt(cfgGet('AUTO_REWRITE_DAILY_LIMIT'), 10) || 100;
-      var hourlyLimit = parseInt(cfgGet('AUTO_REWRITE_HOURLY_LIMIT'), 10) || 20;
-      var rToday = (db.prepare(
-        "SELECT COUNT(*) AS n FROM draft_versions WHERE created_at >= date('now')"
-      ).get() || {}).n || 0;
-      var rHour = (db.prepare(
-        "SELECT COUNT(*) AS n FROM draft_versions WHERE created_at >= datetime('now', '-1 hour')"
-      ).get() || {}).n || 0;
-      var slots = Math.min(concurrency, dailyLimit - rToday, hourlyLimit - rHour);
-
-      logger.info('autopilot',
-        'Run-Now slots: concurrency=' + concurrency +
-        ' daily=' + rToday + '/' + dailyLimit +
-        ' hour=' + rHour + '/' + hourlyLimit +
-        ' -> slotsAvailable=' + slots);
-
-      if (slots > 0) {
-        // Identical to _rewriteLoop SELECT in pipeline.js — blocked-keyword
-        // filter is now pushed into SQL so the ORDER BY steps past blocked
-        // clusters instead of filtering after LIMIT.
-        var realMinSources = parseInt(cfgGet('MIN_SOURCES_THRESHOLD'), 10);
-        if (isNaN(realMinSources) || realMinSources < 1) realMinSources = 2;
-        var realMinSim = parseFloat(cfgGet('AUTOPILOT_MIN_SIMILARITY'));
-        if (isNaN(realMinSim)) realMinSim = 0.30;
-
-        var traceBlockedKwRaw = String(cfgGet('AUTOPILOT_BLOCKED_KEYWORDS') || '');
-        var traceBlockedKw = traceBlockedKwRaw
-          .split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
-        var traceKwWhere = '';
-        var traceKwParams = [];
-        for (var tki = 0; tki < traceBlockedKw.length; tki++) {
-          traceKwWhere += ' AND LOWER(c.topic) NOT LIKE ?';
-          traceKwParams.push('%' + traceBlockedKw[tki] + '%');
-        }
-
-        var traceSiteWhere = rnSiteId ? ' AND d.site_id = ?' : '';
-        var traceSiteParams = rnSiteId ? [rnSiteId] : [];
-        var traceSql =
-          "SELECT d.cluster_id, c.topic, c.trends_boosted, COUNT(*) as draft_count " +
-          "FROM drafts d " +
-          "JOIN clusters c ON d.cluster_id = c.id " +
-          "WHERE d.mode IN ('auto', 'manual_import') AND d.cluster_id IS NOT NULL AND d.status = 'draft' " +
-          "  AND c.status = 'queued' " +
-          "  AND c.article_count >= ? " +
-          "  AND (c.avg_similarity IS NULL OR c.avg_similarity >= ?) " +
-          "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
-          "  AND NOT EXISTS (" +
-          "    SELECT 1 FROM drafts d2 WHERE d2.cluster_id = d.cluster_id " +
-          "    AND d2.status = 'fetching' AND d2.mode IN ('auto', 'manual_import')" +
-          "  )" +
-          traceKwWhere + traceSiteWhere + " " +
-          "GROUP BY d.cluster_id " +
-          "HAVING COUNT(CASE WHEN d.cluster_role = 'primary' THEN 1 END) > 0 " +
-          "ORDER BY c.trends_boosted DESC, c.article_count DESC, c.detected_at ASC " +
-          "LIMIT ?";
-        var traceStmt = db.prepare(traceSql);
-        var traceParams = [realMinSources, realMinSim].concat(traceKwParams).concat(traceSiteParams).concat([slots]);
-        var loopRows = traceStmt.all.apply(traceStmt, traceParams);
-
-        logger.info('autopilot',
-          'Run-Now real-SQL (LIMIT ' + slots + ', blocked-kw in SQL): returned ' + loopRows.length + ' rows');
-
-        if (loopRows.length > 0) {
-          var topics = loopRows.map(function (r) { return (r.topic || '').substring(0, 60); });
-          logger.info('autopilot', 'Run-Now top candidates: ' + JSON.stringify(topics));
-        }
-      }
-    } catch (traceErr) {
-      logger.warn('autopilot', 'Run-Now trace failed: ' + traceErr.message);
-    }
-    // ─── End deep trace ─────────────────────────────────────────────────────
-
-    var startStats = Object.assign({}, pipeline.stats || {});
-    var errors = [];
-    var rewriteSkipped = false;
-
-    // If the scheduler is already mid-cycle the concurrency guard inside
-    // _rewriteLoop returns immediately and Run Now is a no-op. Log that
-    // explicitly so the UI can distinguish "nothing to do" from "busy".
-    if (pipeline._rewriteRunning) {
-      rewriteSkipped = true;
-      logger.info('autopilot', 'Run-Now skipped rewrite: scheduler already running (rewriteRunning=true)');
-    } else {
-      try {
-        await pipeline._rewriteLoop(rnSiteId || undefined);
-      } catch (e) {
-        errors.push('rewrite: ' + e.message);
-        logger.error('autopilot', 'Run-Now rewrite failed: ' + e.message);
-      }
-    }
-
-    logger.info('autopilot',
-      'Run-Now state-after: rewriteRunning=' + !!pipeline._rewriteRunning +
-      ' publishRunning=' + !!pipeline._publishRunning);
-
-    var publishSkipped = false;
-    if (pipeline._publishRunning) {
-      publishSkipped = true;
-      logger.info('autopilot', 'Run-Now skipped publish: scheduler already running (publishRunning=true)');
-    } else {
-      try {
-        await pipeline._publishLoop(rnSiteId || undefined);
-      } catch (e) {
-        errors.push('publish: ' + e.message);
-        logger.error('autopilot', 'Run-Now publish failed: ' + e.message);
-      }
-    }
-
-    var endStats = pipeline.stats || {};
-    var delta = {
-      rewritesStarted: (endStats.rewritesStarted || 0) - (startStats.rewritesStarted || 0),
-      rewritesCompleted: (endStats.rewritesCompleted || 0) - (startStats.rewritesCompleted || 0),
-      rewritesFailed: (endStats.rewritesFailed || 0) - (startStats.rewritesFailed || 0),
-      publishesCompleted: (endStats.publishesCompleted || 0) - (startStats.publishesCompleted || 0),
-      publishesFailed: (endStats.publishesFailed || 0) - (startStats.publishesFailed || 0),
-    };
-    logger.info('autopilot', 'Run-Now finished (delta ' + JSON.stringify(delta) + ')');
-
-    var rateLimit = null;
-    try {
-      if (typeof pipeline.getPublishRateState === 'function') {
-        rateLimit = pipeline.getPublishRateState();
-      }
-    } catch (e) { /* best effort */ }
-
-    res.json({
-      ok: errors.length === 0,
-      siteId: rnSiteId,
-      scope: rnSiteId ? 'site' : 'all',
-      gates: { rewriteEnabled: String(autoRw) === 'true', publishEnabled: String(autoPub) === 'true' },
-      skipped: { rewrite: rewriteSkipped, publish: publishSkipped },
-      delta: delta,
-      diagnostic: diagnostic,
-      rateLimit: rateLimit,
-      errors: errors,
-    });
-  });
-
-  // GET /api/autopilot/publish-rate — current unified rate + live state.
-  router.get('/autopilot/publish-rate', function (req, res) {
-    try {
-      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
-      var state = (pipeline && typeof pipeline.getPublishRateState === 'function')
-        ? pipeline.getPublishRateState() : null;
-      var config = {
-        count: cfgGet('PUBLISH_RATE_COUNT') || '',
-        unit: cfgGet('PUBLISH_RATE_UNIT') || '',
-        legacy: {
-          maxPerHour: cfgGet('MAX_PUBLISH_PER_HOUR'),
-          cooldownMinutes: cfgGet('PUBLISH_COOLDOWN_MINUTES'),
-        },
-      };
-      res.json({ ok: true, config: config, state: state });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // POST /api/autopilot/publish-rate — update PUBLISH_RATE_COUNT + PUBLISH_RATE_UNIT.
-  // Body: { count: <int>, unit: 'second'|'minute'|'hour'|'day' }
-  router.post('/autopilot/publish-rate', function (req, res) {
-    try {
-      var body = req.body || {};
-      var count = parseInt(body.count, 10);
-      var unit = String(body.unit || '').trim().toLowerCase();
-      if (isNaN(count) || count <= 0) {
-        return res.status(400).json({ ok: false, error: 'count must be a positive integer' });
-      }
-      if (['second', 'minute', 'hour', 'day'].indexOf(unit) === -1) {
-        return res.status(400).json({ ok: false, error: "unit must be one of: second, minute, hour, day" });
-      }
-      var { set: cfgSet } = require('../utils/config');
-      cfgSet('PUBLISH_RATE_COUNT', String(count), req.app.locals.db);
-      cfgSet('PUBLISH_RATE_UNIT', unit, req.app.locals.db);
-      logger.info('autopilot', 'Publish rate updated: ' + count + ' per ' + unit);
-
-      var pipeline = req.app.locals.modules && req.app.locals.modules.scheduler;
-      var state = (pipeline && typeof pipeline.getPublishRateState === 'function')
-        ? pipeline.getPublishRateState() : null;
-      res.json({ ok: true, config: { count: count, unit: unit }, state: state });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // GET /api/autopilot/logs — recent log rows from modules relevant to the
-  // autopilot pipeline. Supports ?since=<id> for incremental polling and
-  // ?limit=<n> (default 100, max 500).
-  router.get('/autopilot/logs', function (req, res) {
-    try {
-      var db = req.app.locals.db;
-      var since = parseInt(req.query.since, 10);
-      if (isNaN(since) || since < 0) since = 0;
-      var limit = parseInt(req.query.limit, 10);
-      if (isNaN(limit) || limit <= 0) limit = 100;
-      if (limit > 500) limit = 500;
-
-      var rows = db.prepare(
-        "SELECT id, level, module, message, created_at FROM logs " +
-        "WHERE id > ? AND module IN ('pipeline','rewriter','autopilot','publisher','extractor','wp-publisher') " +
-        "ORDER BY id DESC LIMIT ?"
-      ).all(since, limit);
-
-      res.json({ ok: true, data: rows.reverse(), lastId: rows.length ? rows[rows.length - 1].id : since });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // GET /api/autopilot/queue — unified article queue (status='ready' primary drafts)
-  router.get('/autopilot/queue', function (req, res) {
-    try {
-      var db = req.app.locals.db;
-      var pp = parsePageParam(req, 20);
-      var queueSw = _siteWhere(req.siteId, 'd');
-      var totalStmt = db.prepare(
-        "SELECT COUNT(*) AS cnt FROM drafts d WHERE d.status = 'ready' AND d.cluster_role = 'primary'" + queueSw.clause
-      );
-      var total = (totalStmt.get.apply(totalStmt, queueSw.params) || {}).cnt || 0;
-      var queueStmt = db.prepare(
-        "SELECT d.id, d.cluster_id, d.rewritten_title, d.source_domain, d.rewritten_word_count, " +
-        "d.ai_model_used, d.source_language AS language, d.wp_category_ids, d.wp_primary_cat_id, d.wp_author_id_override, " +
-        "d.updated_at, c.avg_similarity, c.article_count, c.trends_boosted " +
-        "FROM drafts d LEFT JOIN clusters c ON d.cluster_id = c.id " +
-        "WHERE d.status = 'ready' AND d.cluster_role = 'primary'" + queueSw.clause +
-        " ORDER BY c.trends_boosted DESC, d.updated_at DESC " +
-        "LIMIT ? OFFSET ?"
-      );
-      var rows = queueStmt.all.apply(queueStmt, queueSw.params.concat([pp.perPage, (pp.page - 1) * pp.perPage]));
-      // Runtime language detection when source_language is NULL (existing rows
-      // back-filled by DB migration; this handles any that still slip through).
-      var HINDI_RE = /[\u0900-\u097F]{3,}/;
-      rows = rows.map(function (r) {
-        if (!r.language) {
-          r.language = HINDI_RE.test(r.rewritten_title || '') ? 'hi' : 'en';
-        }
-        return r;
-      });
-      res.json({ ok: true, data: rows, total: total, page: pp.page, perPage: pp.perPage });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-
-  // POST /api/autopilot/queue/:id/reject — discard a queued draft
-  router.post('/autopilot/queue/:id/reject', function (req, res) {
-    try {
-      var draftId = parseInt(req.params.id, 10);
-      if (!draftId) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
-      var db = req.app.locals.db;
-      var result = db.prepare(
-        "UPDATE drafts SET status = 'failed', error_message = 'Rejected from queue by user', " +
-        "updated_at = datetime('now') WHERE id = ? AND status = 'ready'"
-      ).run(draftId);
-      if (result.changes === 0) return res.status(404).json({ ok: false, error: 'Draft not found or not in ready state' });
-      res.json({ ok: true, message: 'Draft rejected' });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
 
   // POST /api/drafts/cleanup-stale — delete old stuck drafts older than BACKLOG_MAX_AGE_HOURS
   router.post('/drafts/cleanup-stale', function (req, res) {
@@ -6518,44 +5679,6 @@ function createApiRouter(deps) {
     }
   });
 
-  // POST /api/drafts/:id/queue — mark a rewritten draft as ready for autopilot publish
-  router.post('/drafts/:id/queue', function (req, res) {
-    try {
-      var draftId = parseInt(req.params.id, 10);
-      if (!draftId) return res.status(400).json({ ok: false, error: 'Invalid draft id' });
-      var db = req.app.locals.db;
-      var draft = db.prepare(
-        "SELECT id, status, rewritten_html, cluster_id, cluster_role FROM drafts WHERE id = ? AND site_id = ?"
-      ).get(draftId, req.siteId || 1);
-      if (!draft) return res.status(404).json({ ok: false, error: 'Draft not found' });
-      if (!draft.rewritten_html || draft.rewritten_html.length < 100) {
-        return res.status(400).json({ ok: false, error: 'No rewritten content — run AI Rewrite first before queuing' });
-      }
-      if (draft.status === 'published') {
-        return res.status(400).json({ ok: false, error: 'Already published — use Update on WP to re-publish' });
-      }
-
-      db.transaction(function () {
-        // Transition draft to ready with primary role so the publish loop picks it up
-        db.prepare(
-          "UPDATE drafts SET status = 'ready', cluster_role = 'primary', " +
-          "locked_by = NULL, locked_at = NULL, lease_expires_at = NULL, " +
-          "updated_at = datetime('now') WHERE id = ?"
-        ).run(draftId);
-
-        // Set cluster to queued so the autopilot publish loop finds it
-        if (draft.cluster_id) {
-          db.prepare(
-            "UPDATE clusters SET status = 'queued' WHERE id = ? AND status NOT IN ('published')"
-          ).run(draft.cluster_id);
-        }
-      })();
-
-      res.json({ ok: true, message: 'Queued for autopilot — will publish on next cycle', draftId: draftId });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CLASSIFIER ROUTES
@@ -7570,13 +6693,9 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       var site = siteConfigMod.getSite(siteId);
       if (!site) return res.status(404).json({ ok: false, error: 'Site not found' });
       siteConfigMod.updateSite(siteId, { is_active: 1 });
-      // Hot-start the firehose listener if token is present
-      var pool = req.app.locals.modules && req.app.locals.modules.firehosePool;
-      if (pool && site.firehose_token) {
-        pool.addSite(siteId).catch(function (e) {
-          logger.warn('api', 'firehosePool.addSite failed on activate: ' + e.message);
-        });
-      }
+      // Feeds attached to this site will re-enter the feedsPool on the next
+      // init cycle (or via feed-detail reactivate). No system-wide firehose
+      // pool to hot-add here — firehose connections are per-feed now.
       res.json({ ok: true, siteId: siteId, message: 'Site re-activated' });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -7699,13 +6818,13 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Feeds CRUD API — Phase 1
+  // Feeds CRUD API
   //
   // A Feed bundles source (where articles come from), destination (how they get
-  // published), and quality gates into one config record. The goal is to replace
-  // the scattered AutoPilot + Firehose + Publish Rules pages with a single
-  // "Feeds" page. Coexistence: legacy paths keep working; new rows created via
-  // a Feed get feed_id tagged throughout the pipeline.
+  // published), and quality gates into one config record. Feeds are the sole
+  // source of truth for firehose configuration and publish gating — there are
+  // no system-wide firehose defaults, every feed owns its own tap, filter,
+  // quality thresholds, and auto-publish toggle.
   // ═══════════════════════════════════════════════════════════════════════════
 
   // Shape helpers — kept in-file rather than a new module while the Feed schema
@@ -8284,7 +7403,7 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       if (!mgmtKey) {
         return res.status(400).json({
           ok: false,
-          error: 'No firehose token on this feed and no management key on file. Paste a tap token in Edit, or connect a management key via Firehose Rules first.',
+          error: 'No firehose token on this feed and no management key on file. Paste a tap token in Edit, or configure FIREHOSE_MANAGEMENT_KEY in Settings first.',
         });
       }
 

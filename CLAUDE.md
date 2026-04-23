@@ -15,9 +15,8 @@ src/
   middleware/
     site-scope.js       — reads X-Site-Id header → req.siteId (default 1, 0 = All Sites)
   modules/
-    firehose.js         — Ahrefs SSE stream
-    firehose-pool.js    — multi-site firehose connection pool
-    feeds-pool.js       — per-feed fetch orchestration (rate limit, retry)
+    firehose.js         — Ahrefs SSE stream (instantiated per-feed by feeds-pool)
+    feeds-pool.js       — per-feed SSE pool + fetch orchestration (sole ingestion path)
     publisher.js        — WordPress REST API publish
     publisher-pool.js   — multi-site publish orchestration
     wp-publisher.js     — alternate WP publisher path
@@ -28,7 +27,6 @@ src/
     extractor-jina.js   — Jina AI fallback extractor
     rewriter.js         — AI rewrite (Claude/OpenAI/OpenRouter), master prompt lives here
     content-classifier.js — L1 dictionary + L2 AI category/author/tag assignment
-    autopilot.js        — auto-publish decision engine
     trends.js           — Google Trends integration
     infranodus.js       — InfraNodus graph API
     fuel.js / fuel-posts.js     — fuel-prices vertical + WP post generation
@@ -85,7 +83,7 @@ public/
 - `publish_rules` — per-site IF/THEN automations
 - `logs` — structured log (scoped via `site_id`, NULL = system-wide)
 - `fuel_*`, `metals_*`, `lottery_*` — data-feed verticals
-- `autopilot_decisions`, `classification_log`, `wp_posts_log`, `wp_taxonomy_cache`
+- `classification_log`, `wp_posts_log`, `wp_taxonomy_cache`
 - `config_snapshots` — import/export rollback points
 - `fetch_log`, `settings`, `domains_config`, `infranodus_history`
 
@@ -104,3 +102,13 @@ public/
 - Blogspot platform: will NEVER be added. WordPress only.
 - Indian Vehicle Data SEO feature: cancelled, do not implement.
 - Standalone Clusters page (removed — surfaced via Site Home / Feed Detail instead)
+
+## Changelog
+- **2026-04-22** — Removed AutoPilot + Firehose Rules pages. Feeds is now
+  the sole source of truth for firehose configuration, per-feed quality
+  thresholds, auto-publish gating, and WP publishing config. There are no
+  system-wide firehose defaults anymore — every firehose connection is
+  established per feed via `feeds-pool.js`. Dropped the `autopilot_decisions`
+  table and the `AUTOPILOT_*` / `FIREHOSE_{SINCE,TIMEOUT,RECONNECT_*,
+  ALLOWED_DOMAINS,BLOCKED_DOMAINS,ALLOWED_LANGS,CUSTOM_TEMPLATES}` settings
+  keys. Deleted `src/modules/autopilot.js` and `src/modules/firehose-pool.js`.

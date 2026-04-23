@@ -34,7 +34,7 @@ var DEFAULTS = {
   MAX_PUBLISH_PER_HOUR: '4',
   PUBLISH_COOLDOWN_MINUTES: '10',
   // Unified publish rate — overrides the two legacy settings above when both
-  // are set. Admin-configurable via the Autopilot page.
+  // are set. Admin-configurable via the Settings page.
   PUBLISH_RATE_COUNT: '',
   PUBLISH_RATE_UNIT: '',
   TRENDS_GEO: 'IN',
@@ -55,29 +55,12 @@ var DEFAULTS = {
   JINA_API_KEY: '',
   JINA_ENABLED: 'true',
   MAX_AI_REWRITES_PER_HOUR: '60',
-  // Autopilot
-  AUTOPILOT_ENABLED: 'false',
-  AUTOPILOT_DAILY_TARGET: '50',
-  AUTOPILOT_WEEKENDS: 'true',
-  AUTOPILOT_MIN_SIMILARITY: '0.70',
-  AUTOPILOT_MIN_TIER: '0',
-  AUTOPILOT_MIN_WORDS: '300',
-  AUTOPILOT_BLOCKED_KEYWORDS: 'horoscope,rashifal,zodiac,numerology,angel number,wishes,greetings,lottery,panchang',
-  AUTOPILOT_BLOCKED_DOMAINS: '',
-  AUTOPILOT_ALLOWED_DOMAINS: '',
-  AUTOPILOT_BLOCKED_CATEGORIES: '',
-  AUTOPILOT_AUTO_CATEGORIZE: 'true',
   PUBLISH_LANGUAGE: 'en',
   REWRITE_LANGUAGE: 'en',
-  // Firehose
-  FIREHOSE_SINCE: '1h',
-  FIREHOSE_TIMEOUT: '300',
-  FIREHOSE_RECONNECT_MIN: '2000',
-  FIREHOSE_RECONNECT_MAX: '60000',
-  FIREHOSE_ALLOWED_DOMAINS: '',
-  FIREHOSE_BLOCKED_DOMAINS: '',
-  FIREHOSE_ALLOWED_LANGS: 'en,hi',
-  FIREHOSE_CUSTOM_TEMPLATES: '',
+  // Firehose (per-feed tokens live on feeds.firehose_token; these are the
+  // only global firehose keys that remain)
+  FIREHOSE_TOKEN: '',
+  FIREHOSE_MANAGEMENT_KEY: '',
   // Pipeline engine
   EXTRACTION_POLL_MS: '500',
   EXTRACTION_TIMEOUT_MS: '10000',

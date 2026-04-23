@@ -219,7 +219,7 @@ function debug(mod, message, details) { log('debug', mod, message, details); }
 /**
  * Create a child logger bound to a specific site. Every call through the
  * returned object stamps logs.site_id = siteId. Intended for per-site modules
- * (FirehoseListener, WordPressPublisher, AutopilotEngine) that already know
+ * (FirehoseListener within a feed, WordPressPublisher) that already know
  * their siteId at construction time.
  *
  * @param {number} siteId

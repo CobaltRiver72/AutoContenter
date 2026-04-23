@@ -28,8 +28,6 @@ loadRuntimeOverrides(db);
 config = getConfig();
 
 // ─── 5. Create module instances ─────────────────────────────────────────────
-var { FirehoseListener } = require('./modules/firehose');
-var FirehosePool = require('./modules/firehose-pool');
 var FeedsPool = require('./modules/feeds-pool');
 var PublisherPool = require('./modules/publisher-pool');
 var { TrendsPoller } = require('./modules/trends');
@@ -40,7 +38,6 @@ var { WordPressPublisher } = require('./modules/publisher');
 var { Pipeline } = require('./workers/pipeline');
 var { ContentExtractor } = require('./modules/extractor');
 var { InfranodusAnalyzer } = require('./modules/infranodus');
-var AutopilotEngine = require('./modules/autopilot');
 var { ContentClassifier } = require('./modules/content-classifier');
 var { FuelModule } = require('./modules/fuel');
 var { MetalsModule } = require('./modules/metals');
@@ -58,15 +55,12 @@ var siteConfigMod = require('./utils/site-config');
 siteConfigMod.init(db);
 
 // ─── Multi-site pools ──────────────────────────────────────────────────────
-var firehosePool = new FirehosePool(config, db, logger);
 // Per-feed SSE pool: one FirehoseListener per active Feed, keyed by feed_id.
-// Runs alongside firehosePool (per-site) during Phase 1 coexistence.
+// Feeds are the sole source of truth for firehose configuration — there is
+// no system-wide firehose singleton or per-site pool anymore.
 var feedsPool = new FeedsPool(config, db, logger);
 var publisherPool = new PublisherPool(config, db, logger);
 
-// Legacy single-instance references kept for backward compat with modules
-// that don't yet use pools (fuel/metals/lottery post creators, trends, etc.)
-var firehose = new FirehoseListener(config, db, logger);
 var trends = new TrendsPoller(config, db, logger);
 var buffer = new ArticleBuffer(config, db, logger);
 var similarity = new SimilarityEngine(config, db, logger);
@@ -74,9 +68,8 @@ var rewriter = new ArticleRewriter(config, logger);
 var publisher = new WordPressPublisher(config, logger);
 var extractor = new ContentExtractor(config, db, logger);
 var infranodus = new InfranodusAnalyzer(config, db, logger);
-var autopilot = new AutopilotEngine(require('./utils/config'), db, logger);
 var classifier = new ContentClassifier(require('./utils/config'), db, logger);
-var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot, classifier);
+var scheduler = new Pipeline(config, db, rewriter, publisher, logger, extractor, infranodus, classifier);
 var fuel = new FuelModule(config, db, logger);
 var metals = new MetalsModule(config, db, logger);
 var lottery = new LotteryModule(config, db, logger);
@@ -94,13 +87,12 @@ function _clusterQueueMax()      { return parseInt(_cfgMod.get('CLUSTER_QUEUE_MA
 
 async function boot() {
   // ─── Wire up event listeners BEFORE any module init ──────────────────────
-  // EventEmitter drops events that have no listeners. Firehose.init() opens
-  // SSE and replays articles immediately — listeners MUST exist first.
+  // EventEmitter drops events that have no listeners. Listener init opens SSE
+  // streams immediately — listeners MUST exist first.
 
-  // Shared handler for any pool/listener that emits 'article'. Used by both
-  // the per-site firehose pool (legacy) and the per-feed pool (new). Articles
-  // carry source_site_id and, when arriving via a Feed, feed_id — buffer
-  // persists both and the pipeline scopes clusters/drafts accordingly.
+  // Shared handler for the per-feed pool. Articles carry source_site_id and
+  // feed_id — buffer persists both and the pipeline scopes clusters/drafts
+  // accordingly.
   async function _ingestArticle(article) {
     try {
       var articleId = buffer.addArticle(article);
@@ -127,47 +119,7 @@ async function boot() {
     }
   }
 
-  // Wire both pools through the same ingest path.
-  firehosePool.on('article', _ingestArticle);
   feedsPool.on('article', _ingestArticle);
-
-  // Legacy single-site firehose listener (kept for backward compat during transition)
-  firehose.on('article', async function(article) {
-    try {
-      var articleId = buffer.addArticle(article);
-      if (!articleId) return; // duplicate or failed insert
-      // buffer.addArticle() now attaches id + fingerprint to article object
-
-      // Only match trends if the module is ready
-      var trendsMatch = null;
-      if (trends.enabled && trends.ready) {
-        trendsMatch = trends.matchArticle(article);
-      }
-
-      // Queue article for batch similarity processing instead of immediate
-      if (_clusteringQueue.length >= _clusterQueueMax()) {
-        logger.warn('index', 'Clustering queue full, dropping article', { url: article.url });
-        return;
-      }
-      _clusteringQueue.push({ article: article, trendsMatch: trendsMatch });
-
-      if (!_clusteringFirstEventAt) {
-        _clusteringFirstEventAt = Date.now();
-      }
-
-      if (_clusteringTimer) clearTimeout(_clusteringTimer);
-
-      // Force process if we've been waiting too long
-      var waitedMs = Date.now() - _clusteringFirstEventAt;
-      if (waitedMs >= _clusteringMaxWaitMs()) {
-        processSimilarityBatch();
-      } else {
-        _clusteringTimer = setTimeout(processSimilarityBatch, _clusteringDebounceMs());
-      }
-    } catch (err) {
-      logger.error('index', 'Error buffering firehose article: ' + err.message);
-    }
-  });
 
   /**
    * Process all queued articles for similarity in one batch.
@@ -269,8 +221,8 @@ async function boot() {
   });
 
   // ─── Init modules — order matters ────────────────────────────────────────
-  // Buffer & similarity MUST be ready before firehose connects (replay articles
-  // arrive immediately). Firehose & trends start last.
+  // Buffer & similarity MUST be ready before the feeds pool connects (replay
+  // articles arrive immediately). Feeds pool & trends start last.
   // Recover drafts stuck in transient states from previous run
   recoverStuckDrafts(logger);
 
@@ -300,11 +252,8 @@ async function boot() {
   await publisherPool.init();
   await publisherPool.initAll();
 
-  logger.info('index', 'All downstream modules ready. Starting firehose...');
-  // Firehose opens SSE — replay articles flow into listeners above
-  await firehose.init();
-  await firehosePool.init();
-  // Feed-level SSE pool: one listener per active Feed with a token.
+  logger.info('index', 'All downstream modules ready. Starting feed listeners...');
+  // Per-feed SSE pool: one FirehoseListener per active Feed with a token.
   // Non-fatal if a single feed token is bad; init() logs per-feed failures.
   await feedsPool.init();
   await trends.init();
@@ -316,11 +265,11 @@ async function boot() {
 
   // Expose modules for performance monitoring endpoint
   app.locals.modules = {
-    firehose: firehose, firehosePool: firehosePool, feedsPool: feedsPool,
+    feedsPool: feedsPool,
     publisherPool: publisherPool,
     trends: trends, buffer: buffer, similarity: similarity,
     extractor: extractor, rewriter: rewriter, publisher: publisher,
-    scheduler: scheduler, infranodus: infranodus, autopilot: autopilot, classifier: classifier,
+    scheduler: scheduler, infranodus: infranodus, classifier: classifier,
     fuel: fuel, metals: metals, lottery: lottery,
     wpPublisher: wpPub, fuelPosts: fuelPosts, metalsPosts: metalsPosts, lotteryPosts: lotteryPosts,
   };
@@ -423,8 +372,6 @@ async function boot() {
 
   // API routes — protected by checkAuth
   var apiRouter = createApiRouter({
-    firehose: firehose,
-    firehosePool: firehosePool,
     feedsPool: feedsPool,
     publisherPool: publisherPool,
     trends: trends,
@@ -473,11 +420,19 @@ async function boot() {
   var server = app.listen(PORT, function() {
     logger.info('index', 'Express server listening on port ' + PORT);
 
-    // Log module health summary
-    var modules = [firehose, trends, buffer, similarity, extractor, rewriter, publisher, infranodus, fuel, metals, lottery];
+    // Log module health summary. feedsPool returns an array (one entry per
+    // active feed) — reported separately so its shape doesn't collide with
+    // the per-module `{ module, status }` objects the others return.
+    if (feedsPool && typeof feedsPool.getHealth === 'function') {
+      var fpHealth = feedsPool.getHealth() || [];
+      logger.info('index', 'feeds-pool: ' + fpHealth.length + ' listener(s)');
+    }
+    var modules = [trends, buffer, similarity, extractor, rewriter, publisher, infranodus, fuel, metals, lottery];
     for (var i = 0; i < modules.length; i++) {
-      var h = modules[i].getHealth();
-      logger.info('index', h.module + ': ' + h.status);
+      if (modules[i] && typeof modules[i].getHealth === 'function') {
+        var h = modules[i].getHealth();
+        if (h && h.module) logger.info('index', h.module + ': ' + h.status);
+      }
     }
   });
 
@@ -499,11 +454,11 @@ async function boot() {
 
   logger.info('index', 'HDF News AutoPub started successfully');
 
-  // ─── Memory watchdog — pause firehose if RAM gets critical ──────────────
+  // ─── Memory watchdog — pause all feeds if RAM gets critical ──────────────
   var MEMORY_CHECK_INTERVAL_MS = 30000;
   var MEMORY_HIGH_WATER_MB = 400;
   var MEMORY_LOW_WATER_MB = 300;
-  var _firehosePaused = false;
+  var _feedsPaused = false;
 
   var memoryWatchdog = setInterval(function() {
     try {
@@ -511,15 +466,19 @@ async function boot() {
       var heapMB = Math.round(usage.heapUsed / 1024 / 1024);
       var rssMB = Math.round(usage.rss / 1024 / 1024);
 
-      if (heapMB > MEMORY_HIGH_WATER_MB && !_firehosePaused) {
-        _firehosePaused = true;
-        logger.warn('index', 'MEMORY HIGH: ' + heapMB + 'MB heap, ' + rssMB + 'MB RSS — pausing firehose');
-        if (firehose.disconnect) firehose.disconnect();
+      if (heapMB > MEMORY_HIGH_WATER_MB && !_feedsPaused) {
+        _feedsPaused = true;
+        logger.warn('index', 'MEMORY HIGH: ' + heapMB + 'MB heap, ' + rssMB + 'MB RSS — pausing feeds pool');
+        if (feedsPool && typeof feedsPool.shutdown === 'function') feedsPool.shutdown();
         if (global.gc) global.gc();
-      } else if (heapMB < MEMORY_LOW_WATER_MB && _firehosePaused) {
-        _firehosePaused = false;
-        logger.info('index', 'MEMORY OK: ' + heapMB + 'MB heap — resuming firehose');
-        if (firehose.connect) firehose.connect();
+      } else if (heapMB < MEMORY_LOW_WATER_MB && _feedsPaused) {
+        _feedsPaused = false;
+        logger.info('index', 'MEMORY OK: ' + heapMB + 'MB heap — resuming feeds pool');
+        if (feedsPool && typeof feedsPool.init === 'function') {
+          feedsPool.init().catch(function (e) {
+            logger.error('index', 'Feeds pool resume failed: ' + e.message);
+          });
+        }
       }
 
       if (heapMB > 200) {
@@ -549,7 +508,7 @@ async function boot() {
     server.close(function() {
       logger.info('index', 'HTTP server closed');
       try {
-        var shutdownList = [feedsPool, firehosePool, firehose, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
+        var shutdownList = [feedsPool, trends, scheduler, extractor, infranodus, similarity, fuel, metals, lottery];
         for (var i = 0; i < shutdownList.length; i++) {
           try {
             if (shutdownList[i] && shutdownList[i].shutdown) shutdownList[i].shutdown();

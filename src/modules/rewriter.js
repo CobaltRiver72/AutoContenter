@@ -337,8 +337,8 @@ function buildPrompt(article, cluster, settings) {
 
   // InfraNodus entity analysis — injected into the AI prompt so the rewriter
   // knows the topical landscape, SEO gaps, and what readers actually want.
-  // This block is populated only when the user clicks "Rewrite with AI" or
-  // the pipeline pre-rewrite step runs — never on autopilot extraction.
+  // Called by the publish pipeline after the per-feed quality threshold is
+  // applied — not during extraction.
   var entityContext = '';
   if (s.infraData) {
     var infra = s.infraData;

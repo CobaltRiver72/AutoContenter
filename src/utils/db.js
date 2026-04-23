@@ -195,18 +195,8 @@ function runMigrations() {
       )
     `);
 
-    // Autopilot decisions log table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS autopilot_decisions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cluster_id INTEGER,
-        draft_title TEXT,
-        approved INTEGER NOT NULL DEFAULT 0,
-        reason TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-      )
-    `);
-    db.exec('CREATE INDEX IF NOT EXISTS idx_autopilot_decisions_created ON autopilot_decisions(created_at)');
+    // Migration: drop legacy autopilot_decisions table (AutoPilot page removed)
+    db.exec('DROP TABLE IF EXISTS autopilot_decisions;');
 
     // Classification log table
     db.exec(`
@@ -867,30 +857,11 @@ function runMigrations() {
       } catch (e) { /* metals_cities may not exist yet */ }
     })();
 
-    // ─── Seed autopilot + pipeline defaults (INSERT OR IGNORE — never overwrites) ─
-    (function seedAutopilotDefaults() {
+    // ─── Seed pipeline defaults (INSERT OR IGNORE — never overwrites) ─
+    (function seedPipelineDefaults() {
       var defaults = {
-        AUTOPILOT_ENABLED: 'false',
-        AUTOPILOT_DAILY_TARGET: '50',
-        AUTOPILOT_WEEKENDS: 'true',
-        AUTOPILOT_MIN_SIMILARITY: '0.70',
-        AUTOPILOT_MIN_TIER: '0',
-        AUTOPILOT_MIN_WORDS: '300',
-        AUTOPILOT_BLOCKED_KEYWORDS: 'horoscope,rashifal,zodiac,numerology,angel number,wishes,greetings,lottery,panchang',
-        AUTOPILOT_BLOCKED_DOMAINS: '',
-        AUTOPILOT_ALLOWED_DOMAINS: '',
-        AUTOPILOT_BLOCKED_CATEGORIES: '',
-        AUTOPILOT_AUTO_CATEGORIZE: 'true',
         PUBLISH_LANGUAGE: 'en',
         REWRITE_LANGUAGE: 'en',
-        FIREHOSE_SINCE: '1h',
-        FIREHOSE_TIMEOUT: '300',
-        FIREHOSE_RECONNECT_MIN: '2000',
-        FIREHOSE_RECONNECT_MAX: '60000',
-        FIREHOSE_ALLOWED_DOMAINS: '',
-        FIREHOSE_BLOCKED_DOMAINS: '',
-        FIREHOSE_ALLOWED_LANGS: 'en,hi',
-        FIREHOSE_CUSTOM_TEMPLATES: '',
         EXTRACTION_POLL_MS: '500',
         EXTRACTION_TIMEOUT_MS: '10000',
         EXTRACTION_MAX_SIZE_MB: '5',
@@ -986,10 +957,10 @@ function runMigrations() {
     // UNIQUE(site_id, key) already creates an implicit index covering both
     // (site_id) prefix and (site_id, key) lookups — no extra indexes needed.
 
-    // ─── 3. Add site_id column to 8 existing tables ─────────────────────────
+    // ─── 3. Add site_id column to 7 existing tables ─────────────────────────
     var _siteIdTables = [
       'drafts', 'draft_versions', 'published', 'publish_rules',
-      'wp_taxonomy_cache', 'classification_log', 'autopilot_decisions', 'wp_posts_log'
+      'wp_taxonomy_cache', 'classification_log', 'wp_posts_log'
     ];
     for (var _ti = 0; _ti < _siteIdTables.length; _ti++) {
       var _tbl = _siteIdTables[_ti];
@@ -1010,7 +981,7 @@ function runMigrations() {
 
     // ─── 3c. Tag logs with site_id so /api/logs can be scoped per site.
     //         NULL = system-wide log (startup, scheduler tick, etc.).
-    //         Major modules with their own siteId (firehose, publisher, autopilot,
+    //         Major modules with their own siteId (feeds-pool, publisher,
     //         wp-publisher) write logs tagged via logger.forSite(siteId).
     try {
       db.exec('ALTER TABLE logs ADD COLUMN site_id INTEGER DEFAULT NULL');
@@ -1018,17 +989,17 @@ function runMigrations() {
     db.exec('CREATE INDEX IF NOT EXISTS idx_logs_site ON logs(site_id)');
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Feeds — Phase 1 of the "replace AutoPilot + Firehose pages with a single
-    // Feeds page" migration. A Feed is a single config record that bundles:
+    // Feeds — the sole source of truth for firehose ingestion and publish
+    // gating. A Feed is a single config record that bundles:
     //   • source  — where articles come from (query, country, filters)
     //   • dest    — where they go on WP (category, author, tags, status)
     //   • quality — per-feed gates (daily limit, blocked keywords, min sources)
     //
-    // Decisions (locked in with the user):
+    // Invariants:
     //   • Feed → Site is 1:1 (FK site_id NOT NULL)
     //   • One SSE connection per feed — every Feed has its own firehose_token
     //   • Per-feed clusters (no fan-out) — articles carry feed_id from ingest
-    //   • Per-feed quality gates with site defaults as fallback
+    //   • Per-feed quality gates and per-feed auto-publish toggle
     // ═══════════════════════════════════════════════════════════════════════════
     db.exec(`
       CREATE TABLE IF NOT EXISTS feeds (
@@ -1055,9 +1026,9 @@ function runMigrations() {
     db.exec('CREATE INDEX IF NOT EXISTS idx_feeds_kind   ON feeds(kind)');
 
     // Tag every row in the per-feed pipeline with the originating feed. NULL
-    // means "came in via the legacy AutoPilot/Firehose path" — coexistence is
-    // allowed until the legacy pages are removed. Every new row created via
-    // a Feed stamps feed_id so the Feed detail page can filter cleanly.
+    // means "legacy row created before Feeds existed" — kept for historical
+    // audit. Every new row created today stamps feed_id so the Feed detail
+    // page can filter cleanly.
     var _feedIdTables = ['articles', 'clusters', 'drafts', 'published'];
     for (var _fti = 0; _fti < _feedIdTables.length; _fti++) {
       var _ftbl = _feedIdTables[_fti];
@@ -1112,15 +1083,7 @@ function runMigrations() {
 
       // Copy per-site settings from global settings → site_config for site 1
       var _perSiteKeys = [
-        'AUTOPILOT_ENABLED', 'AUTOPILOT_DAILY_TARGET', 'AUTOPILOT_WEEKENDS',
-        'AUTOPILOT_MIN_SIMILARITY', 'AUTOPILOT_MIN_TIER', 'AUTOPILOT_MIN_WORDS',
-        'AUTOPILOT_BLOCKED_KEYWORDS', 'AUTOPILOT_BLOCKED_DOMAINS',
-        'AUTOPILOT_ALLOWED_DOMAINS', 'AUTOPILOT_BLOCKED_CATEGORIES',
-        'AUTOPILOT_AUTO_CATEGORIZE', 'AUTOPILOT_START_HOUR', 'AUTOPILOT_END_HOUR',
         'PUBLISH_LANGUAGE', 'REWRITE_LANGUAGE',
-        'FIREHOSE_SINCE', 'FIREHOSE_TIMEOUT', 'FIREHOSE_RECONNECT_MIN',
-        'FIREHOSE_RECONNECT_MAX', 'FIREHOSE_ALLOWED_DOMAINS', 'FIREHOSE_BLOCKED_DOMAINS',
-        'FIREHOSE_ALLOWED_LANGS', 'FIREHOSE_CUSTOM_TEMPLATES',
         'AUTO_REWRITE_ENABLED', 'AUTO_REWRITE_DAILY_LIMIT', 'AUTO_REWRITE_HOURLY_LIMIT',
         'AUTO_REWRITE_MIN_SIMILARITY', 'AUTO_REWRITE_MIN_SOURCES',
         'PUBLISH_RATE_COUNT', 'PUBLISH_RATE_UNIT',
