@@ -7,12 +7,11 @@ const MODULE = 'buffer';
 // Maps known publisher domains to a NEWS_CATEGORIES slug.
 // Only domains where category is unambiguous are listed.
 //
-// TODO(feeds-migration): This India-centric domain→category map predates the
-// Feeds feature. With Feeds, category routing is an explicit dest_config per
-// feed (admin picks a WP category ID), so this static map becomes dead weight
-// once the legacy AutoPilot / Firehose Rules paths are retired (Phase 5 of
-// the Feeds rollout). Leave in place until then so existing srdmgroup /
-// rrmahavidyalaya deployments keep their current categorization.
+// TODO(feeds-migration): This India-centric domain→category map is legacy
+// infrastructure from before Feeds existed. With Feeds, category routing is an
+// explicit dest_config per feed (admin picks a WP category ID), so this static
+// map is now only a fallback for legacy rows without feed_id. New deployments
+// should not rely on it.
 const DOMAIN_CATEGORY_MAP = {
   // Hindi news
   'aajtak.in':              'hindi-news',

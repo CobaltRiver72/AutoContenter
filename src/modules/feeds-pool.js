@@ -6,10 +6,10 @@ var { FirehoseListener } = require('./firehose');
 var MODULE = 'feeds-pool';
 
 /**
- * Per-feed SSE pool. Analog of FirehosePool but keyed by feed_id instead of
- * site_id. Each active Feed with a firehose_token gets its own FirehoseListener
- * that applies the Feed's source_config (query, country, include/exclude domains)
- * as filters. Articles emitted by the pool carry both feed_id and source_site_id,
+ * Per-feed SSE pool — the sole firehose ingestion path in this app. Each
+ * active Feed with a firehose_token gets its own FirehoseListener that applies
+ * the Feed's source_config (query, country, include/exclude domains) as
+ * filters. Articles emitted by the pool carry both feed_id and source_site_id,
  * so downstream code can tag the whole pipeline — articles → clusters → drafts
  * → published — with the originating Feed.
  *

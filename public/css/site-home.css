@@ -595,8 +595,6 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sh-sb .sh-sb-legacy { opacity: 0.65; }
-.sh-sb .sh-sb-legacy:hover { opacity: 1; }
 .sh-sb .nav-badge {
   font-size: 10.5px;
   background: transparent;
@@ -666,9 +664,9 @@ body,
 
 /* ================================================================
    NEW TOPBAR (sh-topbar)
-   Breadcrumb on the left, icon buttons on the right. Legacy controls
-   (site-selector, status dots, buffer count) are kept in the DOM so
-   dashboard.js keeps working, but hidden via .sh-legacy-hide.
+   Breadcrumb on the left, icon buttons on the right. The legacy
+   site-selector <select> is kept in the DOM (dashboard.js + site-home.js
+   update it) but hidden visually via .sh-legacy-hide.
    ================================================================ */
 .sh-legacy-hide { display: none !important; }
 

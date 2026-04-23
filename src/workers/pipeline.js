@@ -45,17 +45,13 @@ function _autoRewritePollMs()     { return parseInt(_cfg.get('REWRITE_POLL_MS'),
 function _autoRewriteDailyLimit() { return parseInt(_cfg.get('AUTO_REWRITE_DAILY_LIMIT'), 10) || 100; }
 function _autoRewriteHourlyLimit(){ return parseInt(_cfg.get('AUTO_REWRITE_HOURLY_LIMIT'), 10) || 20; }
 
-// Unified min-sources, min-similarity, and blocked-keyword gates — shared with
-// the autopilot publish decision in src/modules/autopilot.js so a single
-// admin-facing value gates BOTH the rewrite stage and the publish stage. This
-// replaced three duplicate AUTO_REWRITE_* keys that were drifting apart from
-// their autopilot counterparts in the admin UI.
+// Legacy global-fallback gates used by the rewrite stage when a draft has no
+// feed_id (or the feed doesn't override these values). Feeds that DO set their
+// own quality config via feeds.quality_config are the authoritative source —
+// these only apply to the unscoped/legacy path.
 function _minSources()            { return parseInt(_cfg.get('MIN_SOURCES_THRESHOLD'), 10) || 2; }
-function _minSimilarity()         { return parseFloat(_cfg.get('AUTOPILOT_MIN_SIMILARITY')) || 0.30; }
-function _blockedKeywords()       {
-  var v = _cfg.get('AUTOPILOT_BLOCKED_KEYWORDS') || '';
-  return String(v).split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
-}
+function _minSimilarity()         { return parseFloat(_cfg.get('SIMILARITY_THRESHOLD')) || 0.30; }
+function _blockedKeywords()       { return []; }
 
 /**
  * Pipeline V2: Decoupled multi-stage workers.
@@ -68,7 +64,7 @@ function _blockedKeywords()       {
  * All run in the same Node.js process. SQLite drafts table is the queue.
  */
 class Pipeline {
-  constructor(config, db, rewriter, publisher, logger, extractor, infranodus, autopilot, classifier, publisherPool) {
+  constructor(config, db, rewriter, publisher, logger, extractor, infranodus, classifier, publisherPool) {
     this.config = config;
     this.db = db;
     this.rewriter = rewriter;
@@ -76,7 +72,6 @@ class Pipeline {
     this.logger = logger;
     this.extractor = extractor;
     this.infranodus = infranodus || null;
-    this.autopilot = autopilot || null;
     this.classifier = classifier || null;
     this.publisherPool = publisherPool || null;
 
@@ -520,7 +515,7 @@ class Pipeline {
       filters: {
         minSources: _minSources(),
         minSimilarity: _minSimilarity(),
-        blockedKeywords: _cfg.get('AUTOPILOT_BLOCKED_KEYWORDS') || '',
+        blockedKeywords: '',
       },
     };
   }
@@ -1004,21 +999,11 @@ class Pipeline {
         pubSiteParams = [siteFilter];
       }
 
-      // Per-site opt-out for publish: drafts whose site set AUTOPILOT_ENABLED='false'
-      // in site_config are skipped here so they don't starve siblings. The
-      // per-site AutopilotEngine.isActive() gate below is still the source of
-      // truth on a successful pick — this SQL filter is a pre-emptive fairness
-      // tweak so one disabled site doesn't hog the single-candidate LIMIT 1.
-      var PUB_SITE_OPT_OUT = " AND NOT EXISTS (" +
-        "  SELECT 1 FROM site_config sc WHERE sc.site_id = d.site_id " +
-        "    AND sc.key = 'AUTOPILOT_ENABLED' " +
-        "    AND LOWER(sc.value) IN ('false', '0'))";
-
-      // Find a cluster with primary draft in 'ready' status.
-      // c.article_count and c.avg_similarity MUST be in the SELECT — the
-      // autopilot gate below reads them from readyPrimary; if they're missing
-      // they come back undefined, default to 1/0, and every article is
-      // permanently rejected with "too few sources".
+      // Find a cluster with primary draft in 'ready' status. Publish gating —
+      // quality thresholds, auto-publish toggle, blocked keywords, etc. — is
+      // owned by the feed that produced this draft. Drafts only reach
+      // status='ready' after their feed's per-feed gate approved them, so the
+      // publisher here just drains the queue at the configured rate.
       var readyPrimarySql =
         "SELECT d.*, c.topic, c.trends_boosted, c.article_count, c.avg_similarity FROM drafts d " +
         "JOIN clusters c ON d.cluster_id = c.id " +
@@ -1026,7 +1011,7 @@ class Pipeline {
         "  AND d.rewritten_html IS NOT NULL AND LENGTH(d.rewritten_html) > 100 " +
         "  AND (d.locked_by IS NULL OR d.lease_expires_at < datetime('now')) " +
         "  AND c.status = 'queued'" +
-        pubSiteWhere + PUB_SITE_OPT_OUT + " " +
+        pubSiteWhere + " " +
         "ORDER BY c.trends_boosted DESC, c.article_count DESC, d.created_at ASC " +
         "LIMIT 1";
       var readyPrimaryStmt = this.db.prepare(readyPrimarySql);
@@ -1035,54 +1020,6 @@ class Pipeline {
         : readyPrimaryStmt.get();
 
       if (!readyPrimary) return;
-
-      // ─── Autopilot gate ────────────────────────────────────────────────────
-      // Use per-site autopilot when the draft has a site_id, falling back to
-      // the global autopilot instance for backward compat.
-      var _apSiteId = readyPrimary.site_id || 1;
-      var AutopilotEngine = require('../modules/autopilot');
-      var _siteAutopilot = new AutopilotEngine(require('../utils/config'), this.db, this.logger, _apSiteId);
-      if (_siteAutopilot.isActive()) {
-        // Build minimal cluster/draft objects for the decision engine.
-        // Use correct column names from the drafts table:
-        //   source_language (not language), rewritten_word_count (not word_count)
-        var clusterForAutopilot = {
-          id: readyPrimary.cluster_id,
-          avg_similarity: readyPrimary.avg_similarity || 0,
-          article_count: readyPrimary.article_count || 1,
-        };
-        // Detect language: prefer stored source_language, else detect from
-        // rewritten title + extracted content so existing rows with NULL
-        // source_language are still filtered correctly.
-        var _detectedLang = readyPrimary.source_language;
-        if (!_detectedLang) {
-          var _langSample = (readyPrimary.rewritten_title || readyPrimary.source_title || '') +
-                            ' ' + (readyPrimary.extracted_content || '').slice(0, 500);
-          _detectedLang = /[\u0900-\u097F]{3,}/.test(_langSample) ? 'hi' : 'en';
-        }
-        var draftForAutopilot = {
-          title: readyPrimary.rewritten_title || readyPrimary.source_title || '',
-          language: _detectedLang,
-          word_count: readyPrimary.rewritten_word_count || 0,
-          tier: 3,
-          domain: readyPrimary.source_domain || '',
-          page_category: readyPrimary.source_category || '',
-        };
-        var decision = _siteAutopilot.shouldPublish(clusterForAutopilot, draftForAutopilot);
-        _siteAutopilot.logDecision(
-          readyPrimary.cluster_id,
-          draftForAutopilot.title,
-          decision.approved,
-          decision.reason
-        );
-        if (!decision.approved) {
-          this.logger.info(MODULE, 'Autopilot skipped cluster #' + readyPrimary.cluster_id +
-            ' "' + draftForAutopilot.title.substring(0, 50) + '" — ' + decision.reason);
-          // Release the optimistic lock we haven't taken yet — nothing to unlock
-          return;
-        }
-      }
-      // ─── End autopilot gate ────────────────────────────────────────────────
 
       var publishSiteId = readyPrimary.site_id || 1;
       var clusterId = readyPrimary.cluster_id;
