@@ -4866,7 +4866,11 @@
     // Standard groups (AI is handled by its own section now)
     var standardGroups = {
       'Firehose': ['FIREHOSE_TOKEN'],
-      'Pipeline': ['MIN_SOURCES_THRESHOLD', 'SIMILARITY_THRESHOLD', 'BUFFER_HOURS', 'ALLOW_SAME_DOMAIN_CLUSTERS', 'MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
+      // Clustering settings (MIN_SOURCES_THRESHOLD, SIMILARITY_THRESHOLD,
+      // BUFFER_HOURS, ALLOW_SAME_DOMAIN_CLUSTERS) moved to per-feed — edit
+      // each feed's Configuration tab. They remain in settings/config as
+      // seed values for new feeds and as legacy fallbacks.
+      'Pipeline': ['MAX_PUBLISH_PER_HOUR', 'PUBLISH_COOLDOWN_MINUTES'],
       'Google Trends': ['TRENDS_ENABLED', 'TRENDS_GEO', 'TRENDS_POLL_MINUTES'],
       'InfraNodus': ['INFRANODUS_ENABLED', 'INFRANODUS_API_KEY'],
       'Jina AI Reader (Extraction Fallback)': ['JINA_ENABLED', 'JINA_API_KEY'],
@@ -4885,7 +4889,6 @@
     var booleanKeys = {
       TRENDS_ENABLED: true,
       INFRANODUS_ENABLED: true,
-      ALLOW_SAME_DOMAIN_CLUSTERS: true,
       JINA_ENABLED: true,
     };
 
@@ -6380,6 +6383,7 @@
     'fdCfgQuery':               function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('query', el.value); },
     'fdCfgMinSrc':              function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('minSrc', Number(el.value)); },
     'fdCfgSim':                 function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('sim', Number(el.value)); },
+    'fdCfgBufferHours':         function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('bufferHours', Number(el.value) || 0); },
     'fdSetName':                function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('name', el.value); },
     'fdSetDescription':         function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('description', el.value); },
     'ssSchedStart':             function (el) { if (window.__siteSettings) window.__siteSettings.setSchedStart(el.value); },
@@ -6399,6 +6403,7 @@
     'fdToggleHideBelow':  function (el) { if (window.__feedDetail) window.__feedDetail.toggleHideBelow(!!el.checked); },
     'fdSetAutoPub':       function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('autoPub', !!el.checked); },
     'fdSetNotify':        function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('notifyFail', !!el.checked); },
+    'fdCfgAllowSame':     function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('allowSameDomain', !!el.checked); },
     'editorToggleCitations': function (el) { if (window.__editorPage) window.__editorPage.toggleCitations(!!el.checked); },
     'editorToggleSeo':       function (el) { if (window.__editorPage) window.__editorPage.toggleSeo(!!el.checked); },
     'ssSelectCfg':           function (el) { if (window.__siteSettings) window.__siteSettings.selectCfg(el.dataset.field, el.value); },
