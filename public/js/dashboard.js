@@ -4943,12 +4943,24 @@
         } else {
           var inputType = isSensitive ? 'password' : 'text';
           var hint = keyHints[key];
-          html += '<div class="settings-row">' +
-            '<label class="settings-label">' + escapeHtml(key) + '</label>' +
+          // Input + optional hint live inside a single flex-column wrapper
+          // so .settings-row (which is display:flex with `flex:1` on inputs)
+          // sees exactly two children: label + wrapper. Without the wrapper
+          // the hint div competes with the input for flex space and squashes
+          // it to min-width.
+          var inputHtml =
             '<input type="' + inputType + '" data-setting-key="' + escapeHtml(key) + '" value="' + escapeHtml(displayValue) + '"' +
             (isSensitive ? ' placeholder="' + (currentValue || configValue ? '(configured)' : '(not set)') + '"' : '') +
-            '>' +
-            (hint ? '<div class="settings-help" style="font-size:12px;color:var(--text-muted,#888);margin-top:4px;line-height:1.4">' + escapeHtml(hint) + '</div>' : '') +
+            '>';
+          var fieldHtml = hint
+            ? '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">' +
+                inputHtml +
+                '<div class="settings-help" style="font-size:12px;color:var(--text-muted,#888);line-height:1.4">' + escapeHtml(hint) + '</div>' +
+              '</div>'
+            : inputHtml;
+          html += '<div class="settings-row">' +
+            '<label class="settings-label">' + escapeHtml(key) + '</label>' +
+            fieldHtml +
           '</div>';
         }
       }
