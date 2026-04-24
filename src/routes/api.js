@@ -1955,7 +1955,12 @@ function createApiRouter(deps) {
       var BLOCKED_KEYS = [
         'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY',
         'DASHBOARD_PASSWORD', 'DASHBOARD_PASSWORD_HASH', 'SESSION_SECRET',
-        'FIREHOSE_MANAGEMENT_KEY',
+        // FIREHOSE_MANAGEMENT_KEY used to be here alongside the AI keys; now
+        // the Settings UI exposes it so auto-provisioning (tap + rule
+        // creation on feed save) can be configured without .env edits or
+        // direct DB writes. Still masked on GET via SENSITIVE_KEYS above and
+        // the masked-value skip at line ~1979 prevents accidental blanking
+        // on re-save.
         'DB_PATH', 'DATA_DIR', 'LOG_PATH', 'NODE_ENV',
       ];
 
