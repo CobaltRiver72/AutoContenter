@@ -75,13 +75,56 @@
   }
 
   // ─── Rendering ─────────────────────────────────────────────────────────
+  //
+  // Focus-bounce fix: every re-render rewrites root.innerHTML, which destroys
+  // the currently-focused input. Without restoration the old code stamped the
+  // Name input on every render, so typing in Query → preview fires → render
+  // → cursor bounces to Name. Now we snapshot document.activeElement BEFORE
+  // the rewrite (keyed on data-input attribute), then find the same logical
+  // field AFTER the rewrite and restore focus + cursor position.
+  //
+  // Initial-focus policy: only once per entry into the form step (tracked by
+  // _state._didInitialFocus, which back() resets). Picker step has no focus
+  // target.
   function render() {
     var root = document.getElementById('page-create-feed');
     if (!root) return;
     root.classList.add('sh-root');
+
+    // Snapshot focus state before innerHTML rewrite destroys it.
+    var prevFocus = null;
+    var active = document.activeElement;
+    if (active && root.contains(active) && active.dataset && active.dataset.input) {
+      prevFocus = {
+        key: active.dataset.input,
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end:   typeof active.selectionEnd   === 'number' ? active.selectionEnd   : null,
+      };
+    }
+
     if (_state.step === 'pick') { _renderPick(root); }
     else { _renderForm(root); }
     if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+
+    // Restore focus if we captured one.
+    if (prevFocus) {
+      var next = root.querySelector('[data-input="' + prevFocus.key + '"]');
+      if (next) {
+        next.focus();
+        try {
+          if (prevFocus.start != null && prevFocus.end != null) {
+            next.setSelectionRange(prevFocus.start, prevFocus.end);
+          }
+        } catch (_selErr) { /* not every input supports selection (e.g. number) */ }
+      }
+    } else if (_state.step === 'form' && !_state._didInitialFocus) {
+      // First landing on the form — focus Name once. Defer with setTimeout
+      // so any pending layout work (Lucide icons, etc.) doesn't steal focus
+      // back immediately.
+      _state._didInitialFocus = true;
+      var nameInput = root.querySelector('[data-input="createFeedName"]');
+      if (nameInput) setTimeout(function () { nameInput.focus(); }, 0);
+    }
   }
 
   function _renderPick(root) {
@@ -262,12 +305,10 @@
         '</div>' +
       '</div>';
 
-    // Focus the name field on first entry into the form for quick typing.
-    var nameInput = root.querySelector('[data-input="createFeedName"]');
-    if (nameInput && !nameInput.dataset.focused) {
-      nameInput.dataset.focused = '1';
-      setTimeout(function () { nameInput.focus(); }, 50);
-    }
+    // Initial focus is handled in render() using _state._didInitialFocus so
+    // every subsequent render (e.g. live-preview refresh) does NOT re-focus
+    // the Name field and bounce the caret out of whatever input the user is
+    // currently typing in.
   }
 
   function _kindLabelFor(id) {
@@ -362,6 +403,10 @@
 
   function back() {
     _state.step = 'pick';
+    // Reset the initial-focus flag so re-entering the form auto-focuses Name
+    // once (but still only once — subsequent renders preserve whatever the
+    // user is currently typing in).
+    _state._didInitialFocus = false;
     render();
   }
 
@@ -448,6 +493,7 @@
     _state.autoPub = false;
     _state.preview = null;
     _state.submitting = false;
+    _state._didInitialFocus = false;
     // Keep existingFeeds across resets — it's remote data, harmless to reuse.
   }
 
