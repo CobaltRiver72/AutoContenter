@@ -4865,7 +4865,7 @@
 
     // Standard groups (AI is handled by its own section now)
     var standardGroups = {
-      'Firehose': ['FIREHOSE_TOKEN'],
+      'Firehose': ['FIREHOSE_TOKEN', 'FIREHOSE_MANAGEMENT_KEY'],
       // Pipeline group removed in PR 3. Clustering settings moved to per-feed
       // (Feed Configuration tab); publish-rate settings moved to per-site
       // (Site Settings → Publishing tab). All four keys remain editable via
@@ -4880,10 +4880,21 @@
 
     var sensitiveKeys = {
       FIREHOSE_TOKEN: true,
+      FIREHOSE_MANAGEMENT_KEY: true,
       WP_APP_PASSWORD: true,
       DASHBOARD_PASSWORD: true,
       INFRANODUS_API_KEY: true,
       JINA_API_KEY: true,
+    };
+
+    // Per-key hint text rendered under the input. Keyed sparsely — most
+    // settings are self-explanatory from their label. Only keys where the
+    // difference from a neighbour matters (e.g. FIREHOSE_TOKEN vs MGMT_KEY)
+    // need a hint.
+    var keyHints = {
+      FIREHOSE_MANAGEMENT_KEY:
+        'Ahrefs Firehose management key (starts fhm_). Required only if you want new feeds to auto-provision their own tap + rule on create. ' +
+        'Per-feed fh_ tap tokens override this.',
     };
 
     var booleanKeys = {
@@ -4931,11 +4942,13 @@
           '</div>';
         } else {
           var inputType = isSensitive ? 'password' : 'text';
+          var hint = keyHints[key];
           html += '<div class="settings-row">' +
             '<label class="settings-label">' + escapeHtml(key) + '</label>' +
             '<input type="' + inputType + '" data-setting-key="' + escapeHtml(key) + '" value="' + escapeHtml(displayValue) + '"' +
             (isSensitive ? ' placeholder="' + (currentValue || configValue ? '(configured)' : '(not set)') + '"' : '') +
             '>' +
+            (hint ? '<div class="settings-help" style="font-size:12px;color:var(--text-muted,#888);margin-top:4px;line-height:1.4">' + escapeHtml(hint) + '</div>' : '') +
           '</div>';
         }
       }
