@@ -15,9 +15,12 @@
   // ─── Helpers (shared with site-home.js where possible) ─────────────────
   function escapeHtml(str) {
     if (str == null) return '';
-    var div = document.createElement('div');
-    div.textContent = String(str);
-    return div.innerHTML;
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function api(path) {

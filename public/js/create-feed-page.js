@@ -56,9 +56,18 @@
   var _previewTimer = null;
 
   // ─── Helpers ────────────────────────────────────────────────────────────
+  // Escapes the five HTML-significant characters. The textContent→innerHTML
+  // trick used before only escaped &, <, >, leaving " and ' untouched — which
+  // silently broke every `value="' + escapeHtml(...) + '"` call site when a
+  // user typed a quote. Explicit replaces fix both attribute and text contexts.
   function escapeHtml(str) {
     if (str == null) return '';
-    var d = document.createElement('div'); d.textContent = String(str); return d.innerHTML;
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
   function icon(name, size) {
     size = size || 14;
