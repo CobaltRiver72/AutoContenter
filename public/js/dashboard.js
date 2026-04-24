@@ -6338,6 +6338,9 @@
     'createFeedCancel':        function () { if (window.__createFeed) window.__createFeed.cancel(); },
     'createFeedSetKind':       function (el) { if (window.__createFeed) window.__createFeed.setKind(el.dataset.kind); },
     'createFeedSubmit':        function () { if (window.__createFeed) window.__createFeed.submit(); },
+    // PR 6 — Sources section on New Feed wizard
+    'createFeedToggleLang':    function (el) { if (window.__createFeed) window.__createFeed.toggleLang(el.dataset.lang); },
+    'createFeedRemoveTag':     function (el) { if (window.__createFeed) window.__createFeed.removeTag(el.dataset.field, el.dataset.value); },
 
     // Feed detail (tabs + cluster list + settings)
     'fdBack':                  function () { if (window.__feedDetail) window.__feedDetail.back(); },
@@ -6422,6 +6425,7 @@
     'fdSetNotify':        function (el) { if (window.__feedDetail) window.__feedDetail.setSetg('notifyFail', !!el.checked); },
     'fdCfgAllowSame':     function (el) { if (window.__feedDetail) window.__feedDetail.setCfg('allowSameDomain', !!el.checked); },
     'fdCfgTimeRange':     function (el) { if (window.__feedDetail) window.__feedDetail.setTimeRange(el.value); },
+    'createFeedTimeRange':function (el) { if (window.__createFeed) window.__createFeed.setTimeRange(el.value); },
     'editorToggleCitations': function (el) { if (window.__editorPage) window.__editorPage.toggleCitations(!!el.checked); },
     'editorToggleSeo':       function (el) { if (window.__editorPage) window.__editorPage.toggleSeo(!!el.checked); },
     'ssSelectCfg':           function (el) { if (window.__siteSettings) window.__siteSettings.selectCfg(el.dataset.field, el.value); },
@@ -6443,6 +6447,11 @@
       if (window.__feedDetail && typeof window.__feedDetail.onTagKeydown === 'function') {
         window.__feedDetail.onTagKeydown(el, e);
       }
+    },
+    'createFeedTagKey': function (el, e) {
+      if (window.__createFeed && typeof window.__createFeed.onTagKeydown === 'function') {
+        window.__createFeed.onTagKeydown(el, e);
+      }
     }
   };
 
@@ -6450,6 +6459,11 @@
     'fdCfgTagPaste': function (el, e) {
       if (window.__feedDetail && typeof window.__feedDetail.onTagPaste === 'function') {
         window.__feedDetail.onTagPaste(el, e);
+      }
+    },
+    'createFeedTagPaste': function (el, e) {
+      if (window.__createFeed && typeof window.__createFeed.onTagPaste === 'function') {
+        window.__createFeed.onTagPaste(el, e);
       }
     }
   };

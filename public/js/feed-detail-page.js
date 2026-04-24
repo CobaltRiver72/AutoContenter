@@ -376,152 +376,39 @@
     '</div>';
   }
 
-  // ─── Sources section (PR 5) ────────────────────────────────────────────
-  // Four controls that map 1:1 to feeds.source_config keys. The backend
-  // (firehose.js + lucene-builder.js) already consumes each; this section
-  // is pure UI surfacing — zero new backend filters.
+  // ─── Sources section (PR 5 + PR 6 shared) ─────────────────────────────
+  // PR 6 extracted the pure render + validation helpers into
+  // public/js/shared-feed-form.js so the New Feed wizard and this
+  // Configuration tab stay pixel-identical. State-coupled bits (focus
+  // restore, dom chip mutators that touch _state.cfg) stay here.
 
-  var LANG_OPTIONS = [
-    { value: 'en', label: 'English'    },
-    { value: 'hi', label: 'Hindi'      },
-    { value: 'es', label: 'Spanish'    },
-    { value: 'fr', label: 'French'     },
-    { value: 'de', label: 'German'     },
-    { value: 'pt', label: 'Portuguese' },
-    { value: 'it', label: 'Italian'    },
-    { value: 'ja', label: 'Japanese'   },
-    { value: 'zh', label: 'Chinese'    },
-    { value: 'ar', label: 'Arabic'     },
-  ];
-
-  var TIME_RANGE_OPTIONS = [
-    { value: 'any',        label: 'Any time'   },
-    { value: 'past-hour',  label: 'Past hour'  },
-    { value: 'past-day',   label: 'Past day'   },
-    { value: 'past-week',  label: 'Past week'  },
-    { value: 'past-month', label: 'Past month' },
-    { value: 'past-year',  label: 'Past year'  },
-  ];
-
-  // Mirrors the validation in src/utils/lucene-builder._cleanDomain plus
-  // the shape check the spec mandates. Allows wildcards like *.example.com
-  // and bare domains; rejects spaces, slashes, schemes, empty.
-  var _DOMAIN_RE = /^[*.]*[a-z0-9.-]+$/i;
-  function _isValidDomain(raw) {
-    if (!raw || typeof raw !== 'string') return false;
-    var s = raw.trim().toLowerCase();
-    if (!s || s.length > 253) return false;
-    return _DOMAIN_RE.test(s);
-  }
-
-  function _normalizeDomain(raw) {
-    return String(raw || '').trim().toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/\/.*$/, '');
-  }
-
-  function _renderLangPills(selected) {
-    var active = {};
-    for (var i = 0; i < (selected || []).length; i++) active[selected[i]] = true;
-    return LANG_OPTIONS.map(function (opt) {
-      var on = !!active[opt.value];
-      var style = on
-        ? 'background:var(--sh-text);color:var(--sh-bg);border-color:var(--sh-text)'
-        : '';
-      return '<button type="button" class="sh-btn sh-btn-sm" style="' + style +
-        '" data-click="fdCfgToggleLang" data-lang="' + escapeHtml(opt.value) + '">' +
-        escapeHtml(opt.label) + ' · ' + escapeHtml(opt.value) +
-        '</button>';
-    }).join('');
-  }
-
-  function _renderTagChip(field, value) {
-    return '<span class="sh-fd-tag" style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px 2px 10px;background:var(--sh-bg-2);border:1px solid var(--sh-border);border-radius:12px;font-size:12.5px;line-height:1.4">' +
-      '<span class="sh-mono">' + escapeHtml(value) + '</span>' +
-      '<button type="button" class="sh-btn-icon" style="padding:0 4px;background:transparent;border:none;color:var(--sh-text-3);cursor:pointer;font-size:14px;line-height:1" data-click="fdCfgRemoveTag" data-field="' + escapeHtml(field) + '" data-value="' + escapeHtml(value) + '" aria-label="Remove ' + escapeHtml(value) + '">&times;</button>' +
-    '</span>';
-  }
-
-  function _renderTagInput(field, values) {
-    var chips = (values || []).map(function (v) { return _renderTagChip(field, v); }).join(' ');
-    var placeholder = values && values.length
-      ? 'Add another + Enter'
-      : 'example.com or *.reuters.com, then Enter';
-    return '<div class="sh-fd-tag-wrap" data-tag-field="' + escapeHtml(field) + '" ' +
-      'style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;' +
-      'min-height:36px;border:1px solid var(--sh-border);border-radius:6px;background:var(--sh-surface)">' +
-      chips +
-      (chips ? ' ' : '') +
-      '<input type="text" data-keydown="fdCfgTagKey" data-paste="fdCfgTagPaste" ' +
-        'data-field="' + escapeHtml(field) + '" ' +
-        'class="sh-fd-tag-input" ' +
-        'style="flex:1;min-width:140px;border:none;outline:none;background:transparent;font-size:13px;padding:2px" ' +
-        'placeholder="' + escapeHtml(placeholder) + '"/>' +
-    '</div>';
-  }
+  function _isValidDomain(raw)    { return window.__shFeedForm.isValidDomain(raw); }
+  function _normalizeDomain(raw)  { return window.__shFeedForm.normalizeDomain(raw); }
+  function _flashInputInvalid(el) { return window.__shFeedForm.flashInputInvalid(el); }
 
   function _renderSourcesSection(cfg) {
-    var siteDefaults = (_state.siteDefaultLanguages || []).join(', ') || 'en, hi';
-
-    return '<div class="sh-eyebrow" style="margin-top:24px">Sources</div>' +
-      // Time window
-      '<div style="margin-bottom:14px">' +
-        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Time window</div>' +
-        '<select class="sh-select" data-change="fdCfgTimeRange" style="width:100%;max-width:240px">' +
-          TIME_RANGE_OPTIONS.map(function (o) {
-            var sel = (o.value === cfg.timeRange) ? ' selected' : '';
-            return '<option value="' + escapeHtml(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
-          }).join('') +
-        '</select>' +
-        '<div class="sh-field-hint">How far back Firehose searches when your query matches.</div>' +
-      '</div>' +
-
-      // Languages
-      '<div style="margin-bottom:14px">' +
-        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Languages</div>' +
-        '<div style="display:flex;flex-wrap:wrap;gap:6px">' + _renderLangPills(cfg.languages) + '</div>' +
-        '<div class="sh-field-hint">Articles must match one of the selected languages.</div>' +
-        ((!cfg.languages || !cfg.languages.length)
-          ? '<div class="sh-field-hint" style="color:var(--sh-text-3);font-style:italic">Leave empty to inherit site default (currently: ' + escapeHtml(siteDefaults) + ')</div>'
-          : '') +
-      '</div>' +
-
-      // Include domains
-      '<div style="margin-bottom:14px">' +
-        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Include domains</div>' +
-        _renderTagInput('includeDomains', cfg.includeDomains) +
-        '<div class="sh-field-hint">Only articles from these domains. Leave empty for no restriction. Wildcards: *.reuters.com matches any Reuters subdomain.</div>' +
-      '</div>' +
-
-      // Exclude domains
-      '<div style="margin-bottom:14px">' +
-        '<div style="font-size:13px;font-weight:500;margin-bottom:6px">Exclude domains</div>' +
-        _renderTagInput('excludeDomains', cfg.excludeDomains) +
-        '<div class="sh-field-hint">Articles from these domains are dropped. Wildcards supported.</div>' +
-      '</div>';
+    // feed-detail keeps its existing fdCfg* action names so dashboard.js's
+    // delegation registry doesn't need to change for this page.
+    return window.__shFeedForm.renderSourcesSection(cfg, {
+      timeRangeAction:       'fdCfgTimeRange',
+      langToggleAction:      'fdCfgToggleLang',
+      tagKeydownAction:      'fdCfgTagKey',
+      tagPasteAction:        'fdCfgTagPaste',
+      tagRemoveAction:       'fdCfgRemoveTag',
+      siteDefaultLanguages:  _state.siteDefaultLanguages,
+    });
   }
 
   // After each render cycle, if the user was typing in a tag input, restore
-  // focus so their flow isn't interrupted by a chip add/remove.
+  // focus so their flow isn't interrupted by a chip add/remove. State-coupled
+  // (reads _state.activeTagField), so it stays local rather than moving to
+  // the shared module.
   function _restoreTagFocus() {
     if (!_state.activeTagField) return;
     var input = document.querySelector(
       'input[data-keydown="fdCfgTagKey"][data-field="' + _state.activeTagField + '"]'
     );
     if (input) input.focus();
-  }
-
-  // Brief red flash on the given input to signal a rejected entry.
-  function _flashInputInvalid(input) {
-    if (!input) return;
-    var prevBorder = input.style.border;
-    var prevBg = input.style.background;
-    input.style.border = '1px solid var(--sh-red,#dc2626)';
-    input.style.background = 'rgba(248,113,113,0.08)';
-    setTimeout(function () {
-      input.style.border = prevBorder;
-      input.style.background = prevBg;
-    }, 1800);
   }
 
   // ─── Configuration tab ─────────────────────────────────────────────────
