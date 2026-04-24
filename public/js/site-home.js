@@ -35,9 +35,12 @@
   // ─── Helpers ────────────────────────────────────────────────────────────
   function escapeHtml(str) {
     if (str == null) return '';
-    var div = document.createElement('div');
-    div.textContent = String(str);
-    return div.innerHTML;
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // Site avatar: deterministic gradient from the site's color (if set) or a
