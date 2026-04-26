@@ -555,10 +555,15 @@
 
   // ─── Actions ───────────────────────────────────────────────────────────
   function back() {
+    // Preserve the feed-detail context that was active when the editor
+    // opened so Back doesn't drop the user on an empty feed-detail shell.
+    var feedId = (window.__dashboard && window.__dashboard.state)
+      ? window.__dashboard.state.currentFeedId
+      : null;
     if (window.__dashboard && typeof window.__dashboard.navigateTo === 'function') {
-      window.__dashboard.navigateTo('feed-detail');
+      window.__dashboard.navigateTo('feed-detail', feedId);
     } else {
-      window.location.hash = 'feed-detail';
+      window.location.hash = feedId ? ('feed-detail/' + feedId) : 'feed-detail';
     }
   }
   function setCtx(id) {

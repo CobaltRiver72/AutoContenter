@@ -501,9 +501,9 @@
     if (!clusterId) return;
     if (window.__dashboard && window.__dashboard.state) window.__dashboard.state.currentClusterId = clusterId;
     if (window.__dashboard && typeof window.__dashboard.navigateTo === 'function') {
-      window.__dashboard.navigateTo('editor');
+      window.__dashboard.navigateTo('editor', clusterId);
     } else {
-      window.location.hash = 'editor';
+      window.location.hash = 'editor/' + clusterId;
     }
   }
 
