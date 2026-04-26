@@ -1634,6 +1634,87 @@ function createApiRouter(deps) {
     res.json({ ok: allOk, checks: checks });
   });
 
+  // ─── GET /api/diagnostics/system ───────────────────────────────────────
+  //
+  // System-wide health window: DB sizes + journal mode + per-table row
+  // counts + process uptime + memory. Different shape from the older
+  // /api/diagnostics (which is a checklist for fuel/metals/WP creds and
+  // is consumed by the dashboard's diagnostics panel) — left untouched
+  // to avoid breaking that UI. Use this endpoint to answer "what's
+  // happening server-side right now" without ssh-ing into the box.
+  router.get('/diagnostics/system', function (req, res) {
+    try {
+      var fs = require('fs');
+      var path = require('path');
+      var dbPath = process.env.DB_PATH ||
+        path.resolve(__dirname, '..', '..', 'data', 'autopub.db');
+
+      function _safeStat(p) {
+        try { return fs.statSync(p).size; } catch (_e) { return 0; }
+      }
+
+      // Count rows in every table that exists. Listed by name so we
+      // don't accidentally surface internal sqlite_* tables. Anything
+      // missing returns "table not present" instead of a silent zero
+      // so a missing migration is visible.
+      var tablesToCount = [
+        'sites','feeds','articles','clusters','drafts','draft_versions','published',
+        'settings','site_config','logs','infranodus_history','config_snapshots',
+        'classification_log','wp_posts_log','wp_taxonomy_cache','publish_rules',
+        'fetch_log','trends','domains_config',
+        'fuel_cities','fuel_log','fuel_prices',
+        'metals_cities','metals_log','metals_prices',
+        'lottery_results',
+      ];
+      var tableCounts = {};
+      for (var i = 0; i < tablesToCount.length; i++) {
+        var t = tablesToCount[i];
+        try {
+          tableCounts[t] = db.prepare('SELECT COUNT(*) AS n FROM ' + t).get().n;
+        } catch (e) {
+          tableCounts[t] = /no such table/i.test(e.message) ? null : ('error: ' + e.message);
+        }
+      }
+
+      var dbSize  = _safeStat(dbPath);
+      var walSize = _safeStat(dbPath + '-wal');
+      var shmSize = _safeStat(dbPath + '-shm');
+      var pageCount  = db.pragma('page_count', { simple: true });
+      var pageSize   = db.pragma('page_size',  { simple: true });
+      var journalMode = db.pragma('journal_mode', { simple: true });
+      var fkEnforced  = db.pragma('foreign_keys',  { simple: true }) === 1;
+
+      var mem = process.memoryUsage();
+
+      res.json({
+        ok: true,
+        db: {
+          path: dbPath,
+          mainSizeBytes: dbSize,
+          walSizeBytes:  walSize,
+          shmSizeBytes:  shmSize,
+          pageCount:     pageCount,
+          pageSize:      pageSize,
+          journalMode:   journalMode,
+          foreignKeysEnforced: fkEnforced,
+        },
+        tableCounts: tableCounts,
+        process: {
+          uptimeSeconds:       Math.floor(process.uptime()),
+          memoryRssBytes:      mem.rss,
+          memoryHeapUsedBytes: mem.heapUsed,
+          memoryHeapTotalBytes: mem.heapTotal,
+          nodeVersion:         process.version,
+          platform:            process.platform,
+          pid:                 process.pid,
+        },
+      });
+    } catch (err) {
+      logger.error('api', '/diagnostics/system: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ─── POST GENERATION + WP ROUTES ───────────────────────────────────────
 
   router.post('/fuel/generate-posts', function (req, res) {
