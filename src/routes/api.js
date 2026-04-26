@@ -2451,6 +2451,77 @@ function createApiRouter(deps) {
     }
   });
 
+  // ─── DELETE /api/clusters/:id ─────────────────────────────────────────────
+  //
+  // Hard-delete a cluster row. Distinct from /clusters/:id/drafts which
+  // only clears the cluster's drafts but keeps the cluster row. Cascade
+  // FKs (PR Tier1) drop drafts → draft_versions → infranodus_history.
+  // Articles are preserved with cluster_id = NULL (SET NULL FK), so the
+  // raw content stays available for re-clustering.
+  //
+  // Refuses if any published row references the cluster — protects the
+  // audit trail. The RESTRICT FK would block this anyway, but the early
+  // 409 gives a clean message instead of an opaque SQLITE_CONSTRAINT.
+  router.delete('/clusters/:id', function (req, res) {
+    try {
+      var clusterId = parseId(req.params.id);
+      if (!clusterId) return res.status(400).json({ ok: false, error: 'Invalid cluster id' });
+
+      var pub = db.prepare('SELECT id FROM published WHERE cluster_id = ? LIMIT 1').get(clusterId);
+      if (pub) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Cluster has published article(s). Unpublish first, then retry.',
+        });
+      }
+
+      // Cascade-count for the response so admins see what's about to be removed.
+      var counts = db.prepare(
+        'SELECT (SELECT COUNT(*) FROM drafts WHERE cluster_id = ?) AS drafts, ' +
+        '(SELECT COUNT(*) FROM articles WHERE cluster_id = ?) AS articles_unlinked'
+      ).get(clusterId, clusterId);
+
+      var result = db.prepare('DELETE FROM clusters WHERE id = ?').run(clusterId);
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Cluster not found' });
+      }
+
+      logger.info('api', 'Cluster ' + clusterId + ' deleted. Cascade removed ' + counts.drafts +
+        ' draft(s); ' + counts.articles_unlinked + ' article(s) unlinked (cluster_id=NULL).');
+      res.json({
+        ok: true,
+        deleted: result.changes,
+        cascade: { drafts: counts.drafts, articles_unlinked: counts.articles_unlinked },
+      });
+    } catch (err) {
+      logger.error('api', 'DELETE /clusters/:id: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── DELETE /api/articles/:id ─────────────────────────────────────────────
+  //
+  // Hard-delete an article row. The previous codebase had no admin path
+  // to remove a single article — the only cleanup was via DELETE FROM
+  // articles in the cleanOldArticles cron. Now an admin can remove a
+  // specific bad article (broken extraction, source taken down, etc.).
+  // FK on drafts.source_article_id is SET NULL so any draft that
+  // referenced this article keeps existing — just loses the back-pointer.
+  router.delete('/articles/:id', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ ok: false, error: 'Invalid article id' });
+      var result = db.prepare('DELETE FROM articles WHERE id = ?').run(id);
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Article not found' });
+      }
+      res.json({ ok: true, deleted: result.changes });
+    } catch (err) {
+      logger.error('api', 'DELETE /articles/:id: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ─── POST /api/clusters/:id/skip ──────────────────────────────────────────
 
   router.post('/clusters/:id/skip', function (req, res) {
@@ -6398,9 +6469,46 @@ function createApiRouter(deps) {
       if (siteId === 1) return res.status(400).json({ ok: false, error: 'Cannot delete the default site' });
       var existing = siteConfigMod.getSite(siteId);
       if (!existing) return res.status(404).json({ ok: false, error: 'Site not found' });
+
+      // Default behavior is soft-delete (deactivate) — preserves all
+      // child data. ?hard=true triggers a real DELETE that cascades
+      // through every per-site table (feeds, articles, clusters,
+      // drafts, draft_versions, logs, classification_log, etc.) thanks
+      // to the Tier-1 FK migration.
+      //
+      // Refuses if any published row references the site — protects
+      // the audit trail. The RESTRICT FK on published.site_id would
+      // block this anyway, but the early 409 gives a clear message
+      // instead of an opaque SQLITE_CONSTRAINT.
+      if (req.query.hard === 'true' || req.query.hard === '1') {
+        var hasPublished = db.prepare('SELECT id FROM published WHERE site_id = ? LIMIT 1').get(siteId);
+        if (hasPublished) {
+          return res.status(409).json({
+            ok: false,
+            error: 'Site has published article(s). Either unpublish them first, or omit ?hard=true to deactivate instead.',
+          });
+        }
+
+        // Pre-count cascade impact for the response.
+        var cascade = db.prepare(
+          'SELECT ' +
+          '  (SELECT COUNT(*) FROM feeds      WHERE site_id = ?) AS feeds, ' +
+          '  (SELECT COUNT(*) FROM articles   WHERE source_site_id = ?) AS articles, ' +
+          '  (SELECT COUNT(*) FROM drafts     WHERE site_id = ?) AS drafts, ' +
+          '  (SELECT COUNT(*) FROM site_config WHERE site_id = ?) AS site_config_rows'
+        ).get(siteId, siteId, siteId, siteId);
+
+        db.prepare('DELETE FROM sites WHERE id = ?').run(siteId);
+        logger.info('api', 'Site ' + siteId + ' hard-deleted. Cascade removed ' +
+          cascade.feeds + ' feed(s), ' + cascade.articles + ' article(s), ' +
+          cascade.drafts + ' draft(s), ' + cascade.site_config_rows + ' site_config row(s).');
+        return res.json({ ok: true, message: 'Site hard-deleted with full cascade.', cascade: cascade });
+      }
+
       siteConfigMod.deactivateSite(siteId);
-      res.json({ ok: true, message: 'Site deactivated' });
+      res.json({ ok: true, message: 'Site deactivated (use ?hard=true to delete with full cascade)' });
     } catch (err) {
+      logger.error('api', 'DELETE /sites/:id: ' + err.message);
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -7481,7 +7589,26 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
 
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
+
+      // Pre-count what cascade is about to remove so admins see exactly
+      // what got cleaned up. Tier-1 FKs make this a real cascade now —
+      // articles + clusters + drafts + draft_versions + infranodus_history
+      // for this feed all disappear; published rows keep their data but
+      // get feed_id=NULL (SET NULL FK).
+      var cascadeCounts = db.prepare(
+        'SELECT ' +
+        '  (SELECT COUNT(*) FROM articles WHERE feed_id = ?) AS articles, ' +
+        '  (SELECT COUNT(*) FROM clusters WHERE feed_id = ?) AS clusters, ' +
+        '  (SELECT COUNT(*) FROM drafts   WHERE feed_id = ?) AS drafts, ' +
+        '  (SELECT COUNT(*) FROM published WHERE feed_id = ?) AS published_unlinked'
+      ).get(feedId, feedId, feedId, feedId);
+
       db.prepare('DELETE FROM feeds WHERE id = ?').run(feedId);
+
+      logger.info('api', 'Feed ' + feedId + ' destroyed. Cascade removed ' +
+        cascadeCounts.articles + ' article(s), ' + cascadeCounts.clusters + ' cluster(s), ' +
+        cascadeCounts.drafts + ' draft(s); ' + cascadeCounts.published_unlinked +
+        ' published row(s) unlinked (feed_id=NULL).');
 
       // Removing a feed (hard delete) can tighten the SQL pre-filter floor
       // if it was the loosest contributor. Drop both caches.
@@ -7491,7 +7618,7 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         _ccDestroy.invalidateFloorCache();
       } catch (_icErr) { /* non-critical */ }
 
-      res.json({ ok: true, message: 'Feed destroyed', feedId: feedId });
+      res.json({ ok: true, message: 'Feed destroyed', feedId: feedId, cascade: cascadeCounts });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
