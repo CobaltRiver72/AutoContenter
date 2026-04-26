@@ -20,6 +20,11 @@ let db;
 try {
   db = new Database(dbPath);
 
+  // FK enforcement is OFF by default in SQLite even when FOREIGN KEY
+  // clauses are declared. Turn it on at every connection so cascade
+  // semantics actually fire and orphan inserts get rejected.
+  db.pragma('foreign_keys = ON');
+
   // ─── Security hardening: tighten permissions on DB files (C3 fix) ──
   // The DB holds plaintext API keys, WP credentials, FIREHOSE_TOKEN,
   // SESSION_SECRET, and bcrypt hashes. On multi-tenant hosts, default
@@ -1355,6 +1360,19 @@ function runMigrations() {
         console.log('[db] Encrypted at rest: ' + settingsEnc + ' setting(s), ' + sitesEnc + ' site row(s) updated.');
       }
     })();
+
+    // ─── FK cascade migration ───────────────────────────────────────────────
+    // Adds ON DELETE CASCADE / SET NULL / RESTRICT across the content tables
+    // so removing a feed actually removes its articles + clusters + drafts
+    // instead of leaving orphans forever. Idempotent — already-migrated
+    // tables are skipped via PRAGMA foreign_key_list inspection. Per-table
+    // try/catch in the migrator so one table's failure doesn't break boot.
+    try {
+      var fkMigration = require('./db-fk-migration');
+      fkMigration.migrateAddForeignKeys(db, console);
+    } catch (fkErr) {
+      console.warn('[db] FK migration failed: ' + fkErr.message + ' — continuing boot');
+    }
 
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
