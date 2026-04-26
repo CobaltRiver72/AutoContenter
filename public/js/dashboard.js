@@ -552,27 +552,19 @@
 
   // ─── Router ─────────────────────────────────────────────────────────────
 
-  // Pure hash parser — `#editor/47526` → { page: 'editor', id: 47526 }.
-  // Exported on window.__dashboard.parseRouteHash so the test suite can
-  // pull it via `require()` without booting a DOM. Pages that hold a
-  // selection in JS state (editor, feed-detail) need this so a refresh
-  // can re-hydrate from the URL.
+  // Hash route parsing/building lives in public/js/shared-route.js as a
+  // UMD module so the test suite can require() it without a DOM. Tiny
+  // shims here so the existing call sites (initRouter, hashchange,
+  // navigateTo) read naturally.
   function parseRouteHash(hash) {
-    var raw = String(hash == null ? '' : hash).replace(/^#/, '');
-    if (!raw) return { page: 'overview', id: null };
-    var parts = raw.split('/');
-    var page = parts[0];
-    var id = null;
-    if (parts.length > 1 && parts[1] !== '') {
-      var n = parseInt(parts[1], 10);
-      id = (!isNaN(n) && String(n) === parts[1]) ? n : null;
-    }
-    return { page: page, id: id };
+    return (window.__shRoute && window.__shRoute.parseRouteHash)
+      ? window.__shRoute.parseRouteHash(hash)
+      : { page: 'overview', id: null };
   }
-
-  // Inverse — assembles the hash for a given page + optional id.
   function _buildHash(page, id) {
-    return id != null ? page + '/' + id : page;
+    return (window.__shRoute && window.__shRoute.buildHash)
+      ? window.__shRoute.buildHash(page, id)
+      : (id != null ? page + '/' + id : page);
   }
 
   function navigateTo(page, id) {
