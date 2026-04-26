@@ -552,7 +552,22 @@
 
   // ─── Router ─────────────────────────────────────────────────────────────
 
-  function navigateTo(page) {
+  // Hash route parsing/building lives in public/js/shared-route.js as a
+  // UMD module so the test suite can require() it without a DOM. Tiny
+  // shims here so the existing call sites (initRouter, hashchange,
+  // navigateTo) read naturally.
+  function parseRouteHash(hash) {
+    return (window.__shRoute && window.__shRoute.parseRouteHash)
+      ? window.__shRoute.parseRouteHash(hash)
+      : { page: 'overview', id: null };
+  }
+  function _buildHash(page, id) {
+    return (window.__shRoute && window.__shRoute.buildHash)
+      ? window.__shRoute.buildHash(page, id)
+      : (id != null ? page + '/' + id : page);
+  }
+
+  function navigateTo(page, id) {
     // Clear timers from the previous page before switching
     clearPageTimers();
 
@@ -575,9 +590,19 @@
 
     state.currentPage = page;
 
-    // Keep URL hash in sync
-    if (window.location.hash.slice(1) !== page) {
-      window.location.hash = page;
+    // Persist the selection ID into state so the page module can read it.
+    // Each consumer (editor / feed-detail) honors an explicit load(id) arg
+    // first and falls back to state.current{Cluster|Feed}Id otherwise.
+    if (id != null) {
+      if (page === 'editor')      state.currentClusterId = id;
+      if (page === 'feed-detail') state.currentFeedId    = id;
+    }
+
+    // Keep URL hash in sync — include the selection ID so refresh
+    // restores the same view instead of an empty shell.
+    var newHash = _buildHash(page, id);
+    if (window.location.hash.slice(1) !== newHash) {
+      window.location.hash = newHash;
     }
 
     // Update topbar page title
@@ -638,14 +663,16 @@
         break;
       case 'feed-detail':
         if (window.__feedDetail && typeof window.__feedDetail.load === 'function') {
-          window.__feedDetail.load();
+          // Pass id explicitly so a refresh-from-URL path doesn't depend
+          // on state being pre-populated by a click handler.
+          window.__feedDetail.load(id != null ? id : state.currentFeedId);
         } else {
           navigateTo('feeds');
         }
         break;
       case 'editor':
         if (window.__editorPage && typeof window.__editorPage.load === 'function') {
-          window.__editorPage.load();
+          window.__editorPage.load(id != null ? id : state.currentClusterId);
         } else {
           navigateTo('feeds');
         }
@@ -668,8 +695,8 @@
   }
 
   function initRouter() {
-    var hash = window.location.hash.slice(1) || 'overview';
-    navigateTo(hash);
+    var initial = parseRouteHash(window.location.hash);
+    navigateTo(initial.page, initial.id);
 
     // Restore editor state after refresh
     try {
@@ -685,11 +712,17 @@
       }
     } catch (e) {}
 
-    // Handle browser back/forward
+    // Handle browser back/forward. Compare both page + id so an in-page
+    // selection change (e.g. clicking a different cluster in the editor)
+    // also re-hydrates instead of being ignored as "same page".
     window.addEventListener('hashchange', function () {
-      var hash = window.location.hash.slice(1) || 'overview';
-      if (hash !== state.currentPage) {
-        navigateTo(hash);
+      var next = parseRouteHash(window.location.hash);
+      var samePage = next.page === state.currentPage;
+      var sameId   = next.id   === (next.page === 'editor'      ? state.currentClusterId
+                                  : next.page === 'feed-detail' ? state.currentFeedId
+                                  : null);
+      if (!samePage || !sameId) {
+        navigateTo(next.page, next.id);
       }
     });
 
@@ -10226,6 +10259,7 @@
     state: state,
     fetchApi: fetchApi,
     navigateTo: navigateTo,
+    parseRouteHash: parseRouteHash,
     formatTime: formatTime,
     formatDateTime: formatDateTime,
     escapeHtml: escapeHtml

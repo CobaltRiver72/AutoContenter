@@ -370,14 +370,15 @@
   }
 
   function openFeed(id) {
-    // Stash on dashboard state so the feed-detail module can read it without
-    // a hash query parser. (Not bookmark-friendly — we'll add proper URL
-    // param support when the router gets a general overhaul.)
+    // navigateTo(page, id) writes the id into the URL hash so a refresh
+    // restores the same feed. Also still pokes state.currentFeedId for any
+    // downstream module that hasn't yet been migrated to read the id arg
+    // from load(id) — belt and suspenders.
     if (window.__dashboard && window.__dashboard.state) window.__dashboard.state.currentFeedId = id;
     if (window.__dashboard && typeof window.__dashboard.navigateTo === 'function') {
-      window.__dashboard.navigateTo('feed-detail');
+      window.__dashboard.navigateTo('feed-detail', id);
     } else {
-      window.location.hash = 'feed-detail';
+      window.location.hash = 'feed-detail/' + id;
     }
   }
 

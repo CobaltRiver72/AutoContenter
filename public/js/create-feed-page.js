@@ -230,13 +230,23 @@
       }).join('');
     }
 
-    var canSubmit = _state.name.trim().length > 0 && _state.kind === 'firehose';
+    // Mirrors src/validators/feed.js — name is required, plus at least one
+    // matching signal (query OR include_domains). Time/languages/exclude
+    // alone don't satisfy this. Submit button stays disabled until the
+    // user provides the minimum so they don't get a 400 round-trip.
+    var hasQuery = _state.query && _state.query.trim().length > 0;
+    var hasIncludeDomains = (_state.includeDomains || []).length > 0;
+    var canSubmit = _state.name.trim().length > 0 &&
+                    _state.kind === 'firehose' &&
+                    (hasQuery || hasIncludeDomains);
 
     // Inline error banner — populated after submit() failures so the user
     // sees the server-side message next to the Create button instead of
-    // a transient alert().
+    // a transient alert(). Marked with submit-error-banner class so the
+    // input handlers (setField etc.) can clear it via direct DOM removal
+    // without forcing a full re-render that would steal typing focus.
     var errorBanner = _state.submitError
-      ? '<div class="sh-card" style="margin:12px 0;padding:12px 14px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.4);color:var(--sh-red,#dc2626);font-size:13px;line-height:1.45;border-radius:8px">' +
+      ? '<div class="sh-card submit-error-banner" style="margin:12px 0;padding:12px 14px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.4);color:var(--sh-red,#dc2626);font-size:13px;line-height:1.45;border-radius:8px">' +
           '<strong>Could not create feed.</strong> ' + escapeHtml(_state.submitError) +
         '</div>'
       : '';
@@ -482,8 +492,32 @@
     goTo('feeds');
   }
 
+  // Drop the stale "Could not create feed" banner the moment the user
+  // touches anything. Surgical DOM removal so we don't trigger a full
+  // re-render mid-keystroke (would steal focus before PR 6's restoration
+  // path catches up). State mutation so the next render() doesn't put
+  // the banner back.
+  function _clearSubmitError() {
+    if (!_state.submitError) return;
+    _state.submitError = null;
+    var bannerEl = document.querySelector('.submit-error-banner');
+    if (bannerEl && bannerEl.parentNode) bannerEl.parentNode.removeChild(bannerEl);
+    // Submit button enabled-state may also have flipped — refresh it surgically.
+    var btn = document.querySelector('[data-click="createFeedSubmit"]');
+    if (btn) {
+      var hasQuery = _state.query && _state.query.trim().length > 0;
+      var hasIncludeDomains = (_state.includeDomains || []).length > 0;
+      var canSubmit = _state.name.trim().length > 0 &&
+                      _state.kind === 'firehose' &&
+                      (hasQuery || hasIncludeDomains);
+      if (canSubmit) btn.removeAttribute('disabled');
+      else btn.setAttribute('disabled', '');
+    }
+  }
+
   function setField(field, value) {
     _state[field] = value;
+    _clearSubmitError();
     // Slider / query / source-filter changes should refresh the preview.
     if (field === 'query' || field === 'minSrc' || field === 'sim' ||
         field === 'timeRange') {
@@ -497,6 +531,7 @@
     var allowed = { any:1, 'past-hour':1, 'past-day':1, 'past-week':1, 'past-month':1, 'past-year':1 };
     if (!allowed[value]) return;
     _state.timeRange = value;
+    _clearSubmitError();
     _schedulePreview();
     // Deliberate: no render() — the <select> already shows the new value
     // and re-rendering here would unfocus anything the user is typing in.
@@ -508,6 +543,7 @@
     var idx = arr.indexOf(code);
     if (idx === -1) arr.push(code); else arr.splice(idx, 1);
     _state.languages = arr;
+    _clearSubmitError();
     _schedulePreview();
     render();
   }
@@ -521,6 +557,7 @@
     var curr = (_state[field] || []).slice();
     if (curr.indexOf(cleaned) === -1) curr.push(cleaned);
     _state[field] = curr;
+    _clearSubmitError();
     return true;
   }
 
@@ -530,6 +567,7 @@
     var idx = curr.indexOf(value);
     if (idx !== -1) curr.splice(idx, 1);
     _state[field] = curr;
+    _clearSubmitError();
     _schedulePreview();
     render();
   }

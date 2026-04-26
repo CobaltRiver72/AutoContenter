@@ -7100,6 +7100,14 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       var v = _validateFeedBody(body, true);
       if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
 
+      // Authoritative content-validity gate: feed name + at least one
+      // matching signal (query OR include_domains). Pure function lives at
+      // src/validators/feed.js so the same rule is unit-testable.
+      var contentCheck = require('../validators/feed').validateFeedInput(body);
+      if (!contentCheck.valid) {
+        return res.status(400).json({ ok: false, error: contentCheck.error });
+      }
+
       var site = siteConfigMod.getSite(body.site_id);
       if (!site) return res.status(400).json({ ok: false, error: 'site_id does not exist' });
 
@@ -7114,12 +7122,11 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       // supply a tap token themselves AND we have a management key on file.
       var willAutoProvision = !providedToken && !!mgmtKey;
 
-      if (willAutoProvision && !luceneQuery) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Add a search query, time range, or domain filter before saving — without at least one, the feed has nothing to match on.',
-        });
-      }
+      // Note: the older `willAutoProvision && !luceneQuery` check that
+      // rejected feeds with NO filter (query / time / domain) is now
+      // subsumed by validateFeedInput above. The new rule is stricter —
+      // time-range-only feeds are also rejected — and applies regardless
+      // of whether auto-provisioning will run.
 
       // Soft pre-check against the 25-rule org cap. The authoritative check
       // is the 422 we'll get from createRule if we're already at the limit,
