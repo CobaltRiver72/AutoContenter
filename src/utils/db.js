@@ -1384,12 +1384,59 @@ function runMigrations() {
 // Run migrations immediately on require
 runMigrations();
 
+// ─── WAL checkpoint scheduling ──────────────────────────────────────────────
+// SQLite's WAL file grows until something forces a checkpoint. A
+// force-killed process can leave a WAL that's many MB on a tiny main DB,
+// because the checkpoint that normally runs on close didn't get a chance
+// to fire. Two safety nets:
+//   - Run wal_checkpoint(TRUNCATE) on startup so a stale WAL gets folded
+//     in immediately and the file size drops back to zero.
+//   - Hourly checkpoint so a long-running process with steady writes
+//     doesn't accumulate either. TRUNCATE mode shrinks the file (RESTART
+//     would just rewind without reclaiming bytes).
+// closeDb() also calls checkpointWal() before db.close() so a clean
+// SIGTERM exits with an empty WAL.
+
+var _walCheckpointInterval = null;
+
+function checkpointWal() {
+  try {
+    if (!db || !db.open) return;
+    var result = db.pragma('wal_checkpoint(TRUNCATE)');
+    // result is [{ busy, log, checkpointed }] — log a one-liner only when
+    // pages were actually written, otherwise stay quiet on the hot path.
+    if (Array.isArray(result) && result[0] && result[0].log > 0) {
+      console.log('[db] WAL checkpoint: ' + JSON.stringify(result[0]));
+    }
+  } catch (e) {
+    console.warn('[db] WAL checkpoint failed: ' + e.message);
+  }
+}
+
+// Initial checkpoint — fold any leftover WAL from a prior boot into the
+// main DB and shrink the file.
+checkpointWal();
+
+// Hourly recurring checkpoint. unref() so the timer doesn't keep the
+// process alive past natural exit (test runners would otherwise hang).
+_walCheckpointInterval = setInterval(checkpointWal, 60 * 60 * 1000);
+if (_walCheckpointInterval && typeof _walCheckpointInterval.unref === 'function') {
+  _walCheckpointInterval.unref();
+}
+
 /**
- * Graceful shutdown helper.
+ * Graceful shutdown helper. Truncates the WAL before closing so the
+ * next boot sees a clean file (and existing backups don't include a
+ * stale WAL that could confuse a restore).
  */
 function closeDb() {
   try {
+    if (_walCheckpointInterval) {
+      clearInterval(_walCheckpointInterval);
+      _walCheckpointInterval = null;
+    }
     if (db && db.open) {
+      checkpointWal();
       db.close();
       console.log('[db] Database connection closed');
     }
