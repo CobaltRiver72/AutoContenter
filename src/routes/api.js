@@ -1850,8 +1850,17 @@ function createApiRouter(deps) {
     try {
       var rows = db.prepare('SELECT key, value, updated_at FROM settings').all();
       var settings = {};
+      // Decrypt secret values BEFORE masking — otherwise the mask shows the
+      // last 4 chars of the ciphertext, which is useless and confusing
+      // ("did my key save correctly?"). The mask still ships only the
+      // last 4 of the plaintext to the browser.
+      var secrets = require('../utils/secrets');
       rows.forEach(function (row) {
-        settings[row.key] = row.value;
+        var v = row.value;
+        if (secrets.isSecretSettingKey(row.key) && typeof v === 'string') {
+          try { v = secrets.decrypt(v); } catch (_e) { v = row.value; }
+        }
+        settings[row.key] = v;
       });
 
       // SECURITY: Mask ALL sensitive values before sending to frontend
@@ -2000,9 +2009,19 @@ function createApiRouter(deps) {
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
       );
 
+      // Encrypt secret-keyed values at the boundary so a leaked DB
+      // backup doesn't hand attackers RapidAPI / WP / Firehose creds.
+      // encrypt() is idempotent on already-encrypted input — safe to
+      // call on re-saves of values that came back masked from GET.
+      var settingsSecrets = require('../utils/secrets');
       var insertMany = db.transaction(function (items) {
         for (var j = 0; j < items.length; j++) {
-          upsertStmt.run(items[j][0], items[j][1]);
+          var k = items[j][0];
+          var v = items[j][1];
+          if (settingsSecrets.isSecretSettingKey(k) && v) {
+            v = settingsSecrets.encrypt(v);
+          }
+          upsertStmt.run(k, v);
         }
       });
 

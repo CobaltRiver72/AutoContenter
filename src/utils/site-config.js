@@ -180,8 +180,35 @@ function isSiteConfigEnabled(siteId, key) {
 
 // ─── Site CRUD helpers ─────────────────────────────────────────────────────
 
+// Auto-encrypt + auto-decrypt the secret columns (firehose_token,
+// wp_app_password) at every boundary. Single source of truth for the
+// column list lives in src/utils/secrets.js — this module just calls
+// the helpers. Lazily required so secrets.js can be a no-op if the
+// SECRETS_ENCRYPTION_KEY env var is missing in a dev environment.
+function _decryptRow(row) {
+  if (!row) return row;
+  try {
+    var secrets = require('./secrets');
+    var copy = Object.assign({}, row);
+    secrets.SECRET_SITE_COLUMNS.forEach(function (col) {
+      if (typeof copy[col] === 'string') copy[col] = secrets.decrypt(copy[col]);
+    });
+    return copy;
+  } catch (_e) { return row; /* secrets disabled — return raw */ }
+}
+
+function _encryptValue(col, value) {
+  if (value == null || value === '') return value;
+  try {
+    var secrets = require('./secrets');
+    if (secrets.isSecretSiteColumn(col)) return secrets.encrypt(String(value));
+  } catch (_e) { /* fall back to raw */ }
+  return value;
+}
+
 /**
- * Get a site row by id.
+ * Get a site row by id. Secret columns (firehose_token, wp_app_password)
+ * are decrypted before return.
  *
  * @param {number} siteId
  * @returns {object|undefined}
@@ -189,7 +216,7 @@ function isSiteConfigEnabled(siteId, key) {
 function getSite(siteId) {
   var db = _initDb();
   if (!_stmtGetSite) _stmtGetSite = db.prepare('SELECT * FROM sites WHERE id = ?');
-  return _stmtGetSite.get(siteId);
+  return _decryptRow(_stmtGetSite.get(siteId));
 }
 
 /**
@@ -200,7 +227,7 @@ function getSite(siteId) {
 function getAllActiveSites() {
   var db = _initDb();
   if (!_stmtGetAllSites) _stmtGetAllSites = db.prepare('SELECT * FROM sites WHERE is_active = 1 ORDER BY id');
-  return _stmtGetAllSites.all();
+  return _stmtGetAllSites.all().map(_decryptRow);
 }
 
 /**
@@ -210,11 +237,11 @@ function getAllActiveSites() {
  */
 function getAllSites() {
   var db = _initDb();
-  return db.prepare('SELECT * FROM sites ORDER BY id').all();
+  return db.prepare('SELECT * FROM sites ORDER BY id').all().map(_decryptRow);
 }
 
 /**
- * Create a new site. Returns the new site row.
+ * Create a new site. Returns the new site row (decrypted view).
  *
  * @param {object} data - { name, slug, color?, firehose_token?, wp_url?, wp_username?, wp_app_password? }
  * @returns {object}
@@ -226,8 +253,9 @@ function createSite(data) {
     'VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(
     data.name, data.slug, data.color || '#3b82f6',
-    data.firehose_token || null,
-    data.wp_url || null, data.wp_username || null, data.wp_app_password || null
+    _encryptValue('firehose_token',  data.firehose_token  || null),
+    data.wp_url || null, data.wp_username || null,
+    _encryptValue('wp_app_password', data.wp_app_password || null)
   );
   // Reset cached statement so it picks up new rows
   _stmtGetAllSites = null;
@@ -247,9 +275,10 @@ function updateSite(siteId, data) {
   var values = [];
   var allowed = ['name', 'slug', 'color', 'is_active', 'firehose_token', 'wp_url', 'wp_username', 'wp_app_password'];
   for (var i = 0; i < allowed.length; i++) {
-    if (data[allowed[i]] !== undefined) {
-      fields.push(allowed[i] + ' = ?');
-      values.push(data[allowed[i]]);
+    var col = allowed[i];
+    if (data[col] !== undefined) {
+      fields.push(col + ' = ?');
+      values.push(_encryptValue(col, data[col]));
     }
   }
   if (fields.length === 0) return getSite(siteId);

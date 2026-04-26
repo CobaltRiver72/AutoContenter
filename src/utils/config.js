@@ -401,6 +401,18 @@ function get(key) {
     else if (DEFAULTS[key] !== undefined) value = DEFAULTS[key];
   }
 
+  // Auto-decrypt at rest. The list of keys that are encrypted lives in
+  // src/utils/secrets.js (single source of truth). For non-secret keys
+  // decrypt() is a no-op; for secret keys with legacy plain-text values
+  // it's also a no-op (passthrough on missing PREFIX) so the migration
+  // window is graceful.
+  try {
+    var secrets = require('./secrets');
+    if (secrets.isSecretSettingKey(key) && typeof value === 'string') {
+      value = secrets.decrypt(value);
+    }
+  } catch (_e) { /* secrets module disabled / key missing — fall back to raw */ }
+
   _getCache.set(key, { value: value, expires: now + _GET_CACHE_TTL_MS });
   return value;
 }
@@ -418,11 +430,22 @@ function set(key, value, db) {
     throw new Error('No database available. Call loadRuntimeOverrides first.');
   }
 
+  // Auto-encrypt at rest for secret keys. Non-secret keys store as-is.
+  // encrypt() is idempotent on already-encrypted values, so re-saving
+  // a masked-roundtrip from the UI doesn't double-wrap.
+  var dbValue = String(value);
+  try {
+    var secrets = require('./secrets');
+    if (secrets.isSecretSettingKey(key) && dbValue) {
+      dbValue = secrets.encrypt(dbValue);
+    }
+  } catch (_e) { /* fall back to plaintext — caller's choice */ }
+
   try {
     database.prepare(
       "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
       "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-    ).run(key, String(value));
+    ).run(key, dbValue);
 
     // Update in-memory config
     _config[key] = value;

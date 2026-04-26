@@ -1275,6 +1275,87 @@ function runMigrations() {
       }
     })();
 
+    // ─── One-time at-rest encryption migration ──────────────────────────────
+    // Idempotent: encrypts plain-text rows in settings (secret keys) and
+    // sites (firehose_token, wp_app_password). Already-encrypted rows
+    // (have the "enc:v1:" prefix) are skipped. Repeat boots are no-ops.
+    //
+    // If SECRETS_ENCRYPTION_KEY is missing the migration logs a one-line
+    // warning and skips — the app still boots so dev environments without
+    // the env var work, but production should always have it set.
+    (function _migrateEncryptSecretsAtRest() {
+      var secrets;
+      try { secrets = require('./secrets'); }
+      catch (_e) { return; /* helper not present yet */ }
+
+      if (!process.env.SECRETS_ENCRYPTION_KEY) {
+        console.warn('[db] SECRETS_ENCRYPTION_KEY not set — skipping at-rest encryption migration. Set the env var for production deployments.');
+        return;
+      }
+
+      var settingsKeys = Array.from(secrets.SECRET_SETTING_KEYS);
+
+      // Settings table — encrypt any plain-text rows for known secret keys.
+      var settingsEnc = 0;
+      try {
+        var placeholders = settingsKeys.map(function () { return '?'; }).join(',');
+        var settingsRows = db.prepare(
+          'SELECT key, value FROM settings WHERE key IN (' + placeholders + ')'
+        ).all.apply(db.prepare(
+          'SELECT key, value FROM settings WHERE key IN (' + placeholders + ')'
+        ), settingsKeys);
+        var setStmt = db.prepare('UPDATE settings SET value = ?, updated_at = datetime(\'now\') WHERE key = ?');
+        for (var si = 0; si < settingsRows.length; si++) {
+          var sr = settingsRows[si];
+          if (sr.value && !secrets.isEncrypted(sr.value)) {
+            try {
+              setStmt.run(secrets.encrypt(sr.value), sr.key);
+              settingsEnc++;
+            } catch (encErr) {
+              console.warn('[db] Failed to encrypt settings.' + sr.key + ': ' + encErr.message);
+            }
+          }
+        }
+      } catch (sErr) {
+        console.warn('[db] settings encryption pass failed: ' + sErr.message);
+      }
+
+      // Sites table — same pattern for firehose_token + wp_app_password.
+      var sitesEnc = 0;
+      try {
+        var siteCols = Array.from(secrets.SECRET_SITE_COLUMNS);
+        var siteRows = db.prepare('SELECT id, ' + siteCols.join(', ') + ' FROM sites').all();
+        for (var ri = 0; ri < siteRows.length; ri++) {
+          var row = siteRows[ri];
+          var fields = [];
+          var values = [];
+          for (var ci = 0; ci < siteCols.length; ci++) {
+            var col = siteCols[ci];
+            var val = row[col];
+            if (val && typeof val === 'string' && !secrets.isEncrypted(val)) {
+              try {
+                fields.push(col + ' = ?');
+                values.push(secrets.encrypt(val));
+              } catch (e2) {
+                console.warn('[db] Failed to encrypt sites.' + col + ' for site ' + row.id + ': ' + e2.message);
+              }
+            }
+          }
+          if (fields.length) {
+            values.push(row.id);
+            db.prepare('UPDATE sites SET ' + fields.join(', ') + ' WHERE id = ?').run.apply(null, values);
+            sitesEnc++;
+          }
+        }
+      } catch (sErr2) {
+        console.warn('[db] sites encryption pass failed: ' + sErr2.message);
+      }
+
+      if (settingsEnc > 0 || sitesEnc > 0) {
+        console.log('[db] Encrypted at rest: ' + settingsEnc + ' setting(s), ' + sitesEnc + ' site row(s) updated.');
+      }
+    })();
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);
