@@ -116,10 +116,16 @@ class MetalsModule extends EventEmitter {
 
   /**
    * Get RapidAPI key from settings table.
+   *
+   * Routed through utils/config so the secret-key decryption happens
+   * automatically — direct SELECT against settings would return the
+   * encrypted ciphertext (enc:v1:…) post-Tier-1 hardening.
    */
   _getApiKey() {
-    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
-    if (row && row.value) return row.value;
+    try {
+      var v = require('../utils/config').get('METALS_RAPIDAPI_KEY');
+      if (v) return v;
+    } catch (_e) { /* fall through to env */ }
     if (process.env.METALS_RAPIDAPI_KEY) return process.env.METALS_RAPIDAPI_KEY;
     return null;
   }

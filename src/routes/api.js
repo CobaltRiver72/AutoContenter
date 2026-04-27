@@ -1397,8 +1397,9 @@ function createApiRouter(deps) {
   router.get('/fuel/ping-api', async function (req, res) {
     var apiKey = req.query.key || null;
     if (!apiKey) {
-      var row = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
-      apiKey = row ? row.value : null;
+      // Route through config.get so the secret is decrypted; direct
+      // SELECT would return enc:v1:… ciphertext post-Tier-1 hardening.
+      apiKey = cfgGet('FUEL_RAPIDAPI_KEY') || null;
     }
     if (!apiKey) return res.json({ ok: false, error: 'FUEL_RAPIDAPI_KEY not set — type a key above and Ping, or save it first' });
 
@@ -1427,8 +1428,8 @@ function createApiRouter(deps) {
   router.get('/metals/ping-api', async function (req, res) {
     var apiKey = req.query.key || null;
     if (!apiKey) {
-      var row = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
-      apiKey = row ? row.value : null;
+      // Same rationale as fuel/ping-api — config.get decrypts.
+      apiKey = cfgGet('METALS_RAPIDAPI_KEY') || null;
     }
     if (!apiKey) return res.json({ ok: false, error: 'METALS_RAPIDAPI_KEY not set — type a key above and Ping, or save it first' });
 
@@ -1588,28 +1589,33 @@ function createApiRouter(deps) {
     var metalsToday = db.prepare("SELECT COUNT(*) AS c FROM metals_prices WHERE price_date = date('now')").get().c;
     checks.push({ name: 'Metals Prices Today', ok: metalsToday > 0, detail: metalsToday + ' rows' });
 
-    // Fuel API key — check both DB settings and env var fallback
-    var fuelKeyDb = db.prepare("SELECT value FROM settings WHERE key = 'FUEL_RAPIDAPI_KEY'").get();
+    // Fuel API key — check via cfgGet so the secret is decrypted (raw
+    // SELECT would return enc:v1:… ciphertext after Tier-1 hardening
+    // and would always look "set" but invalid). Reports source so the
+    // admin sees whether it came from settings or env.
+    var fuelKeyVal = cfgGet('FUEL_RAPIDAPI_KEY') || '';
     var fuelKeyEnv = process.env.FUEL_RAPIDAPI_KEY;
-    var fuelKeyVal = (fuelKeyDb && fuelKeyDb.value) || fuelKeyEnv || '';
     checks.push({
       name: 'Fuel API Key',
       ok: !!fuelKeyVal,
-      detail: fuelKeyDb && fuelKeyDb.value
-        ? 'settings (' + fuelKeyDb.value.length + ' chars)'
-        : fuelKeyEnv ? 'env var (' + fuelKeyEnv.length + ' chars)' : 'NOT SET'
+      detail: fuelKeyVal
+        ? (fuelKeyEnv && fuelKeyEnv === fuelKeyVal
+            ? 'env var (' + fuelKeyEnv.length + ' chars)'
+            : 'settings (' + fuelKeyVal.length + ' chars)')
+        : 'NOT SET'
     });
 
-    // Metals API key — same pattern
-    var metalsKeyDb = db.prepare("SELECT value FROM settings WHERE key = 'METALS_RAPIDAPI_KEY'").get();
+    // Metals API key — same pattern.
+    var metalsKeyVal = cfgGet('METALS_RAPIDAPI_KEY') || '';
     var metalsKeyEnv = process.env.METALS_RAPIDAPI_KEY;
-    var metalsKeyVal = (metalsKeyDb && metalsKeyDb.value) || metalsKeyEnv || '';
     checks.push({
       name: 'Metals API Key',
       ok: !!metalsKeyVal,
-      detail: metalsKeyDb && metalsKeyDb.value
-        ? 'settings (' + metalsKeyDb.value.length + ' chars)'
-        : metalsKeyEnv ? 'env var (' + metalsKeyEnv.length + ' chars)' : 'NOT SET'
+      detail: metalsKeyVal
+        ? (metalsKeyEnv && metalsKeyEnv === metalsKeyVal
+            ? 'env var (' + metalsKeyEnv.length + ' chars)'
+            : 'settings (' + metalsKeyVal.length + ' chars)')
+        : 'NOT SET'
     });
 
     // WP credentials — check config (merges DB + env, aliases WP_URL ↔ WP_SITE_URL)
