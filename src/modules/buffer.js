@@ -1,5 +1,6 @@
 'use strict';
 
+const { EventEmitter } = require('node:events');
 const { NEWS_CATEGORIES } = require('../utils/categories');
 const clusteringConfig = require('../utils/clustering-config');
 
@@ -50,13 +51,14 @@ const DOMAIN_CATEGORY_MAP = {
   'moneycontrol.com':       'business',
 };
 
-class ArticleBuffer {
+class ArticleBuffer extends EventEmitter {
   /**
    * @param {object} config - Frozen config object
    * @param {import('better-sqlite3').Database} db
    * @param {object} logger
    */
   constructor(config, db, logger) {
+    super();
     this.config = config;
     this.db = db;
     this.logger = logger;
@@ -68,6 +70,19 @@ class ArticleBuffer {
 
     // Prepared statements (lazy init)
     this._stmts = {};
+
+    // ── Batched-insert pipeline ──────────────────────────────────────────
+    // Pre-batching, every Firehose article called .run() one at a time on
+    // the synchronous better-sqlite3 prepared statement. With WAL+fsync
+    // each commit costs ~1–5 ms; a 1000-article cold-boot replay turned
+    // into 1–5 seconds of fully-blocked event loop, which is exactly when
+    // the user is loading /login. Batching collapses the writes into one
+    // transaction per window, so the event loop only stalls for the
+    // single transaction's commit cost regardless of batch size.
+    this._pending = [];
+    this._flushTimer = null;
+    this._FLUSH_MS = 250;   // max time an article waits before commit
+    this._FLUSH_MAX = 50;   // hard ceiling — flush immediately when reached
   }
 
   async init() {
@@ -88,14 +103,26 @@ class ArticleBuffer {
     };
   }
 
-  async shutdown() { /* no-op */ }
+  async shutdown() {
+    // Drain any in-flight batch before the process closes the DB. Without
+    // this, a graceful SIGTERM during a 250ms window loses the buffered
+    // articles entirely.
+    try { this._flush(); } catch (_e) { /* logged inside _flush */ }
+  }
 
   /**
-   * Add an article to the buffer.
-   * Generates a fingerprint from title + first 500 words of content.
+   * Add an article to the buffer queue.
+   *
+   * Synchronous validation + fingerprint generation; the actual INSERT is
+   * deferred to _flush() (250 ms window or 50-row ceiling, whichever
+   * fires first). On commit, an 'article-buffered' event fires for each
+   * non-duplicate row with the article object (now carrying its DB id).
+   *
+   * Callers that need the DB id MUST listen for 'article-buffered'
+   * instead of consuming the return value.
    *
    * @param {object} article
-   * @returns {number|null} The inserted article ID, or null on failure
+   * @returns {void}
    */
   addArticle(article) {
     try {
@@ -113,56 +140,106 @@ class ArticleBuffer {
         }
       }
 
-      if (!this._stmts.insert) {
-        this._stmts.insert = this.db.prepare(`
-          INSERT OR IGNORE INTO articles
-            (firehose_event_id, url, domain, title, publish_time, content_markdown, fingerprint, authority_tier, page_category, language, source_site_id, feed_id, image_url, received_at)
-          VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `);
+      this._pending.push(article);
+
+      if (this._pending.length >= this._FLUSH_MAX) {
+        this._flush();
+        return;
       }
-
-      const result = this._stmts.insert.run(
-        article.firehose_event_id || null,
-        article.url,
-        article.domain,
-        article.title || null,
-        article.publish_time || null,
-        typeof article.content_markdown === 'string' ? article.content_markdown : (article.content_markdown ? JSON.stringify(article.content_markdown) : null),
-        fingerprint,
-        article.authority_tier || 3,
-        article.page_category ? (Array.isArray(article.page_category) ? article.page_category.join(',') : article.page_category) : null,
-        article.language || null,
-        article.source_site_id || 1,
-        article.feed_id || null,
-        article.image_url || null
-      );
-
-      if (result.changes === 0) {
-        // Likely a duplicate (firehose_event_id UNIQUE constraint)
-        this.logger.debug(MODULE, `Duplicate article skipped: ${article.url}`);
-        return null;
+      if (!this._flushTimer) {
+        var self = this;
+        this._flushTimer = setTimeout(function () { self._flush(); }, this._FLUSH_MS);
       }
-
-      const articleId = result.lastInsertRowid;
-
-      // Attach ID back so caller doesn't need to do it
-      article.id = typeof articleId === 'bigint' ? Number(articleId) : articleId;
-
-      this.logger.info(MODULE, `Article buffered: id=${article.id} "${article.title || article.url}"`, {
-        domain: article.domain,
-        id: article.id,
-      });
-
-      return article.id;
     } catch (err) {
-      this.logger.error(MODULE, 'Failed to add article: ' + err.message, {
-        url: article.url,
-        domain: article.domain,
-        firehose_event_id: article.firehose_event_id,
+      this.logger.error(MODULE, 'Failed to enqueue article: ' + err.message, {
+        url: article && article.url,
+        domain: article && article.domain,
+        firehose_event_id: article && article.firehose_event_id,
         stack: err.stack,
       });
-      return null;
+    }
+  }
+
+  /**
+   * Commit the pending batch in a single transaction. Idempotent — calling
+   * with no pending articles is a no-op. Listener emit happens AFTER the
+   * transaction commits so a listener throw can't roll back the batch.
+   * @private
+   */
+  _flush() {
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+    if (!this._pending.length) return;
+
+    const batch = this._pending;
+    this._pending = [];
+
+    if (!this._stmts.insert) {
+      this._stmts.insert = this.db.prepare(`
+        INSERT OR IGNORE INTO articles
+          (firehose_event_id, url, domain, title, publish_time, content_markdown, fingerprint, authority_tier, page_category, language, source_site_id, feed_id, image_url, received_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `);
+    }
+
+    const inserted = [];
+    const stmt = this._stmts.insert;
+    const insertMany = this.db.transaction(function (rows) {
+      for (var i = 0; i < rows.length; i++) {
+        var a = rows[i];
+        var contentMd = typeof a.content_markdown === 'string'
+          ? a.content_markdown
+          : (a.content_markdown ? JSON.stringify(a.content_markdown) : null);
+        var pageCategory = a.page_category
+          ? (Array.isArray(a.page_category) ? a.page_category.join(',') : a.page_category)
+          : null;
+        var result = stmt.run(
+          a.firehose_event_id || null,
+          a.url,
+          a.domain,
+          a.title || null,
+          a.publish_time || null,
+          contentMd,
+          a.fingerprint,
+          a.authority_tier || 3,
+          pageCategory,
+          a.language || null,
+          a.source_site_id || 1,
+          a.feed_id || null,
+          a.image_url || null
+        );
+        if (result.changes > 0) {
+          var rowid = result.lastInsertRowid;
+          a.id = typeof rowid === 'bigint' ? Number(rowid) : rowid;
+          inserted.push(a);
+        }
+      }
+    });
+
+    try {
+      insertMany(batch);
+    } catch (err) {
+      this.logger.error(MODULE, 'Batch flush failed: ' + err.message + ' (size=' + batch.length + ')', {
+        stack: err.stack,
+      });
+      return;
+    }
+
+    // Emit AFTER commit so listeners see persisted state and a thrown
+    // listener can't trigger a rollback.
+    if (inserted.length > 0) {
+      this.logger.debug(MODULE, 'Buffer batch flush: ' + inserted.length + '/' + batch.length + ' new (rest were duplicates)');
+    }
+    for (var i = 0; i < inserted.length; i++) {
+      var a = inserted[i];
+      try {
+        this.emit('article-buffered', a);
+      } catch (eErr) {
+        this.logger.error(MODULE, "'article-buffered' handler threw: " + eErr.message, { stack: eErr.stack });
+      }
     }
   }
 
