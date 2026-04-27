@@ -94,16 +94,25 @@ async function boot() {
   // EventEmitter drops events that have no listeners. Listener init opens SSE
   // streams immediately — listeners MUST exist first.
 
-  // Shared handler for the per-feed pool. Articles carry source_site_id and
-  // feed_id — buffer persists both and the pipeline scopes clusters/drafts
-  // accordingly.
-  async function _ingestArticle(article) {
+  // Firehose → buffer ingest. The buffer batches INSERTs in 250ms / 50-row
+  // transactions to keep the synchronous SQLite write path off the event-
+  // loop hot path during cold-boot replay. Downstream work (clustering
+  // enqueue, trends match, failure-counter reset) listens for the
+  // 'article-buffered' event the buffer fires after a successful commit
+  // — duplicates simply don't fire the event and naturally short-circuit.
+  function _onFirehoseArticle(article) {
     try {
-      var articleId = buffer.addArticle(article);
-      if (!articleId) return;
-      // Successful ingest resets the feed's failure streak so it drops off the
-      // Failed page the next time anyone refreshes. Guarded for legacy rows
-      // with no feed_id (pre-Feeds ingests).
+      buffer.addArticle(article);
+    } catch (err) {
+      logger.error('index', 'Error enqueuing firehose article: ' + err.message);
+    }
+  }
+
+  function _onArticleBuffered(article) {
+    try {
+      // Successful ingest resets the feed's failure streak so it drops off
+      // the Failed page the next time anyone refreshes. Guarded for legacy
+      // rows with no feed_id (pre-Feeds ingests).
       if (article && article.feed_id) {
         try {
           db.prepare('UPDATE feeds SET consecutive_failures = 0 WHERE id = ? AND consecutive_failures > 0').run(article.feed_id);
@@ -127,11 +136,12 @@ async function boot() {
         _clusteringTimer = setTimeout(processSimilarityBatch, _clusteringDebounceMs());
       }
     } catch (err) {
-      logger.error('index', 'Error buffering firehose article: ' + err.message);
+      logger.error('index', 'Error in article-buffered handler: ' + err.message);
     }
   }
 
-  feedsPool.on('article', _ingestArticle);
+  feedsPool.on('article', _onFirehoseArticle);
+  buffer.on('article-buffered', _onArticleBuffered);
 
   // Track firehose SSE error events so Feeds with notify_failure=true can
   // surface on the Failed page after 3 consecutive failures. Only 'error'
