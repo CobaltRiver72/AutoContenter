@@ -10,6 +10,7 @@ var compression = require('compression');
 var helmet = require('helmet');
 var cors = require('cors');
 var rateLimit = require('express-rate-limit');
+var timingMiddleware = require('./middleware/timing');
 
 // ─── 1. Load config (validates env vars, loads .env) ────────────────────────
 var { getConfig, loadRuntimeOverrides } = require('./utils/config');
@@ -371,6 +372,13 @@ async function boot() {
       }
     }
   }));
+
+  // Per-request timing — logs method/path/status/duration on res.finish.
+  // Slow (>250ms) and 5xx responses log at warn; everything else at debug.
+  // This is the canary for event-loop-blocking regressions: when ingest
+  // batches saturate the loop, /login jumps from <50ms to multi-second
+  // and the warn log surfaces it immediately.
+  app.use(timingMiddleware(logger, { slowMs: 250 }));
 
   // CORS — same origin only
   app.use(cors({ origin: false }));
