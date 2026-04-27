@@ -430,12 +430,22 @@ async function boot() {
   app.use('/api/public', publicRouter);
   app.use('/api', checkAuth, verifyCsrf, apiRouter);
 
-  // Static assets — accessible without auth for login page to work
-  app.use('/css', express.static(path.resolve(__dirname, '..', 'public', 'css')));
-  app.use('/js', express.static(path.resolve(__dirname, '..', 'public', 'js')));
-  app.use('/img', express.static(path.resolve(__dirname, '..', 'public', 'img')));
-  app.use('/fonts', express.static(path.resolve(__dirname, '..', 'public', 'fonts')));
-  app.use('/wp-assets', express.static(path.resolve(__dirname, '..', 'public', 'wp-assets')));
+  // Static assets — accessible without auth so the login page can load
+  // its JS/CSS. Cache headers added: every script tag in index.html
+  // already carries a ?v=NN cache-bust query string, so a 7-day
+  // immutable cache is safe (browsers send If-None-Match and get a
+  // 304 instead of re-downloading dashboard.js's ~480 KB on every
+  // reload).
+  var STATIC_OPTS = {
+    maxAge: '7d',
+    etag: true,
+    lastModified: true,
+  };
+  app.use('/css',       express.static(path.resolve(__dirname, '..', 'public', 'css'),       STATIC_OPTS));
+  app.use('/js',        express.static(path.resolve(__dirname, '..', 'public', 'js'),        STATIC_OPTS));
+  app.use('/img',       express.static(path.resolve(__dirname, '..', 'public', 'img'),       STATIC_OPTS));
+  app.use('/fonts',     express.static(path.resolve(__dirname, '..', 'public', 'fonts'),     STATIC_OPTS));
+  app.use('/wp-assets', express.static(path.resolve(__dirname, '..', 'public', 'wp-assets'), STATIC_OPTS));
 
   // Global error handler — NEVER expose stack traces.
   //

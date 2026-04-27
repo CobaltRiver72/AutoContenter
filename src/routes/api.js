@@ -1634,6 +1634,87 @@ function createApiRouter(deps) {
     res.json({ ok: allOk, checks: checks });
   });
 
+  // ─── GET /api/diagnostics/system ───────────────────────────────────────
+  //
+  // System-wide health window: DB sizes + journal mode + per-table row
+  // counts + process uptime + memory. Different shape from the older
+  // /api/diagnostics (which is a checklist for fuel/metals/WP creds and
+  // is consumed by the dashboard's diagnostics panel) — left untouched
+  // to avoid breaking that UI. Use this endpoint to answer "what's
+  // happening server-side right now" without ssh-ing into the box.
+  router.get('/diagnostics/system', function (req, res) {
+    try {
+      var fs = require('fs');
+      var path = require('path');
+      var dbPath = process.env.DB_PATH ||
+        path.resolve(__dirname, '..', '..', 'data', 'autopub.db');
+
+      function _safeStat(p) {
+        try { return fs.statSync(p).size; } catch (_e) { return 0; }
+      }
+
+      // Count rows in every table that exists. Listed by name so we
+      // don't accidentally surface internal sqlite_* tables. Anything
+      // missing returns "table not present" instead of a silent zero
+      // so a missing migration is visible.
+      var tablesToCount = [
+        'sites','feeds','articles','clusters','drafts','draft_versions','published',
+        'settings','site_config','logs','infranodus_history','config_snapshots',
+        'classification_log','wp_posts_log','wp_taxonomy_cache','publish_rules',
+        'fetch_log','trends','domains_config',
+        'fuel_cities','fuel_log','fuel_prices',
+        'metals_cities','metals_log','metals_prices',
+        'lottery_results',
+      ];
+      var tableCounts = {};
+      for (var i = 0; i < tablesToCount.length; i++) {
+        var t = tablesToCount[i];
+        try {
+          tableCounts[t] = db.prepare('SELECT COUNT(*) AS n FROM ' + t).get().n;
+        } catch (e) {
+          tableCounts[t] = /no such table/i.test(e.message) ? null : ('error: ' + e.message);
+        }
+      }
+
+      var dbSize  = _safeStat(dbPath);
+      var walSize = _safeStat(dbPath + '-wal');
+      var shmSize = _safeStat(dbPath + '-shm');
+      var pageCount  = db.pragma('page_count', { simple: true });
+      var pageSize   = db.pragma('page_size',  { simple: true });
+      var journalMode = db.pragma('journal_mode', { simple: true });
+      var fkEnforced  = db.pragma('foreign_keys',  { simple: true }) === 1;
+
+      var mem = process.memoryUsage();
+
+      res.json({
+        ok: true,
+        db: {
+          path: dbPath,
+          mainSizeBytes: dbSize,
+          walSizeBytes:  walSize,
+          shmSizeBytes:  shmSize,
+          pageCount:     pageCount,
+          pageSize:      pageSize,
+          journalMode:   journalMode,
+          foreignKeysEnforced: fkEnforced,
+        },
+        tableCounts: tableCounts,
+        process: {
+          uptimeSeconds:       Math.floor(process.uptime()),
+          memoryRssBytes:      mem.rss,
+          memoryHeapUsedBytes: mem.heapUsed,
+          memoryHeapTotalBytes: mem.heapTotal,
+          nodeVersion:         process.version,
+          platform:            process.platform,
+          pid:                 process.pid,
+        },
+      });
+    } catch (err) {
+      logger.error('api', '/diagnostics/system: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ─── POST GENERATION + WP ROUTES ───────────────────────────────────────
 
   router.post('/fuel/generate-posts', function (req, res) {
@@ -1850,8 +1931,17 @@ function createApiRouter(deps) {
     try {
       var rows = db.prepare('SELECT key, value, updated_at FROM settings').all();
       var settings = {};
+      // Decrypt secret values BEFORE masking — otherwise the mask shows the
+      // last 4 chars of the ciphertext, which is useless and confusing
+      // ("did my key save correctly?"). The mask still ships only the
+      // last 4 of the plaintext to the browser.
+      var secrets = require('../utils/secrets');
       rows.forEach(function (row) {
-        settings[row.key] = row.value;
+        var v = row.value;
+        if (secrets.isSecretSettingKey(row.key) && typeof v === 'string') {
+          try { v = secrets.decrypt(v); } catch (_e) { v = row.value; }
+        }
+        settings[row.key] = v;
       });
 
       // SECURITY: Mask ALL sensitive values before sending to frontend
@@ -2000,9 +2090,19 @@ function createApiRouter(deps) {
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
       );
 
+      // Encrypt secret-keyed values at the boundary so a leaked DB
+      // backup doesn't hand attackers RapidAPI / WP / Firehose creds.
+      // encrypt() is idempotent on already-encrypted input — safe to
+      // call on re-saves of values that came back masked from GET.
+      var settingsSecrets = require('../utils/secrets');
       var insertMany = db.transaction(function (items) {
         for (var j = 0; j < items.length; j++) {
-          upsertStmt.run(items[j][0], items[j][1]);
+          var k = items[j][0];
+          var v = items[j][1];
+          if (settingsSecrets.isSecretSettingKey(k) && v) {
+            v = settingsSecrets.encrypt(v);
+          }
+          upsertStmt.run(k, v);
         }
       });
 
@@ -2429,6 +2529,77 @@ function createApiRouter(deps) {
     } catch (err) {
       logger.error('api', 'Failed to delete cluster #' + req.params.id + ' drafts: ' + err.message);
       res.status(500).json({ success: false, error: 'Failed to delete cluster drafts' });
+    }
+  });
+
+  // ─── DELETE /api/clusters/:id ─────────────────────────────────────────────
+  //
+  // Hard-delete a cluster row. Distinct from /clusters/:id/drafts which
+  // only clears the cluster's drafts but keeps the cluster row. Cascade
+  // FKs (PR Tier1) drop drafts → draft_versions → infranodus_history.
+  // Articles are preserved with cluster_id = NULL (SET NULL FK), so the
+  // raw content stays available for re-clustering.
+  //
+  // Refuses if any published row references the cluster — protects the
+  // audit trail. The RESTRICT FK would block this anyway, but the early
+  // 409 gives a clean message instead of an opaque SQLITE_CONSTRAINT.
+  router.delete('/clusters/:id', function (req, res) {
+    try {
+      var clusterId = parseId(req.params.id);
+      if (!clusterId) return res.status(400).json({ ok: false, error: 'Invalid cluster id' });
+
+      var pub = db.prepare('SELECT id FROM published WHERE cluster_id = ? LIMIT 1').get(clusterId);
+      if (pub) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Cluster has published article(s). Unpublish first, then retry.',
+        });
+      }
+
+      // Cascade-count for the response so admins see what's about to be removed.
+      var counts = db.prepare(
+        'SELECT (SELECT COUNT(*) FROM drafts WHERE cluster_id = ?) AS drafts, ' +
+        '(SELECT COUNT(*) FROM articles WHERE cluster_id = ?) AS articles_unlinked'
+      ).get(clusterId, clusterId);
+
+      var result = db.prepare('DELETE FROM clusters WHERE id = ?').run(clusterId);
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Cluster not found' });
+      }
+
+      logger.info('api', 'Cluster ' + clusterId + ' deleted. Cascade removed ' + counts.drafts +
+        ' draft(s); ' + counts.articles_unlinked + ' article(s) unlinked (cluster_id=NULL).');
+      res.json({
+        ok: true,
+        deleted: result.changes,
+        cascade: { drafts: counts.drafts, articles_unlinked: counts.articles_unlinked },
+      });
+    } catch (err) {
+      logger.error('api', 'DELETE /clusters/:id: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── DELETE /api/articles/:id ─────────────────────────────────────────────
+  //
+  // Hard-delete an article row. The previous codebase had no admin path
+  // to remove a single article — the only cleanup was via DELETE FROM
+  // articles in the cleanOldArticles cron. Now an admin can remove a
+  // specific bad article (broken extraction, source taken down, etc.).
+  // FK on drafts.source_article_id is SET NULL so any draft that
+  // referenced this article keeps existing — just loses the back-pointer.
+  router.delete('/articles/:id', function (req, res) {
+    try {
+      var id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ ok: false, error: 'Invalid article id' });
+      var result = db.prepare('DELETE FROM articles WHERE id = ?').run(id);
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Article not found' });
+      }
+      res.json({ ok: true, deleted: result.changes });
+    } catch (err) {
+      logger.error('api', 'DELETE /articles/:id: ' + err.message);
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 
@@ -6379,9 +6550,46 @@ function createApiRouter(deps) {
       if (siteId === 1) return res.status(400).json({ ok: false, error: 'Cannot delete the default site' });
       var existing = siteConfigMod.getSite(siteId);
       if (!existing) return res.status(404).json({ ok: false, error: 'Site not found' });
+
+      // Default behavior is soft-delete (deactivate) — preserves all
+      // child data. ?hard=true triggers a real DELETE that cascades
+      // through every per-site table (feeds, articles, clusters,
+      // drafts, draft_versions, logs, classification_log, etc.) thanks
+      // to the Tier-1 FK migration.
+      //
+      // Refuses if any published row references the site — protects
+      // the audit trail. The RESTRICT FK on published.site_id would
+      // block this anyway, but the early 409 gives a clear message
+      // instead of an opaque SQLITE_CONSTRAINT.
+      if (req.query.hard === 'true' || req.query.hard === '1') {
+        var hasPublished = db.prepare('SELECT id FROM published WHERE site_id = ? LIMIT 1').get(siteId);
+        if (hasPublished) {
+          return res.status(409).json({
+            ok: false,
+            error: 'Site has published article(s). Either unpublish them first, or omit ?hard=true to deactivate instead.',
+          });
+        }
+
+        // Pre-count cascade impact for the response.
+        var cascade = db.prepare(
+          'SELECT ' +
+          '  (SELECT COUNT(*) FROM feeds      WHERE site_id = ?) AS feeds, ' +
+          '  (SELECT COUNT(*) FROM articles   WHERE source_site_id = ?) AS articles, ' +
+          '  (SELECT COUNT(*) FROM drafts     WHERE site_id = ?) AS drafts, ' +
+          '  (SELECT COUNT(*) FROM site_config WHERE site_id = ?) AS site_config_rows'
+        ).get(siteId, siteId, siteId, siteId);
+
+        db.prepare('DELETE FROM sites WHERE id = ?').run(siteId);
+        logger.info('api', 'Site ' + siteId + ' hard-deleted. Cascade removed ' +
+          cascade.feeds + ' feed(s), ' + cascade.articles + ' article(s), ' +
+          cascade.drafts + ' draft(s), ' + cascade.site_config_rows + ' site_config row(s).');
+        return res.json({ ok: true, message: 'Site hard-deleted with full cascade.', cascade: cascade });
+      }
+
       siteConfigMod.deactivateSite(siteId);
-      res.json({ ok: true, message: 'Site deactivated' });
+      res.json({ ok: true, message: 'Site deactivated (use ?hard=true to delete with full cascade)' });
     } catch (err) {
+      logger.error('api', 'DELETE /sites/:id: ' + err.message);
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -7462,7 +7670,26 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
 
       var feedsPool = req.app.locals.modules && req.app.locals.modules.feedsPool;
       if (feedsPool) feedsPool.removeFeed(feedId).catch(function () {});
+
+      // Pre-count what cascade is about to remove so admins see exactly
+      // what got cleaned up. Tier-1 FKs make this a real cascade now —
+      // articles + clusters + drafts + draft_versions + infranodus_history
+      // for this feed all disappear; published rows keep their data but
+      // get feed_id=NULL (SET NULL FK).
+      var cascadeCounts = db.prepare(
+        'SELECT ' +
+        '  (SELECT COUNT(*) FROM articles WHERE feed_id = ?) AS articles, ' +
+        '  (SELECT COUNT(*) FROM clusters WHERE feed_id = ?) AS clusters, ' +
+        '  (SELECT COUNT(*) FROM drafts   WHERE feed_id = ?) AS drafts, ' +
+        '  (SELECT COUNT(*) FROM published WHERE feed_id = ?) AS published_unlinked'
+      ).get(feedId, feedId, feedId, feedId);
+
       db.prepare('DELETE FROM feeds WHERE id = ?').run(feedId);
+
+      logger.info('api', 'Feed ' + feedId + ' destroyed. Cascade removed ' +
+        cascadeCounts.articles + ' article(s), ' + cascadeCounts.clusters + ' cluster(s), ' +
+        cascadeCounts.drafts + ' draft(s); ' + cascadeCounts.published_unlinked +
+        ' published row(s) unlinked (feed_id=NULL).');
 
       // Removing a feed (hard delete) can tighten the SQL pre-filter floor
       // if it was the loosest contributor. Drop both caches.
@@ -7472,7 +7699,7 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
         _ccDestroy.invalidateFloorCache();
       } catch (_icErr) { /* non-critical */ }
 
-      res.json({ ok: true, message: 'Feed destroyed', feedId: feedId });
+      res.json({ ok: true, message: 'Feed destroyed', feedId: feedId, cascade: cascadeCounts });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

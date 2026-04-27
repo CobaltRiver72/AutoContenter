@@ -20,6 +20,11 @@ let db;
 try {
   db = new Database(dbPath);
 
+  // FK enforcement is OFF by default in SQLite even when FOREIGN KEY
+  // clauses are declared. Turn it on at every connection so cascade
+  // semantics actually fire and orphan inserts get rejected.
+  db.pragma('foreign_keys = ON');
+
   // ─── Security hardening: tighten permissions on DB files (C3 fix) ──
   // The DB holds plaintext API keys, WP credentials, FIREHOSE_TOKEN,
   // SESSION_SECRET, and bcrypt hashes. On multi-tenant hosts, default
@@ -1275,6 +1280,100 @@ function runMigrations() {
       }
     })();
 
+    // ─── One-time at-rest encryption migration ──────────────────────────────
+    // Idempotent: encrypts plain-text rows in settings (secret keys) and
+    // sites (firehose_token, wp_app_password). Already-encrypted rows
+    // (have the "enc:v1:" prefix) are skipped. Repeat boots are no-ops.
+    //
+    // If SECRETS_ENCRYPTION_KEY is missing the migration logs a one-line
+    // warning and skips — the app still boots so dev environments without
+    // the env var work, but production should always have it set.
+    (function _migrateEncryptSecretsAtRest() {
+      var secrets;
+      try { secrets = require('./secrets'); }
+      catch (_e) { return; /* helper not present yet */ }
+
+      if (!process.env.SECRETS_ENCRYPTION_KEY) {
+        console.warn('[db] SECRETS_ENCRYPTION_KEY not set — skipping at-rest encryption migration. Set the env var for production deployments.');
+        return;
+      }
+
+      var settingsKeys = Array.from(secrets.SECRET_SETTING_KEYS);
+
+      // Settings table — encrypt any plain-text rows for known secret keys.
+      var settingsEnc = 0;
+      try {
+        var placeholders = settingsKeys.map(function () { return '?'; }).join(',');
+        var settingsRows = db.prepare(
+          'SELECT key, value FROM settings WHERE key IN (' + placeholders + ')'
+        ).all.apply(db.prepare(
+          'SELECT key, value FROM settings WHERE key IN (' + placeholders + ')'
+        ), settingsKeys);
+        var setStmt = db.prepare('UPDATE settings SET value = ?, updated_at = datetime(\'now\') WHERE key = ?');
+        for (var si = 0; si < settingsRows.length; si++) {
+          var sr = settingsRows[si];
+          if (sr.value && !secrets.isEncrypted(sr.value)) {
+            try {
+              setStmt.run(secrets.encrypt(sr.value), sr.key);
+              settingsEnc++;
+            } catch (encErr) {
+              console.warn('[db] Failed to encrypt settings.' + sr.key + ': ' + encErr.message);
+            }
+          }
+        }
+      } catch (sErr) {
+        console.warn('[db] settings encryption pass failed: ' + sErr.message);
+      }
+
+      // Sites table — same pattern for firehose_token + wp_app_password.
+      var sitesEnc = 0;
+      try {
+        var siteCols = Array.from(secrets.SECRET_SITE_COLUMNS);
+        var siteRows = db.prepare('SELECT id, ' + siteCols.join(', ') + ' FROM sites').all();
+        for (var ri = 0; ri < siteRows.length; ri++) {
+          var row = siteRows[ri];
+          var fields = [];
+          var values = [];
+          for (var ci = 0; ci < siteCols.length; ci++) {
+            var col = siteCols[ci];
+            var val = row[col];
+            if (val && typeof val === 'string' && !secrets.isEncrypted(val)) {
+              try {
+                fields.push(col + ' = ?');
+                values.push(secrets.encrypt(val));
+              } catch (e2) {
+                console.warn('[db] Failed to encrypt sites.' + col + ' for site ' + row.id + ': ' + e2.message);
+              }
+            }
+          }
+          if (fields.length) {
+            values.push(row.id);
+            db.prepare('UPDATE sites SET ' + fields.join(', ') + ' WHERE id = ?').run.apply(null, values);
+            sitesEnc++;
+          }
+        }
+      } catch (sErr2) {
+        console.warn('[db] sites encryption pass failed: ' + sErr2.message);
+      }
+
+      if (settingsEnc > 0 || sitesEnc > 0) {
+        console.log('[db] Encrypted at rest: ' + settingsEnc + ' setting(s), ' + sitesEnc + ' site row(s) updated.');
+      }
+    })();
+
+    // ─── FK cascade migration ───────────────────────────────────────────────
+    // Adds ON DELETE CASCADE / SET NULL / RESTRICT across the content tables
+    // so removing a feed actually removes its articles + clusters + drafts
+    // instead of leaving orphans forever. Idempotent — already-migrated
+    // tables are skipped via PRAGMA foreign_key_list inspection. Per-table
+    // try/catch in the migrator so one table's failure doesn't break boot.
+    try {
+      var fkMigration = require('./db-fk-migration');
+      fkMigration.migrateAddForeignKeys(db, console);
+    } catch (fkErr) {
+      console.warn('[db] FK migration failed: ' + fkErr.message + ' — continuing boot');
+    }
+
     console.log('[db] Schema migrations completed successfully');
   } catch (err) {
     console.error('[db] Migration failed:', err.message);
@@ -1285,12 +1384,59 @@ function runMigrations() {
 // Run migrations immediately on require
 runMigrations();
 
+// ─── WAL checkpoint scheduling ──────────────────────────────────────────────
+// SQLite's WAL file grows until something forces a checkpoint. A
+// force-killed process can leave a WAL that's many MB on a tiny main DB,
+// because the checkpoint that normally runs on close didn't get a chance
+// to fire. Two safety nets:
+//   - Run wal_checkpoint(TRUNCATE) on startup so a stale WAL gets folded
+//     in immediately and the file size drops back to zero.
+//   - Hourly checkpoint so a long-running process with steady writes
+//     doesn't accumulate either. TRUNCATE mode shrinks the file (RESTART
+//     would just rewind without reclaiming bytes).
+// closeDb() also calls checkpointWal() before db.close() so a clean
+// SIGTERM exits with an empty WAL.
+
+var _walCheckpointInterval = null;
+
+function checkpointWal() {
+  try {
+    if (!db || !db.open) return;
+    var result = db.pragma('wal_checkpoint(TRUNCATE)');
+    // result is [{ busy, log, checkpointed }] — log a one-liner only when
+    // pages were actually written, otherwise stay quiet on the hot path.
+    if (Array.isArray(result) && result[0] && result[0].log > 0) {
+      console.log('[db] WAL checkpoint: ' + JSON.stringify(result[0]));
+    }
+  } catch (e) {
+    console.warn('[db] WAL checkpoint failed: ' + e.message);
+  }
+}
+
+// Initial checkpoint — fold any leftover WAL from a prior boot into the
+// main DB and shrink the file.
+checkpointWal();
+
+// Hourly recurring checkpoint. unref() so the timer doesn't keep the
+// process alive past natural exit (test runners would otherwise hang).
+_walCheckpointInterval = setInterval(checkpointWal, 60 * 60 * 1000);
+if (_walCheckpointInterval && typeof _walCheckpointInterval.unref === 'function') {
+  _walCheckpointInterval.unref();
+}
+
 /**
- * Graceful shutdown helper.
+ * Graceful shutdown helper. Truncates the WAL before closing so the
+ * next boot sees a clean file (and existing backups don't include a
+ * stale WAL that could confuse a restore).
  */
 function closeDb() {
   try {
+    if (_walCheckpointInterval) {
+      clearInterval(_walCheckpointInterval);
+      _walCheckpointInterval = null;
+    }
     if (db && db.open) {
+      checkpointWal();
       db.close();
       console.log('[db] Database connection closed');
     }
