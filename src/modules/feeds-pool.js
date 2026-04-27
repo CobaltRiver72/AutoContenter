@@ -49,6 +49,15 @@ class FeedsPool extends EventEmitter {
       try {
         await this._startListener(rows[i]);
         started++;
+        // Stagger initial connects by 500 ms so N feeds don't all kick off
+        // their `since=…` replay simultaneously and pile articles into the
+        // synchronous SQLite buffer at the same time. Reconnects after
+        // first-connect use Last-Event-ID, so this only matters on cold
+        // boot — but cold boot is exactly when the user is most likely to
+        // be loading /login and noticing event-loop stalls.
+        if (i < rows.length - 1) {
+          await new Promise(function (r) { setTimeout(r, 500); });
+        }
       } catch (err) {
         this.logger.warn(MODULE, 'Failed to start feed listener for feed=' + rows[i].id + ': ' + err.message);
       }

@@ -72,6 +72,13 @@ var DEFAULTS = {
   // only global firehose keys that remain)
   FIREHOSE_TOKEN: '',
   FIREHOSE_MANAGEMENT_KEY: '',
+  // First-ever-connect replay window. Genuine reconnects use the saved
+  // Last-Event-ID cursor and ignore `since` entirely. Kept SHORT (5m) so
+  // a fresh boot with N feeds doesn't flood the synchronous SQLite write
+  // path with N × hours-of-articles and stall the event loop while the
+  // login page is loading. Admins who want a longer cold-start backfill
+  // can override per-site in site_config.
+  FIREHOSE_SINCE: '5m',
   // Pipeline engine
   EXTRACTION_POLL_MS: '500',
   EXTRACTION_TIMEOUT_MS: '10000',

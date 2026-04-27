@@ -165,8 +165,13 @@ class FirehoseListener extends EventEmitter {
         // Reconnect: resume from exact position via Last-Event-ID
         headers['Last-Event-ID'] = lastId;
       } else {
-        // First connect ever: replay the configured window of articles
-        const sinceWindow = _cfg.get('FIREHOSE_SINCE') || '1h';
+        // First connect ever: replay the configured window of articles.
+        // Default '5m' (set in src/utils/config.js DEFAULTS) — bigger
+        // windows on cold boot saturate buffer.addArticle's synchronous
+        // INSERT path and starve the event loop, blocking /login. The
+        // genuine reconnect path uses Last-Event-ID and ignores `since`,
+        // so this fallback only fires on first-ever-connect for a feed.
+        const sinceWindow = _cfg.get('FIREHOSE_SINCE') || '5m';
         streamUrl.searchParams.set('since', sinceWindow);
       }
 
