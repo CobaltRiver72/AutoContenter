@@ -112,6 +112,15 @@ class FirehoseListener extends EventEmitter {
     this._stopped = false;
     this._reconnectAttempts = 0;
 
+    // Debounced last-event-id persistence. Cold-boot replay can fire dozens
+    // of events per second; writing each one to SQLite turned saveLastEventId
+    // into a hot-path bottleneck synonymous with the per-INSERT bottleneck
+    // the buffer batch already solved. We coalesce: only the most recent id
+    // matters for resumption, so we write at most once per second.
+    this._pendingLastEventId = null;
+    this._lastIdSaveTimer = null;
+    this._LAST_ID_SAVE_MS = 1000;
+
     // _allowedLangs is read fresh from config in handleUpdate() for hot-reload.
     // Keep a boot-time snapshot only as an emergency fallback if config is unavailable.
     this._allowedLangs = ['en', 'hi'];
@@ -244,6 +253,9 @@ class FirehoseListener extends EventEmitter {
     }
     this._connected = false;
     this.status = 'paused';
+    // Flush any pending last-event-id so a paused listener can resume
+    // exactly where it stopped instead of replaying the debounce window.
+    try { this._flushLastIdSave(); } catch (_e) { /* logged inside */ }
     this.logger.info(MODULE, 'SSE disconnected (paused)');
   }
 
@@ -281,6 +293,8 @@ class FirehoseListener extends EventEmitter {
     }
     this._closeEventSource();
     this._connected = false;
+    // Flush pending last-event-id before any restart code reads the cursor.
+    try { this._flushLastIdSave(); } catch (_e) { /* logged inside */ }
     this.logger.info(MODULE, 'Firehose listener stopped');
     this.emit('status', { type: 'stopped' });
   }
@@ -299,10 +313,10 @@ class FirehoseListener extends EventEmitter {
       return;
     }
 
-    // Save the event ID for resumption
+    // Save the event ID for resumption (debounced — see _queueLastIdSave)
     if (event.lastEventId) {
       this._lastEventId = event.lastEventId;
-      this.saveLastEventId(event.lastEventId);
+      this._queueLastIdSave(event.lastEventId);
     }
 
     // Extract document from payload
@@ -464,6 +478,42 @@ class FirehoseListener extends EventEmitter {
     } catch (err) {
       this.logger.error(MODULE, 'Failed to save last event ID', err.message);
     }
+  }
+
+  /**
+   * Coalesce last-event-id writes to at most one DB write per second.
+   * Only the most recent id is needed for SSE resumption — intermediate
+   * ids are throw-away. The pending id is flushed on the timer or when
+   * the listener stops/disconnects.
+   *
+   * @param {string} id
+   * @private
+   */
+  _queueLastIdSave(id) {
+    this._pendingLastEventId = id;
+    if (this._lastIdSaveTimer) return;
+    var self = this;
+    this._lastIdSaveTimer = setTimeout(function () {
+      self._lastIdSaveTimer = null;
+      self._flushLastIdSave();
+    }, this._LAST_ID_SAVE_MS);
+  }
+
+  /**
+   * Persist the pending last-event-id immediately. Called by the debounce
+   * timer and by stop()/disconnect() so a graceful shutdown can resume from
+   * where the live stream left off rather than the previously-saved cursor.
+   * @private
+   */
+  _flushLastIdSave() {
+    if (this._lastIdSaveTimer) {
+      clearTimeout(this._lastIdSaveTimer);
+      this._lastIdSaveTimer = null;
+    }
+    if (!this._pendingLastEventId) return;
+    var id = this._pendingLastEventId;
+    this._pendingLastEventId = null;
+    this.saveLastEventId(id);
   }
 
   // ─── Filter resolvers ────────────────────────────────────────────────────
