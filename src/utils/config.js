@@ -79,6 +79,13 @@ var DEFAULTS = {
   // login page is loading. Admins who want a longer cold-start backfill
   // can override per-site in site_config.
   FIREHOSE_SINCE: '5m',
+  // Log retention. The logs table can absorb >1M rows/day at firehose
+  // saturation, so we prune nightly and skip DB writes for debug entirely.
+  // Console + winston file transports are unaffected — they have their
+  // own rotation policy. Override DB_LOG_LEVEL=debug if you genuinely need
+  // SQL-grep on debug output (e.g. debugging a single feed).
+  LOG_RETENTION_DAYS: '7',
+  DB_LOG_LEVEL: 'info',
   // Pipeline engine
   EXTRACTION_POLL_MS: '500',
   EXTRACTION_TIMEOUT_MS: '10000',

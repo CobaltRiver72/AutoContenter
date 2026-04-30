@@ -521,6 +521,17 @@ async function boot() {
     }
   }, CLEANUP_INTERVAL_MS);
 
+  // ─── Log retention: nightly prune + weekly VACUUM ────────────────────────
+  // Without this the logs table absorbs >1M rows/day at firehose saturation
+  // and quickly outgrows the rest of the schema combined.
+  var logRetention;
+  try {
+    var logRetentionModule = require('./modules/log-retention');
+    logRetention = logRetentionModule.start(db, logger);
+  } catch (err) {
+    logger.error('index', 'Failed to start log retention scheduler: ' + err.message);
+  }
+
   logger.info('index', 'HDF News AutoPub started successfully');
 
   // ─── Memory watchdog — pause all feeds if RAM gets critical ──────────────
@@ -568,6 +579,9 @@ async function boot() {
 
     clearInterval(cleanupTimer);
     clearInterval(memoryWatchdog);
+    if (logRetention && typeof logRetention.stop === 'function') {
+      try { logRetention.stop(); } catch (_e) {}
+    }
 
     // Stop accepting new connections and wait for in-flight requests to
     // drain. Only AFTER that do we shut modules down and close the DB —
