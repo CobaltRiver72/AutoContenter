@@ -84,6 +84,13 @@ try {
   db.pragma('cache_size = -64000');        // 64MB page cache (default is 2MB)
   db.pragma('temp_store = MEMORY');        // Temp tables in RAM, not disk
   db.pragma('mmap_size = 268435456');      // Memory-map 256MB of DB for faster reads
+
+  // Force the SQLite default of auto-checkpoint every 1000 pages (~4MB).
+  // Setting it explicitly defends against any other code path that ever
+  // disables auto-checkpoint (PRAGMA wal_autocheckpoint = 0). Combined
+  // with the recurring PASSIVE checkpoint below, the WAL is bounded
+  // even under bursty 245k-articles/day write load.
+  db.pragma('wal_autocheckpoint = 1000');
 } catch (err) {
   console.error('[db] Failed to open database:', err.message);
   process.exit(1);
@@ -1399,14 +1406,17 @@ runMigrations();
 
 var _walCheckpointInterval = null;
 
-function checkpointWal() {
+// TRUNCATE blocks writers until done — fine on cold boot or graceful
+// close, but unkind to fire hourly while the firehose is steady-state.
+// The hourly job uses PASSIVE which never blocks; the boot/close paths
+// keep TRUNCATE so backups capture an empty WAL.
+function checkpointWal(mode) {
   try {
     if (!db || !db.open) return;
-    var result = db.pragma('wal_checkpoint(TRUNCATE)');
-    // result is [{ busy, log, checkpointed }] — log a one-liner only when
-    // pages were actually written, otherwise stay quiet on the hot path.
+    var pragma = 'wal_checkpoint(' + (mode || 'TRUNCATE') + ')';
+    var result = db.pragma(pragma);
     if (Array.isArray(result) && result[0] && result[0].log > 0) {
-      console.log('[db] WAL checkpoint: ' + JSON.stringify(result[0]));
+      console.log('[db] WAL checkpoint (' + (mode || 'TRUNCATE') + '): ' + JSON.stringify(result[0]));
     }
   } catch (e) {
     console.warn('[db] WAL checkpoint failed: ' + e.message);
@@ -1415,11 +1425,15 @@ function checkpointWal() {
 
 // Initial checkpoint — fold any leftover WAL from a prior boot into the
 // main DB and shrink the file.
-checkpointWal();
+checkpointWal('TRUNCATE');
 
-// Hourly recurring checkpoint. unref() so the timer doesn't keep the
-// process alive past natural exit (test runners would otherwise hang).
-_walCheckpointInterval = setInterval(checkpointWal, 60 * 60 * 1000);
+// Hourly recurring checkpoint, PASSIVE so writers are never blocked.
+// PASSIVE only checkpoints frames that no reader is currently using;
+// the next checkpoint covers whatever it skipped. Bounds the WAL under
+// bursty 245k-articles/day load without the dashboard ever stalling.
+// unref() so the timer doesn't keep the process alive past natural exit
+// (test runners would otherwise hang).
+_walCheckpointInterval = setInterval(function () { checkpointWal('PASSIVE'); }, 60 * 60 * 1000);
 if (_walCheckpointInterval && typeof _walCheckpointInterval.unref === 'function') {
   _walCheckpointInterval.unref();
 }
@@ -1436,7 +1450,7 @@ function closeDb() {
       _walCheckpointInterval = null;
     }
     if (db && db.open) {
-      checkpointWal();
+      checkpointWal('TRUNCATE');
       db.close();
       console.log('[db] Database connection closed');
     }
