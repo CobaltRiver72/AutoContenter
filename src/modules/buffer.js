@@ -370,6 +370,28 @@ class ArticleBuffer extends EventEmitter {
         this._stmts.cleanOldClusters.run();
       } catch (e) { /* ignore */ }
 
+      // Orphan-cluster sweep. The two rules above only catch un-clustered
+      // rows and articles in PUBLISHED clusters. Articles attached to
+      // detected/failed/skipped clusters that never reached publish were
+      // accumulating forever — at ~80% never-published rate that's the
+      // bulk of ingest. Prune them at 7 days; admin who needs longer
+      // forensic windows on a specific feed can disable per-feed.
+      try {
+        if (!this._stmts.cleanOrphanClusterArticles) {
+          this._stmts.cleanOrphanClusterArticles = this.db.prepare(
+            "DELETE FROM articles WHERE cluster_id IN " +
+            "(SELECT id FROM clusters WHERE status IN ('detected','failed','skipped') " +
+            " AND detected_at < datetime('now', '-7 days'))"
+          );
+        }
+        var orphanRes = this._stmts.cleanOrphanClusterArticles.run();
+        if (orphanRes && orphanRes.changes > 0) {
+          this.logger.info(MODULE, 'Cleaned ' + orphanRes.changes + ' articles from stale unpublished clusters (>7d)');
+        }
+      } catch (e) {
+        this.logger.warn(MODULE, 'Orphan-cluster cleanup failed: ' + e.message);
+      }
+
       return result.changes;
     } catch (err) {
       this.logger.error(MODULE, 'Failed to clean old articles', err.message);
