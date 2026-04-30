@@ -7,6 +7,8 @@ var { getConfig, get: cfgGet } = require('../utils/config');
 var configImportValidator = require('../utils/config-import-validator');
 var configImportEngine = require('../utils/config-import-engine');
 var { parsePageParam } = require('../utils/pagination');
+var TTLCache = require('../utils/ttl-cache');
+var { keyForIds: _keyForIds } = require('../utils/ttl-cache');
 
 // ── Bulk Config Import — multer config (memory, 5 MB cap, .json only) ──────
 // fileFilter rejects with cb(null, false) instead of cb(new Error, ...). The
@@ -182,6 +184,13 @@ function createApiRouter(deps) {
   function setCache(key, data) {
     _apiCache[key] = { data: data, timestamp: Date.now() };
   }
+
+  // Dedicated 30-second TTL cache for the per-feed activity stats endpoint.
+  // Stats are read on every Feeds-list refresh, every feed-detail open, and
+  // every dashboard route change. The numbers don't need to be real-time
+  // (admin watches "today" counters that change in 1-minute windows anyway)
+  // and the underlying aggregate scans grow with the articles table.
+  var _feedsStatsCache = new TTLCache(30000);
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -7214,74 +7223,74 @@ var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
       if (!raw.length) return res.json({ ok: true, stats: {} });
       // Cap to a sane upper bound so an adversarial ?ids= can't DoS the DB.
       var ids = raw.slice(0, 100);
+
+      // Cache key normalises sort order — [3,1,2] and [1,2,3] are the same
+      // request from the dashboard's perspective.
+      var cacheKey = _keyForIds(ids);
+      var cached = _feedsStatsCache.get(cacheKey);
+      if (cached) return res.json({ ok: true, stats: cached, cached: true });
+
       var placeholders = ids.map(function () { return '?'; }).join(',');
       // Match SQLite's datetime('now') format (space, not T) so string
-// comparisons against received_at / published_at work correctly.
-var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
+      // comparisons against received_at / published_at work correctly.
+      var todayStart = new Date().toISOString().slice(0, 10) + ' 00:00:00';
 
-      function _rowMap(rows, keyField, valueField) {
-        var out = {};
-        for (var i = 0; i < rows.length; i++) out[rows[i][keyField]] = rows[i][valueField];
-        return out;
-      }
-
-      // One SQL per metric, GROUPed by feed_id, then merged in JS. Cheaper
-      // than N round-trips even at small N; dominant cost is JSON serial-
-      // isation, not the queries.
-      var artTodayStmt = db.prepare(
-        "SELECT feed_id, COUNT(*) AS n FROM articles  WHERE feed_id IN (" + placeholders + ") AND received_at  >= ? GROUP BY feed_id"
+      // Collapsed: 8 aggregate queries → 4 conditional-aggregate queries.
+      // Articles and published merge their today/total/last-at metrics
+      // inside a single GROUP BY pass instead of three sequential scans.
+      var artStmt = db.prepare(
+        "SELECT feed_id, " +
+        "  COUNT(*) AS total, " +
+        "  SUM(CASE WHEN received_at >= ? THEN 1 ELSE 0 END) AS today, " +
+        "  MAX(received_at) AS last_at " +
+        "FROM articles WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
       );
-      var articlesTodayMap  = _rowMap(artTodayStmt.all.apply(artTodayStmt, ids.concat([todayStart])), 'feed_id', 'n');
+      var artRows = artStmt.all.apply(artStmt, [todayStart].concat(ids));
+      var articlesMap = {};
+      for (var i = 0; i < artRows.length; i++) articlesMap[artRows[i].feed_id] = artRows[i];
 
-      var artTotalStmt = db.prepare(
-        "SELECT feed_id, COUNT(*) AS n FROM articles  WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+      var pubStmt = db.prepare(
+        "SELECT feed_id, " +
+        "  COUNT(*) AS total, " +
+        "  SUM(CASE WHEN published_at >= ? THEN 1 ELSE 0 END) AS today, " +
+        "  MAX(published_at) AS last_at " +
+        "FROM published WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
       );
-      var articlesTotalMap = _rowMap(artTotalStmt.all.apply(artTotalStmt, ids), 'feed_id', 'n');
+      var pubRows = pubStmt.all.apply(pubStmt, [todayStart].concat(ids));
+      var publishedMap = {};
+      for (var j = 0; j < pubRows.length; j++) publishedMap[pubRows[j].feed_id] = pubRows[j];
 
       var clustersStmt = db.prepare(
-        "SELECT feed_id, COUNT(*) AS n FROM clusters  WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+        "SELECT feed_id, COUNT(*) AS total FROM clusters WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
       );
-      var clustersMap  = _rowMap(clustersStmt.all.apply(clustersStmt, ids), 'feed_id', 'n');
+      var clusterRows = clustersStmt.all.apply(clustersStmt, ids);
+      var clustersMap = {};
+      for (var k = 0; k < clusterRows.length; k++) clustersMap[clusterRows[k].feed_id] = clusterRows[k].total;
 
       var draftsStmt = db.prepare(
-        "SELECT feed_id, COUNT(*) AS n FROM drafts    WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
+        "SELECT feed_id, COUNT(*) AS total FROM drafts WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
       );
-      var draftsMap  = _rowMap(draftsStmt.all.apply(draftsStmt, ids), 'feed_id', 'n');
-
-      var pubTodayStmt = db.prepare(
-        "SELECT feed_id, COUNT(*) AS n FROM published WHERE feed_id IN (" + placeholders + ") AND published_at >= ? GROUP BY feed_id"
-      );
-      var publishedTodayMap = _rowMap(pubTodayStmt.all.apply(pubTodayStmt, ids.concat([todayStart])), 'feed_id', 'n');
-
-      var pubTotalStmt = db.prepare(
-        "SELECT feed_id, COUNT(*) AS n FROM published WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
-      );
-      var publishedTotalMap = _rowMap(pubTotalStmt.all.apply(pubTotalStmt, ids), 'feed_id', 'n');
-
-      var lastArtStmt = db.prepare(
-        "SELECT feed_id, MAX(received_at)  AS t FROM articles  WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
-      );
-      var lastArticleAtMap  = _rowMap(lastArtStmt.all.apply(lastArtStmt, ids), 'feed_id', 't');
-
-      var lastPubStmt = db.prepare(
-        "SELECT feed_id, MAX(published_at) AS t FROM published WHERE feed_id IN (" + placeholders + ") GROUP BY feed_id"
-      );
-      var lastPublishedAtMap = _rowMap(lastPubStmt.all.apply(lastPubStmt, ids), 'feed_id', 't');
+      var draftRows = draftsStmt.all.apply(draftsStmt, ids);
+      var draftsMap = {};
+      for (var m = 0; m < draftRows.length; m++) draftsMap[draftRows[m].feed_id] = draftRows[m].total;
 
       var stats = {};
-      for (var i = 0; i < ids.length; i++) {
-        var id = ids[i];
+      for (var z = 0; z < ids.length; z++) {
+        var id = ids[z];
+        var ar = articlesMap[id]  || { total: 0, today: 0, last_at: null };
+        var pu = publishedMap[id] || { total: 0, today: 0, last_at: null };
         stats[id] = {
-          articlesToday:   articlesTodayMap[id]    || 0,
-          articlesTotal:   articlesTotalMap[id]    || 0,
-          clustersTotal:   clustersMap[id]         || 0,
-          draftsTotal:     draftsMap[id]           || 0,
-          publishedToday:  publishedTodayMap[id]   || 0,
-          publishedTotal:  publishedTotalMap[id]   || 0,
-          lastArticleAt:   lastArticleAtMap[id]    || null,
-          lastPublishedAt: lastPublishedAtMap[id]  || null,
+          articlesToday:   ar.today  || 0,
+          articlesTotal:   ar.total  || 0,
+          clustersTotal:   clustersMap[id] || 0,
+          draftsTotal:     draftsMap[id]   || 0,
+          publishedToday:  pu.today  || 0,
+          publishedTotal:  pu.total  || 0,
+          lastArticleAt:   ar.last_at || null,
+          lastPublishedAt: pu.last_at || null,
         };
       }
+      _feedsStatsCache.set(cacheKey, stats);
       res.json({ ok: true, stats: stats });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
