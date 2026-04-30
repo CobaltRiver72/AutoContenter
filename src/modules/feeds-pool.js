@@ -28,6 +28,12 @@ class FeedsPool extends EventEmitter {
    */
   constructor(config, db, logger) {
     super();
+    // Default 10 is too tight: every /api/feed/live SSE client adds one
+    // 'article' listener, and a handful of open dashboard tabs (or
+    // zombie connections from flaky network) trips Node's leak warning.
+    // 100 covers any realistic admin team plus headroom for kept-alive
+    // connections that haven't been GC'd yet.
+    this.setMaxListeners(100);
     this.config = config;
     this.db = db;
     this.logger = logger;
