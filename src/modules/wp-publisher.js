@@ -1,6 +1,7 @@
 'use strict';
 
 const MODULE = 'wp-publisher';
+const { fetchWithTimeout } = require('../utils/fetch-timeout');
 
 function slugify(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -243,7 +244,7 @@ class WPPublisher {
           opts.body = JSON.stringify(body);
         }
 
-        const res = await fetch(url, opts);
+        const res = await fetchWithTimeout(url, opts, 60000);
 
         if (res.status === 429 && attempt < maxRetries) {
           const delay = baseDelay * Math.pow(2, attempt);
@@ -284,7 +285,7 @@ class WPPublisher {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const res = await fetch(url, {
+        const res = await fetchWithTimeout(url, {
           method: 'POST',
           headers: {
             'Authorization': 'Basic ' + authStr,
@@ -292,7 +293,7 @@ class WPPublisher {
             'Content-Type': mimeType || 'image/webp',
           },
           body: buffer,
-        });
+        }, 60000);
 
         if (res.status === 429 && attempt < maxRetries) {
           const delay = baseDelay * Math.pow(2, attempt);

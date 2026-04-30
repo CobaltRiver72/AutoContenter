@@ -122,6 +122,22 @@ function sanitizeDetailsForDb(details) {
   }
 }
 
+// Numeric severity for the DB-level threshold. error > warn > info > debug.
+// Reading config lazily because logger.js is required before config is
+// fully loaded in some boot paths.
+var _LEVEL_RANK = { error: 40, warn: 30, info: 20, debug: 10 };
+var _dbLevelMin = null;
+function _resolveDbLevelMin() {
+  if (_dbLevelMin !== null) return _dbLevelMin;
+  try {
+    var cfgLvl = String(config.DB_LOG_LEVEL || 'info').toLowerCase();
+    _dbLevelMin = _LEVEL_RANK[cfgLvl] || _LEVEL_RANK.info;
+  } catch (_e) {
+    _dbLevelMin = _LEVEL_RANK.info;
+  }
+  return _dbLevelMin;
+}
+
 function writeToDb(level, mod, message, details, siteId) {
   // Drop silently if the DB has been closed — happens during graceful
   // shutdown when module .shutdown() methods log their own teardown.
@@ -129,6 +145,13 @@ function writeToDb(level, mod, message, details, siteId) {
   // check every late log call throws "database connection is not open"
   // and the catch below spams stderr with it.
   if (!_db || _db.open === false) return;
+
+  // Skip levels below DB_LOG_LEVEL. At firehose saturation (~245k articles/
+  // day) debug accounts for the bulk of log writes; dropping it at this
+  // gate prevents the logs table from out-growing every other table in
+  // the schema. Console + file transports still get the full stream.
+  var rank = _LEVEL_RANK[level] || 0;
+  if (rank < _resolveDbLevelMin()) return;
 
   try {
     if (!_insertStmt) {

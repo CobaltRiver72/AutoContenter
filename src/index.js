@@ -390,10 +390,23 @@ async function boot() {
     message: { error: 'Too many requests' }
   }));
 
-  // Rate limiting — authenticated API
+  // Rate limiting — authenticated API. The dashboard fans out 25–30 calls
+  // per page load (feeds list, stats, clusters, sites, site-config,
+  // diagnostics, …). The previous 200/15min cap was hit after ~6 page
+  // refreshes, which surfaced as 429s during normal admin use. 2000/15min
+  // gives 100+ refreshes per window — comfortable for power users without
+  // losing the spam ceiling for an attacker who has somehow auth'd in.
+  //
+  // SSE long-lived connections (/api/feed/live) are exempt because they
+  // count as a single request that stays open for hours; once a few
+  // dashboard tabs are open, every keep-alive tick from express-rate-
+  // limit's internal store would chip away at the budget.
   app.use('/api/', rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200,
+    max: 2000,
+    skip: function (req) {
+      return req.path === '/feed/live';
+    },
     message: { error: 'Too many requests' }
   }));
 
@@ -521,6 +534,17 @@ async function boot() {
     }
   }, CLEANUP_INTERVAL_MS);
 
+  // ─── Log retention: nightly prune + weekly VACUUM ────────────────────────
+  // Without this the logs table absorbs >1M rows/day at firehose saturation
+  // and quickly outgrows the rest of the schema combined.
+  var logRetention;
+  try {
+    var logRetentionModule = require('./modules/log-retention');
+    logRetention = logRetentionModule.start(db, logger);
+  } catch (err) {
+    logger.error('index', 'Failed to start log retention scheduler: ' + err.message);
+  }
+
   logger.info('index', 'HDF News AutoPub started successfully');
 
   // ─── Memory watchdog — pause all feeds if RAM gets critical ──────────────
@@ -568,6 +592,9 @@ async function boot() {
 
     clearInterval(cleanupTimer);
     clearInterval(memoryWatchdog);
+    if (logRetention && typeof logRetention.stop === 'function') {
+      try { logRetention.stop(); } catch (_e) {}
+    }
 
     // Stop accepting new connections and wait for in-flight requests to
     // drain. Only AFTER that do we shut modules down and close the DB —
