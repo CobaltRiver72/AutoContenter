@@ -5,6 +5,7 @@ const cron = require('node-cron');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { fetchWithTimeout } = require('../utils/fetch-timeout');
 
 const MODULE = 'lottery';
 const MAX_RETRIES = 9;
@@ -402,7 +403,7 @@ class LotteryModule extends EventEmitter {
     form.append('api_key', apiKey);
     form.append('signature', sig);
 
-    const uploadRes = await fetch(uploadUrl, { method: 'POST', body: form });
+    const uploadRes = await fetchWithTimeout(uploadUrl, { method: 'POST', body: form }, 60000);
     if (!uploadRes.ok) {
       const t = await uploadRes.text().catch(() => '');
       throw new Error('Cloudinary upload failed ' + uploadRes.status + ': ' + t.slice(0, 200));
@@ -412,7 +413,7 @@ class LotteryModule extends EventEmitter {
 
     // Fetch page 1 as WEBP
     const webpUrl = 'https://res.cloudinary.com/' + cloudName + '/image/upload/q_85,w_900,pg_1/' + returnedId + '.webp';
-    const webpRes = await fetch(webpUrl);
+    const webpRes = await fetchWithTimeout(webpUrl, undefined, 60000);
     if (!webpRes.ok) throw new Error('Cloudinary WEBP fetch failed ' + webpRes.status);
     const webpBuf = Buffer.from(await webpRes.arrayBuffer());
 
@@ -426,9 +427,9 @@ class LotteryModule extends EventEmitter {
     delForm.append('timestamp', String(delTs));
     delForm.append('api_key', apiKey);
     delForm.append('signature', delSig);
-    fetch('https://api.cloudinary.com/v1_1/' + cloudName + '/image/destroy', {
+    fetchWithTimeout('https://api.cloudinary.com/v1_1/' + cloudName + '/image/destroy', {
       method: 'POST', body: delForm,
-    }).catch(() => {});
+    }, 30000).catch(() => {});
 
     return webpBuf;
   }
