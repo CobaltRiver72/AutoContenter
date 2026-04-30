@@ -6,6 +6,7 @@ var multer = require('multer');
 var { getConfig, get: cfgGet } = require('../utils/config');
 var configImportValidator = require('../utils/config-import-validator');
 var configImportEngine = require('../utils/config-import-engine');
+var { parsePageParam } = require('../utils/pagination');
 
 // ── Bulk Config Import — multer config (memory, 5 MB cap, .json only) ──────
 // fileFilter rejects with cb(null, false) instead of cb(new Error, ...). The
@@ -192,14 +193,8 @@ function createApiRouter(deps) {
     return { data: data, total: total, page: page, perPage: perPage };
   }
 
-  function parsePageParam(req, defaultPerPage) {
-    var page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    var def = defaultPerPage || 20;
-    var reqPp = parseInt(req.query.perPage, 10);
-    // Honor client's perPage but hard-cap at 100 to prevent accidental DoS
-    var perPage = (reqPp > 0) ? Math.min(100, reqPp) : def;
-    return { page: page, perPage: perPage };
-  }
+  // parsePageParam moved to src/utils/pagination.js — call sites below
+  // resolve to the imported binding at top of file.
 
   // ─── GET /api/status ───────────────────────────────────────────────────────
 
